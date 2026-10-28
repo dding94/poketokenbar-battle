@@ -35,3 +35,18 @@ docs/*
 
 # Local-only review-gate opt-out (not published)
 .no-review-gate
+
+# Versioned battle project instructions
+!docs/BATTLE_PLAN.md
+!docs/AI_HANDOFF.md
+
+# Future battle server dependencies, output, and local Cloudflare state
+node_modules/
+server/dist/
+.wrangler/
+.dev.vars
+.dev.vars.*
+.env
+.env.*
+!.env.example
+coverage/

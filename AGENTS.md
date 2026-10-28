@@ -1,11 +1,51 @@
-# Repository instructions
+# PokeTokenBar Battle — AI 작업 지침
 
-Read `CLAUDE.md` for the repository's contribution, testing, and release instructions.
+이 저장소는 `dding94/poketokenbar-battle` 개인 프로젝트다. 기준은 upstream PokeTokenBar `v2.5.6`이며, 현재 배틀 기능은 미구현이다.
 
-## Pull requests
+## 읽는 순서와 기준
 
-When creating, preparing, or updating a PR, use `.agents/skills/prepare-pr/SKILL.md`. This repository's rules take precedence over a personal PR skill's default title or body format.
+1. [docs/AI_HANDOFF.md](docs/AI_HANDOFF.md): 현재 상태·다음 작업·남은 검증
+2. [docs/BATTLE_PLAN.md](docs/BATTLE_PLAN.md): 승인된 제품 결정·16개 PR·완료 기준
+3. [CLAUDE.md](CLAUDE.md): 기존 앱 기여·테스트 규칙과 필요한 참조 문서
 
-Use an English Conventional Commits title and fill out `.github/PULL_REQUEST_TEMPLATE.md` with the actual changes and validation results. Mark checklist items complete only when supported by the work performed.
+제품 결정과 구현 완료를 구분한다. 실제 코드와 테스트 증거 없이 계획의 체크박스를 완료하지 않는다. 인계 상태가 코드와 다르면 확인된 근거를 먼저 기록하고 정정한다. 이 포크의 범위·배포 대상 지침은 아래에 남아 있는 upstream 안내보다 우선한다.
 
-Every PR with a visible UI change must embed images in `UI changes`: actual screenshots, local renders of the production UI, or clearly labeled illustrations of the changed UI are accepted. Include before/after images for an existing screen; for a new screen, explain that no previous screen exists and include its image. Text alone does not satisfy this requirement. If images are missing, the agent must produce and attach them as part of the authorized PR work without asking the user to supply them. Try suitable generation and attachment alternatives before declaring a blocker. Keep publication pending only when a concrete failure still prevents completion, and report the attempted methods and required user action. Remove `UI changes` only when there is no visible UI change.
+## 바꾸지 않을 제품 결정
+
+- 월 서버 운영비 0원이 필수다. Cloudflare Free의 Workers + D1 + SQLite 기반 Durable Objects를 검증한다.
+- macOS 앱을 확장하며, 다른 프로젝트나 회사 서버에 게임 코드를 넣지 않는다.
+- 초대코드와 이메일 표시명으로 시작한다. 로그인 UI·이메일 인증·OAuth를 임의로 추가하지 않는다.
+- 이메일 문자열은 인증 수단이 아니다. 개체 소유자는 서버 ID와 개인 접속키로 구분한다.
+- 기존 로컬 육성 수치를 동료 간 신뢰하되, 소유권·경기 결과·이전·스타터 지급은 서버에서 확정한다.
+- 현재 레벨·개체값·성격·기술·타입·특성을 반영한다. 동일 레벨 보정으로 바꾸지 않는다.
+- 패자의 출전 개체 한 마리만 이전한다. 도감 이력과 현재 보유를 분리하고 같은 종의 다른 개체를 덮어쓰지 않는다.
+- 마지막 개체도 출전 가능하다. 전멸 후 Lv5 스타터 한 마리를 지급한다.
+- 범위를 줄이거나 유료 서비스가 필요해지면 변경안을 제시한다. 동의 없이 확정 요구사항을 포기하거나 과금하지 않는다.
+
+## 구현 순서와 증거
+
+- 구현 지시를 받으면 PR 01의 무료 실행 검증을 먼저 수행한다. 통과 후 요청받은 범위 안에서 계획의 의존 순서를 따른다.
+- PR 01은 Showdown 번들·런타임 호환성, 실제 Free 환경 CPU·메모리·시작·사용량을 확인하는 단계다. 로컬 시간 측정을 Cloudflare 성공 근거로 쓰지 않는다.
+- 기능 변경은 RED → GREEN → REFACTOR로 진행하고 기존 Swift 테스트 관례를 따른다. 문서·설정만 바뀌면 관련 파싱·참조·행동을 확인한다.
+- D1 결과·이전 원장·owner/version·잠금·필요한 스타터 권리는 함께 확정한다. 조건부 UPDATE 0행이 성공한 SQL일 수 있다는 점을 테스트한다.
+- instanceID와 서버 개체 ID를 사용한다. 진화에 따라 바뀌는 UI ID·종 ID·이메일을 소유권 키로 사용하지 않는다.
+- 변경 후 실제 명령·종료 코드·대상·결과·미검증 범위를 기록한다. skip·0건·미실행을 통과로 보고하지 않는다.
+- 완료한 PR과 남은 문제는 `docs/AI_HANDOFF.md`, 세부 체크는 `docs/BATTLE_PLAN.md`에 갱신한다. 같은 내용의 인계 문서를 계속 추가하지 않는다.
+
+## 기존 앱·데이터 보호
+
+- 실제 사용자의 세이브를 테스트 fixture로 쓰거나 개발 실행으로 덮어쓰지 않는다.
+- `PTB_STATE_DIR`로 상태 저장소를 분리하고, 앱 이름·bundle ID·실행 잠금·업데이트·설치 경로도 별도로 확인한다. 환경변수 하나만 바꿨다고 격리가 완료되는 것은 아니다.
+- 기존 `CompanionStore`를 통째로 재작성하지 않는다. 소유권·등록·네트워크 경계를 작은 구성요소로 추가한다.
+- 토큰 사용량 원본 로그·프롬프트·회사 코드·자격 증명은 서버나 저장소에 올리지 않는다.
+- 원본 라이선스·저작자 표시를 유지한다. `README.upstream.md`는 기준 버전 설명이다.
+
+## Git·PR·릴리스
+
+- `origin`은 `https://github.com/dding94/poketokenbar-battle.git`, `upstream`은 원본 참조용이다. 작업 전 실제 remotes를 확인한다.
+- 커밋·PR 제목과 본문은 기존 관례에 맞춰 영어로 작성한다. 한국어 계획서와 사용자 대화는 유지한다.
+- PR 작성 요청에는 `.agents/skills/prepare-pr/SKILL.md`와 `.github/PULL_REQUEST_TEMPLATE.md`를 사용한다. 보이는 UI 변경에는 실제 캡처나 명시적으로 표시한 렌더 이미지를 포함한다.
+- 이 계획서의 PR 번호는 작업 단위 번호다. 이미 GitHub PR이 만들어졌다는 뜻이 아니다.
+- 원본 `scripts/release.sh`는 `chattymin/PokeTokenBar`·원본 Homebrew tap을 가리킨다. `UpdateChecker.swift`도 원본 업데이트를 조회한다. 포크용으로 수정·검증하기 전에 실행하거나 릴리스하지 않는다.
+- GitHub Actions는 현재 `workflow_dispatch`만 활성화했다. 계정 사용량과 과금 설정 확인 없이 자동 실행을 추가하지 않는다.
+- 실제 구현·외부 리소스 생성·배포는 사용자가 요청한 범위에 맞춰 수행한다. 문서 존재나 저장소 초기화만으로 구현·배포가 요청되었다고 해석하지 않는다.

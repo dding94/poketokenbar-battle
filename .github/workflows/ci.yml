@@ -1,10 +1,11 @@
 name: CI
 
+# Private project bootstrap: enable automatic runs only after reviewing Actions usage.
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 # Cancel superseded runs on the same ref (e.g. rapid pushes to a PR).
 concurrency:
