@@ -177,4 +177,52 @@ final class PracticeBattleTests: XCTestCase {
         XCTAssertTrue(model.messages.isEmpty); XCTAssertTrue(model.request.moves.isEmpty)
     }
 
+    func testEventsMirrorTheLogAndLeaveTheTextMessagesAlone() throws {
+        let engine = try engine(); var now = 0.0
+        let model = PracticeBattle(engine: engine, clock: { now })
+        XCTAssertTrue(model.events.isEmpty)
+        model.start(player: try candidate("a", species: 25, moves: ["thunderbolt"], engine: engine),
+                    opponent: try candidate("b", species: 129, moves: ["splash"], engine: engine), mode: .automatic, seed: [1,2,3,4])
+        let opening = model.events
+        guard opening.count >= 3, case .switchIn(.player, _, _) = opening[0], case .switchIn(.opponent, _, _) = opening[1],
+              case .turn(1) = opening[2] else { return XCTFail("\(opening)") }
+        XCTAssertTrue(opening.contains(.abilityRevealed(.player, abilityID: "pressure")), "\(opening)")
+        XCTAssertTrue(opening.contains(.abilityRevealed(.opponent, abilityID: "pressure")))
+        XCTAssertTrue(model.messages.contains { $0.contains("특성 공개: pressure") })
+        let messageCount = model.messages.count
+        now = 1; model.tick()
+        XCTAssertEqual(model.phase, .finished)
+        XCTAssertTrue(model.events.starts(with: opening))
+        XCTAssertTrue(model.events.contains(.faint(.opponent)))
+        XCTAssertEqual(model.events.first { if case .end = $0 { true } else { false } }, .end(winner: .player))
+        XCTAssertGreaterThan(model.messages.count, messageCount)
+    }
+    func testTimeoutAppendsOneTimedOutEventBeforeTheTurnItPicked() throws {
+        let engine = try engine(); var now = 0.0
+        let model = PracticeBattle(engine: engine, clock: { now })
+        model.start(player: try candidate("a", engine: engine), opponent: try candidate("b", engine: engine), mode: .manual, seed: [1,2,3,4])
+        XCTAssertFalse(model.events.contains(.timedOut))
+        let before = model.events.count
+        now = 30; model.tick()
+        XCTAssertEqual(model.events.filter { $0 == .timedOut }.count, 1)
+        XCTAssertEqual(model.events.dropFirst(before).first, .timedOut)
+        XCTAssertTrue(model.events.dropFirst(before + 1).contains { if case .move = $0 { true } else { false } })
+        model.tick()
+        XCTAssertEqual(model.events.filter { $0 == .timedOut }.count, 1)
+    }
+    func testEventsResetOnStartAndPrepareSelection() throws {
+        let engine = try engine(); var now = 0.0
+        let model = PracticeBattle(engine: engine, clock: { now })
+        let a = try candidate("a", species: 25, moves: ["thunderbolt"], engine: engine)
+        let b = try candidate("b", species: 129, moves: ["splash"], engine: engine)
+        model.start(player: a, opponent: b, mode: .manual, seed: [1,2,3,4])
+        let first = model.events
+        now = 30; model.tick()
+        XCTAssertGreaterThan(model.events.count, first.count)
+        model.start(player: a, opponent: b, mode: .manual, seed: [1,2,3,4])
+        XCTAssertEqual(model.events, first)
+        model.prepareSelection()
+        XCTAssertTrue(model.events.isEmpty)
+    }
+
 }

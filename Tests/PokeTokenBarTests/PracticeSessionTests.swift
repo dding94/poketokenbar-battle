@@ -287,8 +287,11 @@ final class PracticeSessionTests: XCTestCase {
         let session = PracticeSession(engineURL: engineURL, clock: { clock.now })
         session.prepare(state: slowState(), activeName: nil)
         session.mode = .automatic; session.start()
+        // The turn's beats play on the injected clock, so it moves a second per poll.
         func waitForTurn(_ turn: Int) async throws {
-            for _ in 0..<40 where (session.battle?.view?.turn ?? 0) < turn { try await Task.sleep(for: .milliseconds(100)) }
+            for _ in 0..<40 where (session.battle?.view?.turn ?? 0) < turn {
+                try await Task.sleep(for: .milliseconds(100)); clock.now += 1
+            }
         }
         XCTAssertEqual(session.battle?.view?.turn, 1)
         clock.now = 1; try await waitForTurn(2)
@@ -302,5 +305,141 @@ final class PracticeSessionTests: XCTestCase {
         session.forfeit()
         clock.now = 200; try await Task.sleep(for: .milliseconds(600))
         XCTAssertNil(session.battle)
+    }
+
+    /// Ticks one second at a time until the staged turn has finished playing.
+    private func playOut(_ session: PracticeSession, _ clock: Clock) {
+        for _ in 0..<30 where session.playback?.isPlaying == true { clock.now += 1; session.tick() }
+    }
+
+    func testStartSeedsAFreshPlaybackWithoutHoldingTheBattle() throws {
+        let clock = Clock(); let session = makeSession(clock, slowState())
+        XCTAssertNil(session.playback)
+        session.start()
+        let first = try XCTUnwrap(session.playback)
+        XCTAssertNotNil(first.display[.player]); XCTAssertNotNil(first.display[.opponent])
+        XCTAssertFalse(first.isPlaying); XCTAssertFalse(session.pauseReasons.contains(.playback))
+        XCTAssertEqual(session.battle?.isPaused, false)
+        session.start()
+        XCTAssertFalse(session.playback === first); XCTAssertTrue(session.playback?.history.isEmpty == true)
+    }
+
+    func testManualDeadlineWaitsForTheTurnToPlayAndThenGetsTheFullThirtySeconds() throws {
+        let clock = Clock(); let session = makeSession(clock, slowState())
+        session.start()
+        let playback = try XCTUnwrap(session.playback)
+        clock.now = 5; session.choose(slot: 1)
+        XCTAssertEqual(session.battle?.view?.turn, 2)
+        XCTAssertTrue(playback.isPlaying); XCTAssertTrue(session.pauseReasons.contains(.playback))
+        XCTAssertEqual(session.battle?.isPaused, true)
+        session.choose(slot: 1); XCTAssertEqual(session.battle?.view?.turn, 2, "no new turn while the last one plays")
+        // Past the old deadline (5 + 30) the turn is still playing or has only just finished.
+        clock.now = 36; session.tick()
+        XCTAssertEqual(session.battle?.view?.turn, 2); XCTAssertFalse(timedOut(session))
+        playOut(session, clock)
+        let finished = clock.now
+        XCTAssertFalse(playback.isPlaying); XCTAssertFalse(session.pauseReasons.contains(.playback))
+        XCTAssertEqual(session.battle?.isPaused, false); XCTAssertEqual(session.battle?.remainingSeconds, 30)
+        XCTAssertEqual(session.battle?.view?.turn, 2); XCTAssertFalse(timedOut(session))
+        clock.now = finished + 29.9; session.tick()
+        XCTAssertEqual(session.battle?.view?.turn, 2); XCTAssertFalse(timedOut(session))
+        clock.now = finished + 30; session.tick()
+        XCTAssertEqual(session.battle?.view?.turn, 3); XCTAssertTrue(timedOut(session))
+    }
+
+    func testAutomaticTurnsNeverOverlapThePlayback() throws {
+        let clock = Clock(); let session = makeSession(clock, slowState())
+        session.mode = .automatic; session.start()
+        let playback = try XCTUnwrap(session.playback)
+        clock.now = 1; session.tick()
+        XCTAssertEqual(session.battle?.view?.turn, 2); XCTAssertTrue(playback.isPlaying)
+        XCTAssertTrue(session.pauseReasons.contains(.playback)); XCTAssertEqual(session.battle?.isPaused, true)
+        // A long gap between ticks does not start the next turn while a beat is on screen.
+        clock.now = 50; session.tick()
+        XCTAssertEqual(session.battle?.view?.turn, 2)
+        playOut(session, clock)
+        XCTAssertFalse(playback.isPlaying); XCTAssertEqual(session.battle?.isPaused, false)
+        XCTAssertEqual(session.battle?.view?.turn, 2)
+        let finished = clock.now
+        clock.now = finished + 0.5; session.tick(); XCTAssertEqual(session.battle?.view?.turn, 2)
+        clock.now = finished + 1; session.tick(); XCTAssertEqual(session.battle?.view?.turn, 3)
+        XCTAssertFalse(timedOut(session))
+    }
+
+    func testHiddenScreenSkipsThePlaybackInsteadOfHoldingTheBattle() throws {
+        let clock = Clock(); let session = makeSession(clock, slowState())
+        session.mode = .automatic; session.start()
+        let playback = try XCTUnwrap(session.playback)
+        session.setPaused(true, reason: .screenHidden)
+        clock.now = 1; session.tick()
+        XCTAssertEqual(session.battle?.view?.turn, 2)
+        XCTAssertFalse(playback.isPlaying); XCTAssertFalse(session.pauseReasons.contains(.playback))
+        XCTAssertFalse(playback.history.isEmpty)
+        let played = playback.history.count
+        clock.now = 2; session.tick()
+        XCTAssertEqual(session.battle?.view?.turn, 3, "automatic play goes on without waiting for beats nobody sees")
+        session.setPaused(false, reason: .screenHidden)
+        XCTAssertNil(playback.beat); XCTAssertGreaterThan(playback.history.count, played)
+    }
+
+    func testClosingThePopoverMidPlaybackSkipsToTheEndAndKeepsTheFullDeadline() throws {
+        let clock = Clock(); let session = makeSession(clock, slowState())
+        session.start()
+        let playback = try XCTUnwrap(session.playback)
+        clock.now = 5; session.choose(slot: 1)
+        XCTAssertTrue(playback.isPlaying)
+        session.setPaused(true, reason: .popoverClosed)
+        XCTAssertFalse(playback.isPlaying); XCTAssertFalse(session.pauseReasons.contains(.playback))
+        XCTAssertEqual(session.battle?.isPaused, true)
+        let history = playback.history.count
+        clock.now = 500; session.tick()
+        XCTAssertEqual(session.battle?.view?.turn, 2)
+        session.setPaused(false, reason: .popoverClosed)
+        XCTAssertNil(playback.beat); XCTAssertEqual(playback.history.count, history, "nothing replays")
+        XCTAssertEqual(session.battle?.isPaused, false)
+        clock.now = 529.9; session.tick(); XCTAssertEqual(session.battle?.view?.turn, 2)
+        clock.now = 530; session.tick(); XCTAssertEqual(session.battle?.view?.turn, 3)
+    }
+
+    func testFinishingBattlePlaysItsLastBeatsThenTheResultIsReady() throws {
+        let clock = Clock(); let session = makeSession(clock, fastState())
+        session.playerID = "p"; session.opponentID = "m"; session.mode = .automatic
+        session.start()
+        let playback = try XCTUnwrap(session.playback)
+        for _ in 0..<5 where session.battle?.phase == .running { clock.now += 1; session.tick() }
+        XCTAssertEqual(session.battle?.phase, .finished); XCTAssertFalse(session.resultSeen)
+        XCTAssertTrue(playback.isPlaying, "the knockout is still being staged")
+        XCTAssertTrue(session.pauseReasons.contains(.playback)); XCTAssertTrue(session.isActive)
+        XCTAssertNil(playback.summary.finishingMoveID)
+        playOut(session, clock)
+        XCTAssertFalse(playback.isPlaying); XCTAssertFalse(session.pauseReasons.contains(.playback))
+        XCTAssertEqual(session.battle?.phase, .finished); XCTAssertFalse(session.resultSeen)
+        XCTAssertEqual(playback.summary.finishingMoveID, "thunderbolt")
+        XCTAssertEqual(playback.display[.opponent]?.fainted, true)
+        let history = playback.history.count
+        clock.now += 10; session.tick()
+        XCTAssertEqual(playback.history.count, history); XCTAssertFalse(session.resultSeen)
+        session.markResultSeen(); clock.now += 10; session.tick()
+        XCTAssertTrue(session.resultSeen, "ticking a finished battle never un-sees the result")
+    }
+
+    func testForfeitAndBackToSelectionDropThePlaybackWithTheBattle() throws {
+        let clock = Clock(); let session = makeSession(clock, slowState())
+        session.mode = .automatic; session.start()
+        clock.now = 1; session.tick()
+        XCTAssertTrue(session.pauseReasons.contains(.playback))
+        session.forfeit()
+        XCTAssertNil(session.playback); XCTAssertFalse(session.pauseReasons.contains(.playback))
+        session.start(); XCTAssertNotNil(session.playback)
+        session.releaseIfIdle()
+        XCTAssertNotNil(session.playback, "a running battle keeps its playback")
+        session.forfeit()
+        session.prepare(state: fastState(), activeName: nil)
+        session.playerID = "p"; session.opponentID = "m"; session.start(); finish(session, clock)
+        XCTAssertEqual(session.battle?.phase, .finished); XCTAssertNotNil(session.playback)
+        session.backToSelection()
+        XCTAssertNil(session.battle); XCTAssertNil(session.playback); XCTAssertFalse(session.pauseReasons.contains(.playback))
+        session.start(); finish(session, clock); session.markResultSeen(); session.releaseIfIdle()
+        XCTAssertNil(session.battle); XCTAssertNil(session.playback)
     }
 }
