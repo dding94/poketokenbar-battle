@@ -120,9 +120,11 @@ final class PracticePlayback {
 
     init(clock: @escaping () -> TimeInterval) { self.clock = clock }
 
-    /// Queues the events of one engine step as beats. `switchIn` events seed `display` at once.
+    /// Queues the events of one engine step as beats. `switchIn` events seed `display` at once. When no
+    /// beat is on screen, the first queued beat starts right away at `clock()`.
     func enqueue(_ events: [PracticeEvent]) {}
-    /// Moves on to the next beat once the current one's time is up. The session's driver calls it.
+    /// Commits the beat on screen once its time is up (`display` takes its `after`, it joins `history`
+    /// and `recent`) and starts the next queued beat at `clock()`. `PracticeSession.tick()` calls it.
     func advance() {}
     /// Plays every queued beat instantly (screen hidden, or the user skips).
     func skipToEnd() {}
