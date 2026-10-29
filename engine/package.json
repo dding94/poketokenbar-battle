@@ -1,0 +1,21 @@
+{
+  "name": "ptb-battle-engine",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Battle engine for PokeTokenBar Battle (Pokemon Showdown simulator via @pkmn/sim) — PR 01 scaffold plus the 2026-10-29 probe",
+  "license": "MIT",
+  "scripts": {
+    "probe:bundle": "esbuild probe/adapter.js --bundle --minify --keep-names --format=iife --platform=neutral --target=es2020 --main-fields=module,main --conditions=import --alias:path=./probe/empty-path.js --log-level=warning --outfile=probe/out/engine.js",
+    "probe:corpus": "PKG=\"$PWD\" node probe/gen-corpus.js 2500 probe/out/corpus.json",
+    "probe:node": "REPLAY=1 SER=3 node probe/run-node.js probe/out/engine.js probe/out/corpus.json probe/out/node.json",
+    "probe:jsc": "swiftc -O probe/run-jsc.swift -o probe/out/run-jsc && codesign -f -s - --entitlements probe/jit.entitlements probe/out/run-jsc && probe/out/run-jsc probe/out/engine.js probe/out/corpus.json probe/out/jsc.json 1 3",
+    "probe:compare": "node probe/compare.js probe/out/node.json probe/out/jsc.json",
+    "probe": "npm run probe:bundle && npm run probe:corpus && npm run probe:node && npm run probe:jsc && npm run probe:compare"
+  },
+  "dependencies": {
+    "@pkmn/sim": "0.10.12"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
+  }
+}

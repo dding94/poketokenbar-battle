@@ -1,0 +1,1 @@
+(function(){ var s=0; for (var i=0;i<1e8;i++){ s = (s + i*7) | 0; } var o=[]; for (var j=0;j<2e6;j++) o.push({a:j, b:'x'+(j%100)}); var m={}; for (var k=0;k<2e6;k++){ m['k'+(k%5000)] = (m['k'+(k%5000)]||0)+1; } return String(s)+' '+o.length; })()
