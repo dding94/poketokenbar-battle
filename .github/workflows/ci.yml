@@ -9,6 +9,11 @@ on:
         type: choice
         default: app
         options: [app, engine, engine-contract]
+      macos:
+        description: Engine runner selection
+        type: choice
+        default: both
+        options: [both, macos-14, macos-15]
 
 permissions:
   contents: read
@@ -79,7 +84,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-14, macos-15]
+        os: ${{ inputs.macos == 'both' && fromJSON('["macos-14","macos-15"]') || fromJSON(format('["{0}"]', inputs.macos)) }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 5
     steps:

@@ -88,7 +88,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         Task { await companion.preparePokemonProfiles() }
         updater = UpdateChecker()
         store.localizationLanguage = companion.language   // 알림 현지화용 미러 시드
-        store.onRefresh = { [weak self] in self?.onStoreRefreshed() }   // 한도 로드 후 companion·사탕 지급
+        store.onRefresh = { @MainActor @Sendable [weak self] in self?.onStoreRefreshed() }   // 한도 로드 후 companion·사탕 지급
         floatingPet = FloatingPetController(
             store: store, companion: companion,
             onOpenPopover: { [weak self] in self?.openPopover() },

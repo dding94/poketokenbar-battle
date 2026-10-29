@@ -15,8 +15,13 @@ for(const p of reference.pokemon){const s=speciesFor(p.num,null);
 }
 let formCount=0;
 for(const [num,list] of Object.entries(forms))for(const form of list){const s=speciesFor(Number(num),form);assert.ok(s.exists);assert.equal(s.num,Number(num));formCount++;}
-const swift=readFileSync('../Sources/PokeTokenBar/Core/PokemonForm.swift','utf8').split('// MARK: Sprites')[0];
-for(const m of swift.matchAll(/(?:Entry|\.init)\("([a-z-]+)", formID:/g))assert.ok(Object.values(forms).some(f=>f.includes(m[1])),`missing app form ${m[1]}`);
+const swift=readFileSync('../Sources/PokeTokenBar/Core/PokemonForm.swift','utf8');
+const swiftForms={201:'abcdefghijklmnopqrstuvwxyz'.split('').concat(['exclamation','question'])};
+for(const match of swift.matchAll(/(\d+): \[([\s\S]*?)\](?=,?\n)/g)){
+  const names=[...match[2].matchAll(/\.init\("([a-z-]+)", formID:/g)].map(m=>m[1]);
+  if(names.length)swiftForms[match[1]]=names;
+}
+assert.deepEqual(forms,swiftForms,'every species/form pair must match the app catalog');
 const set=(species,move)=>({species,moves:[move],ability:'Pressure',level:100,evs:{hp:0,atk:0,def:0,spa:0,spd:0,spe:0},nature:'Hardy'});
 let expectedFailures=0;
 for(const move of reference.moves){assert.ok(Dex.moves.get(move).exists,move);
