@@ -802,6 +802,10 @@ read_when:
   "Iron Tall"로 읽었고, 작은 세그먼트 라벨 "2×"는 이웃 라벨을 읽으면서도 놓쳤다. 비교 정규화에 가는 글자
   (i·l·1·|)를 합치고, 세그먼트처럼 작은 컨트롤 라벨은 OCR 대신 AppKit 컨트롤(`NSSegmentedControl`)에서
   직접 읽는다. 로컬 OCR 통과는 CI 통과를 보장하지 않는다.
+  세 번째 재발(macOS 14 엔진 job: "your"→"vour", "Pow 60 · Acc 100 · Special"→"row ou acc luu. specld")에서
+  근본원인을 고쳤다. 디스플레이가 없는 CI 러너는 `bitmapImageRepForCachingDisplay`를 1배율로 만들어 캡션이
+  몇 픽셀 높이에 불과했다. 연습전 OCR은 `PracticeScreenRenderingTests.capture2x`(2배 픽셀 비트맵에
+  `cacheDisplay`)로 찍는다. 새 OCR 테스트도 2배 캡처를 쓴다.
 
 - **초기 설정 이동은 애니메이션 완료에 의존하지 않는다.** 세션 키 만료·등록 안내에서
   `startExpanded`로 연 고급 섹션의 animated `scrollTo`가 비활성·non-key native 호스트에서

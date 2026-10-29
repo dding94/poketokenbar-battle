@@ -225,9 +225,8 @@ final class PopoverPracticeRoutingTests: XCTestCase {
         let deadline = ContinuousClock.now + .seconds(5)
         repeat {
             try await Task.sleep(for: .milliseconds(100))
-            host.layoutSubtreeIfNeeded()
-            let bitmap = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
-            host.cacheDisplay(in: host.bounds, to: bitmap)
+            // 2x like the practice screen tests: 1x captions misread on display-less CI runners.
+            let bitmap = try PracticeScreenRenderingTests.capture2x(host)
             let request = VNRecognizeTextRequest()
             request.recognitionLevel = .accurate
             request.recognitionLanguages = ["en-US"]

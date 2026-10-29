@@ -82,9 +82,20 @@ final class PracticeScreenRenderingTests: XCTestCase {
         return host
     }
 
+    /// Renders at twice the point size. Display-less CI runners cache at 1x, where captions are a few pixels
+    /// tall and Vision misreads them differently per macOS ("your" as "vour", "Pow 60" garbled on macOS 14).
     private func capture(_ host: NSView) throws -> NSBitmapImageRep {
+        try Self.capture2x(host)
+    }
+
+    static func capture2x(_ host: NSView) throws -> NSBitmapImageRep {
         host.layoutSubtreeIfNeeded()
-        let bitmap = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+        let size = host.bounds.size
+        let bitmap = try XCTUnwrap(NSBitmapImageRep(
+            bitmapDataPlanes: nil, pixelsWide: Int(size.width * 2), pixelsHigh: Int(size.height * 2),
+            bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+            colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0))
+        bitmap.size = size
         host.cacheDisplay(in: host.bounds, to: bitmap)
         return bitmap
     }
