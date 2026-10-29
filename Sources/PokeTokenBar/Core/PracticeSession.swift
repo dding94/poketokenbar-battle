@@ -67,13 +67,30 @@ final class PracticeSession {
     /// stale (a newer search, or another player) must not land.
     private var wildGeneration = 0
 
+    /// Practice results (`PracticeRecordStore`), loaded at init and kept after every battle that ends.
+    private(set) var records = PracticeRecords()
+    /// The battle that just ended, for the result screen; nil until one ends.
+    private(set) var lastRecord: PracticeRecordUpdate?
+    /// Today's opponent for the current player (`PracticeDaily`); never saved.
+    private(set) var dailyCandidate: PracticeCandidate?
+    private(set) var dailyState: PracticeWildState = .idle
+    private let recordStore: PracticeRecordStore
+    /// Wall clock and calendar for the local day (`PracticeDaily.dayKey`); `clock` is uptime for turn timing.
+    private let now: () -> Date
+    private let calendar: Calendar
+
     /// `drivesAutomatically: false` leaves `tick()` to the caller (tests with an injected clock). Tests also
-    /// inject `wildSource` stubs and a fixed `wildSeed`, so wild opponents never reach the network there.
+    /// inject `wildSource` stubs and a fixed `wildSeed`, so wild opponents never reach the network there, and keep
+    /// the default in-memory `recordStore`; the app passes the file next to its save.
     init(engineURL: URL?, clock: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
          drivesAutomatically: Bool = true, wildSource: PracticeWildSource = .live,
-         wildSeed: @escaping () -> UInt64 = { UInt64.random(in: .min ... .max) }) {
+         wildSeed: @escaping () -> UInt64 = { UInt64.random(in: .min ... .max) },
+         recordStore: PracticeRecordStore = PracticeRecordStore(fileURL: nil),
+         now: @escaping () -> Date = Date.init, calendar: Calendar = .current) {
         self.engineURL = engineURL; self.clock = clock; self.drivesAutomatically = drivesAutomatically
         self.wildSource = wildSource; self.wildSeed = wildSeed
+        self.recordStore = recordStore; self.now = now; self.calendar = calendar
+        records = recordStore.load()
     }
 
     /// Searches three wild opponents within ±3 levels of the current player, replacing the previous ones

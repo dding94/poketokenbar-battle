@@ -67,7 +67,12 @@ struct BattleView: Decodable {
     let p2: Pokemon
 }
 struct BattleConfig: Codable {
-    struct Player: Codable { let name: String; let set: BattleSet }
+    struct Player: Codable {
+        let name: String
+        let set: BattleSet
+        /// The engine policy this side's automatic turns run (`PracticeTemperament.policyID`); nil = standard.
+        var policy: String? = nil
+    }
     let seed: [UInt32]
     let policySeed: UInt32
     let p1: Player
