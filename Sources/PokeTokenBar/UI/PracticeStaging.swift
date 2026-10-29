@@ -78,12 +78,14 @@ struct PracticeWording {
     let playerSnapshot: BattleSnapshot?
     let opponentSnapshot: BattleSnapshot?
 
-    init(session: PracticeSession, battle: PracticeBattle, l: L) {
+    /// From the pair the battle was started with: the selection may already name someone else (a wild search
+    /// replacing its batch mid-battle).
+    init(battle: PracticeBattle, l: L) {
         self.l = l
-        playerName = session.player?.name ?? battle.view?.p1.species ?? ""
-        opponentName = session.opponent?.name ?? battle.view?.p2.species ?? ""
-        playerSnapshot = session.player?.snapshot
-        opponentSnapshot = session.opponent?.snapshot
+        playerName = battle.player?.name ?? battle.view?.p1.species ?? ""
+        opponentName = battle.opponent?.name ?? battle.view?.p2.species ?? ""
+        playerSnapshot = battle.player?.snapshot
+        opponentSnapshot = battle.opponent?.snapshot
     }
 
     func name(_ side: PracticeSide) -> String { side == .player ? playerName : opponentName }

@@ -16,7 +16,7 @@ struct PracticeBattleBoard: View {
     private var automatic: Bool { session.mode == .automatic }
     private var playback: PracticePlayback? { session.playback }
     private var playing: Bool { playback?.isPlaying ?? false }
-    private var wording: PracticeWording { PracticeWording(session: session, battle: battle, l: l) }
+    private var wording: PracticeWording { PracticeWording(battle: battle, l: l) }
 
     var body: some View {
         // 8pt rhythm (not 10): the move hints and the speed row take the room the looser spacing had.
@@ -62,11 +62,11 @@ struct PracticeBattleBoard: View {
         let own = side == .player
         let beat = playback?.beat
         return PracticeSideCard(side: pokemon, own: own, name: wording.name(side),
-                                snapshot: own ? session.player?.snapshot : session.opponent?.snapshot,
+                                snapshot: own ? battle.player?.snapshot : battle.opponent?.snapshot,
                                 l: l, artwork: artwork, display: shown(side),
                                 beatID: beat?.id, delta: beat?.hpDelta[side], hitTrigger: lastHit(side),
                                 reveal: own ? nil : stagedReveal,
-                                wild: !own && session.opponent?.origin.wildTraits != nil)
+                                wild: !own && battle.opponent?.origin.wildTraits != nil)
     }
 
     /// What the staged beats have shown of the opponent so far (history plus the beat on screen). The
@@ -249,7 +249,7 @@ struct PracticeBattleBoard: View {
             } else {
                 LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], spacing: 6) {
                     ForEach(Array(moves.enumerated()), id: \.element.slot) { index, move in
-                        PracticeMoveCard(move: move, key: index + 1, snapshot: session.player?.snapshot,
+                        PracticeMoveCard(move: move, key: index + 1, snapshot: battle.player?.snapshot,
                                          hint: session.moveHint(move.id), l: l, artwork: artwork,
                                          locked: automatic || battle.isPaused || playing) {
                             session.choose(slot: move.slot)

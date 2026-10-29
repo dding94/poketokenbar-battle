@@ -54,17 +54,15 @@ struct PracticeSelectionView: View {
             .keyboardShortcut(.defaultAction)
             .disabled(session.player == nil || session.opponent == nil)
         }
-        // Wild opponents are matched to the entry's level: search on appear and again whenever a player
-        // change returns the search to idle.
-        .onAppear { searchWildIfIdle() }
-        .onChange(of: session.playerID) { searchWildIfIdle() }
-        .onChange(of: session.wildState) { searchWildIfIdle() }
+        // Wild opponents are matched to the entry's level: search whenever one is due — idle with a player —
+        // rather than on particular transitions. After a release the same player can come back through
+        // `prepare` with no player or state change to observe, and the search must still start.
+        .onChange(of: wildSearchDue, initial: true) { _, due in
+            if due { session.findWildOpponents() }
+        }
     }
 
-    private func searchWildIfIdle() {
-        guard session.wildState == .idle, session.player != nil else { return }
-        session.findWildOpponents()
-    }
+    private var wildSearchDue: Bool { session.wildState == .idle && session.player != nil }
 
     // MARK: My entry
 

@@ -21,7 +21,7 @@ struct PracticeResultView: View {
     }
 
     private var playback: PracticePlayback? { session.playback }
-    private var wording: PracticeWording { PracticeWording(session: session, battle: battle, l: l) }
+    private var wording: PracticeWording { PracticeWording(battle: battle, l: l) }
     private var turns: Int {
         if let staged = playback?.summary.turns, staged > 0 { return staged }
         return battle.result?.turns ?? battle.view?.turn ?? 0
@@ -47,7 +47,7 @@ struct PracticeResultView: View {
 
     private var hero: some View {
         VStack(spacing: 3) {
-            PracticeSpriteTile(set: session.player?.snapshot?.set, size: 52, artwork: artwork)
+            PracticeSpriteTile(set: battle.player?.snapshot?.set, size: 52, artwork: artwork)
                 .practiceFainted(outcome == .loss)
             Text(outcome == .win ? l.practiceVictory : outcome == .loss ? l.practiceDefeat : l.practiceDraw)
                 .font(.system(size: 26, weight: .bold))
@@ -211,8 +211,9 @@ struct PracticeResultView: View {
             .keyboardShortcut(.defaultAction)
             HStack(spacing: 8) {
                 Button {
-                    // A wild foe was just fought: offer fresh ones instead of the same three.
-                    let wasWild = session.opponent?.origin.wildTraits != nil
+                    // A wild foe was just fought: offer fresh ones instead of the same three. Read off the
+                    // battle, before `backToSelection` drops it.
+                    let wasWild = battle.opponent?.origin.wildTraits != nil
                     session.backToSelection()
                     if wasWild { session.findWildOpponents() }
                 } label: {
