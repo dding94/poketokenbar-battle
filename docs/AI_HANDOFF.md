@@ -53,6 +53,13 @@
 2. PR 02 → PR 03 → PR 03A(로컬 연습전) 순서로 진행한다. 설치·실행 및 계속 진행은 사용자가 승인했다.
 3. 사용자에게 연습전 시험 방법을 안내하고 멈춘다. 공개 전환은 필요하지 않아 private를 유지한다.
 
+### PR 03A 화면 진행
+
+- 세션 GREEN [CI 40811804200](https://github.com/dding94/poketokenbar-battle/actions/runs/40811804200), `5d1b726`: 대상 명령 종료 0, 20건 통과·실패/skip 0. `llvm-cov show --show-regions` 확인 후 늦은 클릭/종료 후 클릭, 200턴 무승부, 봉인으로 인한 자동 재선택, 정보 누락 거절 테스트를 추가했다. 내부 battleID 부재(세션 불변식), 반복 거절 5회 실패, 모든 로그 표현은 아직 전수 검증하지 않았다.
+- 화면 RED [CI 40811957586](https://github.com/dding94/poketokenbar-battle/actions/runs/40811957586), `7ab43e0`: 대상 21건 실행·5 assertion 실패·skip 0, 종료 1. 빈 SwiftUI 화면을 실제 렌더링/OCR한 검사 1건이 실패했으며 기존 20건은 통과했다.
+- 03A-2 구현: 별도 NSWindow, 내/상대 보유 개체 선택, 출전 능력치·HP·공개된 정보, 직접 조작/자동 진행, 전투 기록·결과, 한국어 메시지와 식별자 대체 표시. 스프라이트/이름은 기존 런타임 로더를 재사용하며 저장소에 자산을 넣지 않는다. `--practice` 실행 인자로도 창을 연다. 로컬 `swift build` 종료 0(기존 GeometryProxy Sendable 경고 유지).
+- 화면 이미지는 합성 개체/도형으로 렌더링하는 검사와 설치 후 실제 창 확인으로 남긴다. 아직 설치본을 이 화면으로 교체하지 않았다.
+
 ### PR 03A-1 진행
 
 - RED [CI 40811448759](https://github.com/dding94/poketokenbar-battle/actions/runs/40811448759), `bb7a080`: `swift test --enable-code-coverage --filter "BattleEngineTests|BattleSnapshotTests|PracticeBattleTests"` 종료 1, 20건 실행·22 assertion 실패·skip 0. 연습전 8건 중 7건 실패, 기존 12건 및 잘못된 출전 거절 1건은 통과했다. 컴파일 오류 없이 실제 stub 동작을 확인했다.

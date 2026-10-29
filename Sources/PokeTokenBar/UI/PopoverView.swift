@@ -1014,6 +1014,14 @@ struct PopoverView: View {
                 }
             }
             Spacer()
+            Button {
+                PracticeWindowController.shared.open(state: companion.state, activeName: companion.displayName)
+            } label: {
+                Label("연습전", systemImage: "bolt.shield")
+            }
+            .buttonStyle(.borderless)
+            .help("내 개체로 로컬 연습전 열기")
+
             // 끄기는 펫 우클릭. 켜기는 여기 — 숨기면 우클릭할 대상이 없다(#301).
             // Settings 체크박스와 같은 `floatingPetEnabled`. 홈 탭에만 두면 도감에서 못 켠다.
             Button {

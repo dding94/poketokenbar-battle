@@ -49,7 +49,9 @@ jobs:
       # line-coverage floor on the logic-core files. It replaces a bare `swift test`:
       # the tests still run, and a coverage regression now fails the build.
       - name: Test + coverage gate
-        run: ./scripts/test-gate.sh
+        run: |
+          ./scripts/test-gate.sh
+          ./scripts/battle-coverage.sh
 
       - name: Prove the fork identity guard rejects an upstream value
         run: bash scripts/test-fork-identity-guard.sh

@@ -13,8 +13,8 @@ final class PracticeBattleTests: XCTestCase {
         p.moves = moves.map { PokemonKnownMove(name: $0, learnedAtLevel: 1) }
         return p
     }
-    private func candidate(_ id: String, species: Int = 242, moves: [String] = ["tackle"], engine: BattleEngine) throws -> PracticeCandidate {
-        let snapshot = try BattleSnapshot.make(speciesID: species, nature: .hardy, profile: profile(id, moves: moves), using: engine)
+    private func candidate(_ id: String, species: Int = 242, moves: [String] = ["tackle"], ability: String = "pressure", engine: BattleEngine) throws -> PracticeCandidate {
+        let snapshot = try BattleSnapshot.make(speciesID: species, nature: .hardy, profile: profile(id, moves: moves, ability: ability), using: engine)
         return PracticeCandidate(id: id, name: id, snapshot: snapshot, blockedReason: nil)
     }
     func testRosterExcludesReleasedAndPreservesIndividualIDs() throws {
@@ -105,4 +105,43 @@ final class PracticeBattleTests: XCTestCase {
         XCTAssertEqual(model.view?.p2.moves, []); XCTAssertNil(model.view?.p2.ability)
         model.choose(slot: 1); XCTAssertEqual(model.view?.p2.moves, ["tackle"])
     }
+    func testLateManualClickUsesTimeoutPolicyAndFinishedClicksDoNothing() throws {
+        let engine = try engine(); var now = 0.0
+        let model = PracticeBattle(engine: engine, clock: { now })
+        model.start(player: try candidate("a", species: 25, moves: ["thunderbolt", "splash"], engine: engine),
+                    opponent: try candidate("b", species: 129, moves: ["splash"], engine: engine), mode: .manual, seed: [1,2,3,4])
+        now = 30; model.choose(slot: 2)
+        XCTAssertEqual(model.result?.winner, "p1")
+        let hash = model.result?.logHash; model.choose(slot: 2); model.tick(); model.cancel()
+        XCTAssertEqual(model.phase, .finished); XCTAssertEqual(model.result?.logHash, hash)
+    }
+    func testAutomaticCapDrawAndHiddenRestrictionRetry() throws {
+        let engine = try engine(); var now = 0.0
+        let model = PracticeBattle(engine: engine, clock: { now })
+        let moves = ["splash", "growl", "tail-whip", "defense-curl"]
+        model.start(player: try candidate("a", moves: moves, ability: "natural-cure", engine: engine),
+                    opponent: try candidate("b", moves: moves, ability: "natural-cure", engine: engine), mode: .automatic, seed: [1,2,3,4])
+        model.tick(); XCTAssertEqual(model.view?.turn, 1)
+        for _ in 0..<200 { now += 1; model.tick() }
+        XCTAssertEqual(model.phase, .finished); XCTAssertNil(model.result?.winner)
+        XCTAssertEqual(model.result?.turns, 200)
+        model.start(player: try candidate("a", species: 151, moves: ["imprison", "tackle"], engine: engine),
+                    opponent: try candidate("b", moves: ["tackle", "splash"], engine: engine), mode: .manual, seed: [1,2,3,4])
+        model.choose(slot: 1); model.mode = .automatic; now += 1; model.tick()
+        XCTAssertEqual(model.phase, .running); XCTAssertEqual(model.view?.turn, 3)
+        model.cancel()
+    }
+    func testBlockedCandidateCannotStartAndMessagesHaveUsefulFallbacks() throws {
+        let engine = try engine(); let model = PracticeBattle(engine: engine)
+        let blocked = PracticeCandidate(id: "missing", name: "미완성", snapshot: nil, blockedReason: "특성 없음")
+        model.start(player: blocked, opponent: try candidate("b", engine: engine), mode: .manual)
+        XCTAssertEqual(model.phase, .failed); XCTAssertNil(model.result)
+        XCTAssertTrue(model.notice?.contains("정보") == true)
+        XCTAssertEqual(PracticeText.log("|-status|p1a: Test|par", names: ["p1": "내 개체"]), "내 개체 · 마비 상태가 되었습니다.")
+        XCTAssertEqual(PracticeText.log("|move|p1a: Test|Untranslated Move", names: ["p1": "내 개체"]), "내 개체 · Untranslated Move 사용")
+        XCTAssertEqual(PracticeText.log("|-weather|RainDance", names: [:]), "날씨 · RainDance")
+        XCTAssertNotNil(PracticeText.log("|-future-event|p1a: Test|new effect", names: [:]))
+        XCTAssertNil(PracticeText.log("", names: [:]))
+    }
+
 }

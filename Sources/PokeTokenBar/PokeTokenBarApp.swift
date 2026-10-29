@@ -117,6 +117,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         observeDisplaySleep()
         observePowerState()
         applyState()
+        if CommandLine.arguments.contains("--practice") {
+            PracticeWindowController.shared.open(state: companion.state, activeName: companion.displayName)
+        }
     }
 
     /// Observation 기반 상태 반영 — store 의 menuTitle(=menuLines) 변경 시 재호출.
