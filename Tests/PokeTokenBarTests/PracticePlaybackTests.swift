@@ -362,6 +362,15 @@ final class PracticePlaybackTests: XCTestCase {
         ])
     }
 
+    func testIntroShownIsAScreenFlagThatPlaybackNeverTouches() {
+        let playback = makePlayback(Clock())
+        XCTAssertFalse(playback.introShown)
+        playback.introShown = true
+        playback.enqueue(seeded + koTurn)
+        playback.skipToEnd()
+        XCTAssertTrue(playback.introShown)
+    }
+
     func testSetboostIsABoostWithItsAbsoluteStage() {
         XCTAssertEqual(parse(["|-setboost|p1a: Snorlax|atk|6|[from] move: Belly Drum"]), [.boost(.player, stat: "atk", stages: 6)])
     }

@@ -296,7 +296,14 @@ final class PracticeSessionTests: XCTestCase {
         XCTAssertEqual(session.battle?.view?.turn, 1)
         clock.now = 1; try await waitForTurn(2)
         XCTAssertEqual(session.battle?.view?.turn, 2)
+        // Let the turn finish playing first, so only display sleep can be what holds the next one.
+        for _ in 0..<40 where session.playback?.isPlaying == true {
+            try await Task.sleep(for: .milliseconds(100))
+            if session.playback?.isPlaying == true { clock.now += 1 }
+        }
+        XCTAssertEqual(session.playback?.isPlaying, false); XCTAssertEqual(session.pauseReasons, [])
         session.setPaused(true, reason: .displayAsleep)
+        XCTAssertEqual(session.pauseReasons, [.displayAsleep])
         clock.now = 100; try await Task.sleep(for: .milliseconds(800))
         XCTAssertEqual(session.battle?.view?.turn, 2)
         session.setPaused(false, reason: .displayAsleep)

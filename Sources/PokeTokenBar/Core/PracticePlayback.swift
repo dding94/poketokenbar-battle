@@ -40,9 +40,12 @@ enum PracticeEvent: Equatable, Sendable {
 
 /// Turns `drainLog` lines (viewer p1) into events. It keeps each side's max HP from `|switch|` so a
 /// later "0 fnt" still has a scale. Lines it does not model are dropped; the text log keeps them.
-/// `|-weather|...|[upkeep]` repeats a weather already announced, so only changes become events.
+/// `-sethp` (Pain Split) becomes a damage or heal by comparing with the side's last HP; `-setboost`
+/// (Belly Drum) is a boost whose `stages` is the stage it was set to. `|-weather|...|[upkeep]` repeats a
+/// weather already announced, so only changes become events.
 struct PracticeEventParser {
     private var maxHP: [PracticeSide: Int] = [:]
+    private var lastHP: [PracticeSide: Int] = [:]
 
     mutating func parse(_ lines: [String]) -> [PracticeEvent] {
         var events: [PracticeEvent] = []
@@ -60,18 +63,20 @@ struct PracticeEventParser {
         case "switch", "drag":
             guard let side, let hp = Self.hp(field(4)) else { return nil }
             let max = hp.max ?? hp.current
-            maxHP[side] = max
+            maxHP[side] = max; lastHP[side] = hp.current
             return .switchIn(side, hp: hp.current, maxHP: max)
         case "move": return side.map { .move($0, moveID: Self.id(field(3))) }
         case "cant": return side.map { .cant($0, reason: Self.cause(field(3))) }
-        case "-damage", "-heal":
+        case "-damage", "-heal", "-sethp":
             guard let side, let hp = Self.hp(field(3)) else { return nil }
             let max = hp.max ?? maxHP[side] ?? 100
-            maxHP[side] = max
+            let before = lastHP[side] ?? hp.current
+            maxHP[side] = max; lastHP[side] = hp.current
             let cause = parts.dropFirst(4).first { $0.hasPrefix("[from] ") }
                 .map { Self.cause(String($0.dropFirst("[from] ".count))) }
-            return parts[1] == "-damage" ? .damage(side, hp: hp.current, maxHP: max, cause: cause)
-                                         : .heal(side, hp: hp.current, maxHP: max, cause: cause)
+            let lowers = parts[1] == "-damage" || (parts[1] == "-sethp" && hp.current < before)
+            return lowers ? .damage(side, hp: hp.current, maxHP: max, cause: cause)
+                          : .heal(side, hp: hp.current, maxHP: max, cause: cause)
         case "-supereffective": return side.map(PracticeEvent.superEffective)
         case "-resisted": return side.map(PracticeEvent.resisted)
         case "-immune": return side.map(PracticeEvent.immune)
@@ -80,9 +85,9 @@ struct PracticeEventParser {
         case "-fail": return side.map(PracticeEvent.failed)
         case "-status": return side.map { .status($0, code: field(3).lowercased()) }
         case "-curestatus": return side.map { .cureStatus($0, code: field(3).lowercased()) }
-        case "-boost", "-unboost":
+        case "-boost", "-unboost", "-setboost":
             guard let side, let amount = Int(field(4)) else { return nil }
-            return .boost(side, stat: field(3).lowercased(), stages: parts[1] == "-boost" ? amount : -amount)
+            return .boost(side, stat: field(3).lowercased(), stages: parts[1] == "-unboost" ? -amount : amount)
         case "faint": return side.map(PracticeEvent.faint)
         case "-weather":
             guard !parts.contains("[upkeep]") else { return nil }
@@ -185,6 +190,8 @@ final class PracticePlayback {
     private(set) var recent: [PracticeBeat] = []
     /// Every beat of this battle in order, for the summary and the full log.
     private(set) var history: [PracticeBeat] = []
+    /// The screen's VS splash has played for this battle; the screen sets it, so a reopened popover skips it.
+    var introShown = false
     /// A beat is on screen or queued.
     var isPlaying: Bool { beat != nil || !queue.isEmpty }
     var summary: PracticeSummary {
@@ -273,7 +280,7 @@ final class PracticePlayback {
             case .timedOut: pendingTimeout = true
             case .end: break
             case .damage(let side, _, _, let cause), .heal(let side, _, _, let cause):
-                switch Self.phase(of: cause) {
+                switch Self.phase(of: cause, openMove: open?.actor != nil ? open?.moveID : nil) {
                 case .confusion: begin(side); add(event)
                 case .action: add(event)
                 case .residual: addResidual(event)
@@ -313,11 +320,18 @@ final class PracticePlayback {
     private static let actionCauses: Set<String> = [
         "recoil", "drain", "lifeorb", "rockyhelmet", "roughskin", "ironbarbs", "shellbell", "voltabsorb", "waterabsorb",
     ]
-    private static func phase(of cause: String?) -> Phase {
+    /// Causes that share a name with a move yet only tick at the end of the turn.
+    private static let residualMoveCauses: Set<String> = [
+        "leechseed", "wrap", "bind", "firespin", "whirlpool", "sandtomb", "clamp", "magmastorm", "infestation",
+        "curse", "nightmare", "sandstorm", "hail",
+    ]
+    /// A cause equal to the move the open beat is playing (crash damage, Pain Split) is that move's own effect.
+    private static func phase(of cause: String?, openMove: String?) -> Phase {
         guard let cause else { return .action }
         let key = cause.filter { !$0.isWhitespace }
         if key == "confusion" { return .confusion }
-        return actionCauses.contains(key) ? .action : .residual
+        if residualMoveCauses.contains(key) { return .residual }
+        return actionCauses.contains(key) || key == openMove ? .action : .residual
     }
 
     private func makeBeat(_ draft: Draft) -> PracticeBeat {
