@@ -798,6 +798,10 @@ read_when:
   **부류 스윕:** 같은 PR의 `PracticeScreenRenderingTests`와 `PopoverNavigationTests`의 연습 화면 OCR 비교를
   공백·대소문자 무시로 바꿨다. 기존 OCR 테스트(도감·컬렉션·스냅샷)는 CI에서 안정적으로 통과해 그대로 둔다.
   새 OCR 단언도 대소문자를 구분하지 않는다.
+  같은 부류가 PR 03B-3에서 다시 나왔다. 로컬(macOS 26)에서 통과한 OCR이 CI(macOS 15)에서 "Iron Tail"을
+  "Iron Tall"로 읽었고, 작은 세그먼트 라벨 "2×"는 이웃 라벨을 읽으면서도 놓쳤다. 비교 정규화에 가는 글자
+  (i·l·1·|)를 합치고, 세그먼트처럼 작은 컨트롤 라벨은 OCR 대신 AppKit 컨트롤(`NSSegmentedControl`)에서
+  직접 읽는다. 로컬 OCR 통과는 CI 통과를 보장하지 않는다.
 
 - **초기 설정 이동은 애니메이션 완료에 의존하지 않는다.** 세션 키 만료·등록 안내에서
   `startExpanded`로 연 고급 섹션의 animated `scrollTo`가 비활성·non-key native 호스트에서

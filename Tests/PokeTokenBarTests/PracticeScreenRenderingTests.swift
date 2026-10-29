@@ -113,9 +113,19 @@ final class PracticeScreenRenderingTests: XCTestCase {
     }
 
     /// Spaces and letter case are ignored: Vision reads small "Lv.50" as "LV.50" on CI. The multiplication
-    /// sign reads as a letter x as often as not, so "×2" and "x2" are the same needle.
+    /// sign reads as a letter x as often as not, so "×2" and "x2" are the same needle. Thin glyphs collapse
+    /// too: CI read "Iron Tail" as "Iron Tall", so i, l, 1 and | compare equal.
     private static func normalized(_ text: String) -> String {
-        text.replacingOccurrences(of: " ", with: "").replacingOccurrences(of: "×", with: "x").lowercased()
+        String(text.replacingOccurrences(of: " ", with: "").replacingOccurrences(of: "×", with: "x").lowercased()
+            .map { "l1|".contains($0) ? "i" : $0 })
+    }
+
+    /// Segment titles of the speed control, read from the AppKit control behind the SwiftUI picker. CI's
+    /// Vision missed the small "2×" segment while reading its neighbors, so the control is checked directly.
+    private func segmentLabels(in view: NSView) -> [String] {
+        func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap { descendants($0) } }
+        return descendants(view).compactMap { $0 as? NSSegmentedControl }
+            .flatMap { control in (0..<control.segmentCount).compactMap { control.label(forSegment: $0) } }
     }
 
     private func assertRendered(_ needles: [String], in text: String,
@@ -333,9 +343,10 @@ final class PracticeScreenRenderingTests: XCTestCase {
         session.start()
         XCTAssertEqual(session.battle?.phase, .running)
         let host = host(session)
-        let needles = ["2×", "Skip to result", "Forfeit"]
+        let needles = ["Skip to result", "Forfeit"]
         let (text, _) = try await waitForText(needles, in: host)
         assertRendered(needles, in: text)
+        XCTAssertTrue(segmentLabels(in: host).contains("2×"), "speed segments: \(segmentLabels(in: host))")
         assertPopoverSized(host)
 
         session.skipToResult()
