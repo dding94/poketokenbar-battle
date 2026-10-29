@@ -91,7 +91,7 @@ test('aliases cannot smuggle a duplicate move into the set',()=>{
 });
 test('describes moves from gen9 data for decision hints and rejects unknown ids',()=>{
   const r=call('describeMoves',['thunderbolt','quick-attack','vice-grip','swift']);
-  assert.deepEqual(r.moves[0],{id:'thunderbolt',name:'Thunderbolt',type:'Electric',category:'Special',basePower:90,accuracy:100,priority:0,pp:15});
+  assert.deepEqual(r.moves[0],{id:'thunderbolt',name:'Thunderbolt',type:'Electric',category:'Special',basePower:90,accuracy:100,priority:0,pp:15,fixedDamage:false,variableType:false});
   assert.equal(r.moves[1].priority,1);assert.equal(r.moves[2].id,'visegrip');assert.equal(r.moves[3].accuracy,null);
   for(const bad of [['not-a-move'],[],['Thunderbolt!'],'thunderbolt',Array(9).fill('tackle')])
     assert.deepEqual(call('describeMoves',bad),{ok:false,error:'invalid_moves'});
@@ -102,4 +102,10 @@ test('type chart is type-only over the 18 gen9 types (no Stellar, no abilities)'
   assert.equal(c.damage.Electric.Ground,0);assert.equal(c.damage.Electric.Water,2);assert.equal(c.damage.Normal.Ghost,0);
   assert.equal(c.damage.Fire.Grass,2);assert.equal(c.damage.Fire.Water,0.5);assert.equal(c.damage.Dragon.Fairy,0);
   assert.equal(c.damage.Steel.Fairy,2);assert.equal(c.damage.Ground.Flying,0);
+});
+test('describeMoves flags moves whose damage ignores type matchups or whose type varies',()=>{
+  const by=Object.fromEntries(call('describeMoves',['night-shade','dragon-rage','super-fang','counter','guillotine','sheer-cold','hidden-power','weather-ball']).moves.map(m=>[m.id,m]));
+  for(const id of ['nightshade','dragonrage','superfang','counter','guillotine','sheercold'])assert.equal(by[id].fixedDamage,true,id);
+  for(const id of ['hiddenpower','weatherball'])assert.deepEqual([by[id].variableType,by[id].fixedDamage],[true,false],id);
+  assert.equal(by.nightshade.variableType,false);
 });
