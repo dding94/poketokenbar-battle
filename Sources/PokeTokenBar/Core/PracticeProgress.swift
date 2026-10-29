@@ -13,8 +13,16 @@ enum PracticeTemperament: String, CaseIterable, Sendable {
     case erratic
 
     /// From the individual's nature, so an opponent keeps one temperament: attack-raising natures are aggressive,
-    /// defense-raising tactical, speed-raising standard, and the five neutral natures erratic.
-    init(nature: PokemonNature) { self = .standard }   // contract stub
+    /// defense-raising tactical, speed-raising standard, and the five neutral natures erratic. "Attack" and "defense"
+    /// include their special counterparts. The switch is exhaustive, so a new nature cannot go unmapped.
+    init(nature: PokemonNature) {
+        switch nature {
+        case .lonely, .brave, .adamant, .naughty, .modest, .mild, .quiet, .rash: self = .aggressive
+        case .bold, .relaxed, .impish, .lax, .calm, .gentle, .sassy, .careful: self = .tactical
+        case .timid, .hasty, .jolly, .naive: self = .standard
+        case .hardy, .docile, .serious, .bashful, .quirky: self = .erratic
+        }
+    }
     /// The engine's policy id (`config.pN.policy`).
     var policyID: String { rawValue }
 }
