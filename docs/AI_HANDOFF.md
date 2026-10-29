@@ -1,8 +1,8 @@
 # 다음 AI를 위한 작업 인계
 
-최종 갱신: 2026-10-29. **PR 00·01·02·03 검증을 완료했다. PR 03A의 읽기 전용 연습전 테스트를 실행 중이다. 배틀 화면은 아직 없다.**
+최종 갱신: 2026-10-29(새 세션). **PR 00~03A 구현·검증 완료. 사용자 직접 시험 피드백(별도 창·디자인·단조로움)에 따라 PR 03B(메뉴바 연습전 개선)를 진행 중이며 지금은 03B-1(팝오버 이관)을 병렬 구현하고 있다. 설치본은 아직 `b27282c`(별도 창 버전)다. 먼저 아래 '현재 상태'를 읽는다.**
 
-## 진행 중인 작업 (2026-10-29 기준, PR 03 검증 완료 → PR 03A 착수)
+## 진행 중인 작업 (2026-10-29 기준, 창 재열기 후속 수정 검증 → 다음 세션 인계)
 
 - 브랜치: `feat/local-practice-battle` (`main` 5e9af78에서 분기). 인수 시 모든 변경은 미커밋이었다. 사용자 승인으로 문서(`372eba0`)·PR 00(`c04769a`)·프로브(`0ddc584`)를 나누어 커밋·푸시했고 CI 수정은 `f1dad46`, `cc0b9fe`다. 이후 사용자 승인으로 별도 포크 앱을 설치·실행했으나 아래 격리 누락을 발견해 종료했다. 배포·공개 전환은 하지 않았다.
 - 문서 개정: `docs/BATTLE_PLAN.md`(새 구조, PR 00~13 + PR 03A, 부록 A), `docs/AI_HANDOFF.md`, `AGENTS.md`, `README.md`(고지), `CLAUDE.md`(첫 단락 경고 한 줄).
@@ -47,13 +47,47 @@
 - 같은 실행의 Gitleaks는 전체 이력 385개 커밋에서 원본 테스트의 공개 요금제 라벨 `default_claude_max_20x`를 비밀값으로 오인했다. 원본 커밋·파일·행을 확인하고 `.gitleaksignore`에는 그 한 건의 fingerprint만 예외로 기록한다. 전체 파일·규칙을 제외하지 않는다.
 - 스크립트 가드 점검: `build-app.sh`의 안전 설명 주석에 원본 설치 경로가 있어 기존 문자열 검사가 오인할 수 있었다. 테스트 helper가 주석 행을 제외한 실행 내용을 검사하도록 보완했으며, 원본 식별값 주입 검증은 유지한다. 위 수정은 성공한 CI에서 재검증했다.
 
-이어서 할 일:
+### 현재 상태 — PR 03B-1 팝오버 이관 (2026-10-29 새 세션)
 
-1. PR 03 자동 선택 정책 v1과 최초 공개 이벤트를 구현하고 변경된 정책으로 결정성 코퍼스를 다시 실행한다.
-2. PR 02 → PR 03 → PR 03A(로컬 연습전) 순서로 진행한다. 설치·실행 및 계속 진행은 사용자가 승인했다.
-3. 사용자에게 연습전 시험 방법을 안내하고 멈춘다. 공개 전환은 필요하지 않아 private를 유지한다.
+- 인계받은 [CI 40816751007](https://github.com/dding94/poketokenbar-battle/actions/runs/40816751007)(`6159ece`)은 **성공**했다. 대상 필터 64건 통과·실패 0, 전체 `test-gate.sh` 1,592건 실행·16 skip·실패 0, 원본 bundle ID 결함 주입 PASS, secret-scan 성공. 창 재열기 수정은 GREEN이지만 아래 결정으로 창 자체를 없애므로 설치하지 않았다.
+- 사용자 피드백(설치본 `b27282c` 직접 시험): ① 상단바(메뉴바)로만 진행되길 기대했는데 별도 창이 떠서 당황 ② 디자인이 기대와 다름 ③ 게임 진행이 단조로움. 하나씩 개선한다. 결정은 아래 '사용자 결정'과 BATTLE_PLAN PR 03B.
+- 진단(읽기 전용 서브에이전트): 팝오버는 폭 360 고정·탭 콘텐츠 높이 520이고 닫힐 때 호스팅 트리를 해제해(`popoverDidClose`) 뷰 `@State`·`.task`에 둔 전투가 사라진다. 그래서 세션을 AppDelegate 수명으로 올린다. 게임성은 엔진 번들 600판 시뮬레이션(저장소 밖 scratch 스크립트)에서 평균 2.7턴·2턴 이하 57%, seed로 승자가 바뀌는 대진 8.5%(사용자 보유 개체 기준 2%), 직전과 같은 기술 재선택 88.5%였다.
+- 진행: 계약 골격 `1f5c3c7`(PracticeSession·`PracticeBattle.pause/resume`·`PopoverNavigation.showingPractice`·PracticeScreen stub, 동작 변경 없음, `swift build` 종료 0). 그 위에서 Core 세션·팝오버 UI·AppDelegate 연결을 파일이 겹치지 않게 병렬 구현한다. 조각마다 RED 커밋(테스트만) → GREEN 커밋. 통합 후 CI는 RED 1회·GREEN 1회로 확인하고, 이어서 창 코드·테스트·CI 필터를 정리한 뒤 설치해 실제 팝오버를 확인한다.
+- 사용자에게 안내한 1단계 기본값: 직접 조작 중 팝오버가 닫히거나 다른 화면이면 30초 타이머까지 멈추고 다시 열면 남은 시간으로 이어간다. 자동 진행은 팝오버가 닫혀도 계속되고 디스플레이가 꺼질 때만 멈춘다. 진행 중이거나 결과를 아직 안 봤으면 팝오버가 연습전 화면으로 다시 열린다. 메뉴바에는 진행 `⚔︎`·결과 `⚑` 한 글자와 툴팁만 둔다. `--practice`·Finder 재열기는 창 대신 팝오버를 연다. 앱 재시작 뒤 전투 복원은 PR 11로 미룬다.
+- 이 맥은 여전히 Command Line Tools뿐이라 XCTest를 실행할 수 없다. 테스트 컴파일 오류를 CI 전에 잡는 스텁 XCTest 모듈을 scratch에 만드는 중이다. 그 검사는 통과 증거가 아니며 CI가 기준이다.
+- 승인 범위는 그대로다: 무료 분량 안의 수동 Actions 검증(필요한 커밋·푸시), 포크 앱 설치·실행. 공개 전환·PR 생성·배포는 하지 않는다.
 
-- 능력치 잘림 RED [CI 40813391351](https://github.com/dding94/poketokenbar-battle/actions/runs/40813391351), `7fbd7b4`: 28건 중 27 통과·렌더 1 실패·skip 0, 종료 1. 선택 초기화/문자열/스크롤 가드는 GREEN이다. 캡처에서도 첫 줄 말줄임과 두 번째 줄 누락을 확인했다. 본문은 두 줄 고유 높이를 보장하고 카드 높이를 늘렸다. Vision의 한국어 인식이 불안정해 스피드의 공통 약어 `(Spe)`를 함께 표시하고 OCR은 `Spe`로 검사한다(기존 RED 이미지/인식 결과에도 해당 약어가 없었음).
+### 창 재열기 후속 수정 — 증거와 남은 검증
+
+- 사용자 보고: 연습전 창을 아까 열었을 때는 동작했으나 지금은 보이지 않음. 이 사실만으로 창이 닫힘/최소화/다른 Space 중 무엇인지 단정하지 않았다.
+- 확인한 코드 공백: `--practice`는 최초 기동에만 처리하고 `AppDelegate.applicationShouldHandleReopen`은 없었다. 따라서 Finder에서 이미 실행 중인 앱을 다시 열어도 창을 복원할 코드가 없다. 기존 렌더 테스트는 별도 NSWindow에 내용만 그렸기 때문에 앱 재열기/창 수명 경로를 밟지 않았다.
+- 부류 스윕: `NSWindow`, `makeKeyAndOrderFront`, `deminiaturize`, 앱 reopen delegate를 전수 검색했다. 다른 주요 UI는 명시적인 팝오버 표시와 설정으로 관리하는 FloatingPet NSPanel이며, 연습전과 같은 닫을 수 있는 독립 창 재열기 경로는 없었다.
+- RED `9c78b94`, [CI 40816515354](https://github.com/dding94/poketokenbar-battle/actions/runs/40816515354): `swift test --enable-code-coverage --filter "BattleEngineTests|BattleSnapshotTests|PracticeBattleTests|PracticeBattleRenderingTests|PracticeWindowTests|LocalizedUILiteralTests|ScrollerLaneTests"` 종료 **1**, **30건 실행 = 28건 통과 + 2건 실패, assertion 실패 6개, skip 0**. 새 `PracticeWindowTests` 2건 모두 앱 reopen delegate가 없어서 실패했다. 컴파일 오류나 0건 실패가 아니다. scope에 따른 전체 앱/Node 코퍼스 skip은 미검증이다.
+- 수정 `6159ece`: 앱 재열기를 기존 연습전 열기 경로로 연결한다. 닫힌 창은 재생성하고 기존 창은 세션을 유지하며 앞으로 가져온다. 최소화한 기존 창은 명시적으로 복원한다. `hasVisibleWindows=true`에도 복원한다(AppKit은 최소화 창도 visible로 센다). 테스트는 합성/빈 상태와 저장소 엔진만 사용하며 실제 세이브는 쓰지 않는다.
+- `swift build > /private/tmp/ptb-reopen-green-build.log 2>&1`: 종료 **0**, 5.96초. 기존 GeometryProxy Sendable 경고가 남아 있다. **빌드 성공은 XCTest GREEN 증거가 아니다.** GREEN/전체 게이트는 위 CI 결과 확인 대기다.
+- `git diff --check`: 종료 0. 테스트는 닫힌 창 재생성·숨긴 창 복원·최소화 복원·동일 세션 유지 조건을 검사한다. `scripts/battle-coverage.sh`에 실제 복원 메서드의 region 출력을 추가했으며 결과는 아직 확인하지 않았다.
+- UI 연결은 설치 경로로 다시 시도했으나 CUA timeout(`-10005`)이었다. 이 도구 실패와 재열기 코드 공백의 인과관계는 확인하지 못했다. 실제 스프라이트 캡처·로컬 클릭은 미검증이다.
+
+### 잠금 해제 후 실제 화면 확인 재시도 (2026-10-29)
+
+- 사용자가 맥 잠금을 해제했다고 알려 CUA 확인을 재개했다. 설치 경로·bundle ID·Finder에 표시된 앱 이름으로 연결을 시도했지만 포크 앱만 `timeoutReached`로 화면 접근이 실패했다. bundle ID 접근은 build/와 설치본 두 개의 중복 등록을 보고했으며 정확한 설치 경로에서도 타임아웃이었다.
+- Finder에서 `/Applications/PokeTokenBar Battle.app`을 열어 앞으로 가져오는 시도도 수행했다. 원본 프로세스와 `--practice`로 실행한 포크 프로세스는 유지됐다.
+- `sample <fork PID> 3 -file /private/tmp/ptb-practice-hang.txt`: 종료 0. 주 스레드는 AppKit/CoreFoundation 이벤트 루프에서 대기하고 있으며 이 3초 샘플에 앱 교착/연산 정체 증거는 없다. 이 결과를 화면 정상 동작 증거로 보지는 않는다.
+- 사용자에게 메뉴바 **연습전**으로 창을 앞으로 가져오고 현재 창이 보이는지 알려 달라고 요청했다. 직접 버튼 조작·자동 진행·실제 스프라이트 캡처는 아직 미검증이다. 코드/설치본은 변경하지 않았다.
+
+### PR 03A 완료 증거 (설치본 b27282c, 재열기 후속 수정 이전)
+
+- 코드: `b27282c` (`feat/local-practice-battle`, origin에 push). PR 00 → 01 → 02 → 03 → 03A 순서로 구현했다. 최종 상태 기록은 작업 트리에 남겨 인계한다.
+- [최종 CI 40813724251](https://github.com/dding94/poketokenbar-battle/actions/runs/40813724251), macOS 15:
+  - `swift test --filter "AppIdentityTests|SupportMailTests|UpdateCheckerTests|BattleEngineTests|BattleSnapshotTests|PracticeBattleTests|PracticeBattleRenderingTests|LocalizedUILiteralTests|ScrollerLaneTests"`: 종료 **0**, **62건 통과·실패 0·skip 0**.
+  - `./scripts/test-gate.sh`: 종료 **0**. 내부 `swift test --enable-code-coverage`: **1,590건 = 1,574 통과 + 16 skip, 실패 0**. 로직 코어 라인 커버리지 **93.97%**. 별도 Swift Testing의 0건 메시지는 통과 개수에 포함하지 않는다.
+  - `./scripts/battle-coverage.sh`: 종료 **0**. `llvm-cov show --show-regions --show-line-counts-or-regions`로 시간 초과/늦은 클릭/종료 후 클릭/선택 초기화/수동 거절/자동 재선택 분기 실행을 확인했다. 내부 세션 ID 부재, 자동 거절 5회 소진, 진행 중 기술적 예외, 모든 한국어 로그 분기는 미검증이다. 수치만으로 분기 전체 통과를 주장하지 않는다.
+  - `bash scripts/test-fork-identity-guard.sh`: 종료 **0**. 원본 bundle ID 주입 1건 assertion 실패(내부 종료 1) → 원복 후 1건 통과(내부 종료 0), 원복 일치 확인.
+  - Gitleaks: **407커밋, 발견 0**, 종료 0. 엔진 전용 job은 scope에 따라 skip이며 엔진 결정성 근거는 PR 03 CI에 있다.
+- `swift build`: 종료 0. `PTB_SKIP_INSTALL=1 PTB_NATIVE_ARCH_ONLY=1 ./scripts/build-app.sh`: 종료 **0**, arm64/ad-hoc 서명. 기존 PopoverView GeometryProxy Sendable 경고는 남아 있다. bundle ID·실행 파일·LaunchAgent·JIT entitlement·엔진 SHA-256·라이선스·`codesign --verify --deep --strict`·`lipo <binary> -verify_arch arm64` 검사 종료 0. 첫 lipo 점검은 인자 순서 오류로 실패했으며 올바른 순서 재검사는 통과했다.
+- 사용자 승인 범위에서 포크 프로세스만 종료하고 `ditto`로 `/Applications/PokeTokenBar Battle.app`을 교체, `open -a ... --args --practice` 실행(각 종료 0). 설치 binary가 검증한 build binary와 동일하며 포크 인스턴스 1개·`--practice` 인자를 확인했다. 원본 PID 유지 및 실행 직후 3초 관측 **원본 폴더 220개 파일 변경 0·추가 0**. 최초 세이브 복사는 PR 00에서 확인한 그대로 유지했다. 원본 자체의 정상 주기 저장까지 장시간 불변이라고 주장하지 않는다.
+- 실제 SwiftUI 선택/전투 화면을 CI에서 합성 개체·도형으로 렌더링하고 OCR/시각 검토했다. 6개 능력치·30초·공개 정보 표시를 확인했다. `snapshot-history-renders` artifact의 `practice-selection-synthetic.png`, `practice-battle-synthetic.png`(보관 1일), 재생성 소스는 PracticeBattleRenderingTests다. 사용자에게 별도 로컬 이미지도 전달한다. Nintendo 스프라이트를 저장소에 추가하지 않았다.
+- **남은 범위:** 기존 skip 16건(대용량 성능 1·선택적 렌더 3·실제 자격 증명 2·실제 사용량/PokéAPI 10), Intel·macOS 14 전체 앱/UI·배포 서명·기술 효과의 모든 조건 조합·실제 두 맥/서버 경기는 미검증. 로컬 맥이 잠겨 CUA 실제 버튼 클릭·다운로드 스프라이트 화면 확인은 못했다. 잠금 해제를 요청했고 사용자 직접 시험 전이다. 화면 렌더링과 세션 XCTest 통과로 이 수동 검증을 대체 통과 처리하지 않는다.
 
 ### PR 03A 전체 검사·화면 보완
 
@@ -67,7 +101,7 @@
 - 세션 GREEN [CI 40811804200](https://github.com/dding94/poketokenbar-battle/actions/runs/40811804200), `5d1b726`: 대상 명령 종료 0, 20건 통과·실패/skip 0. `llvm-cov show --show-regions` 확인 후 늦은 클릭/종료 후 클릭, 200턴 무승부, 봉인으로 인한 자동 재선택, 정보 누락 거절 테스트를 추가했다. 내부 battleID 부재(세션 불변식), 반복 거절 5회 실패, 모든 로그 표현은 아직 전수 검증하지 않았다.
 - 화면 RED [CI 40811957586](https://github.com/dding94/poketokenbar-battle/actions/runs/40811957586), `7ab43e0`: 대상 21건 실행·5 assertion 실패·skip 0, 종료 1. 빈 SwiftUI 화면을 실제 렌더링/OCR한 검사 1건이 실패했으며 기존 20건은 통과했다.
 - 03A-2 구현: 별도 NSWindow, 내/상대 보유 개체 선택, 출전 능력치·HP·공개된 정보, 직접 조작/자동 진행, 전투 기록·결과, 한국어 메시지와 식별자 대체 표시. 스프라이트/이름은 기존 런타임 로더를 재사용하며 저장소에 자산을 넣지 않는다. `--practice` 실행 인자로도 창을 연다. 로컬 `swift build` 종료 0(기존 GeometryProxy Sendable 경고 유지).
-- 화면 이미지는 합성 개체/도형으로 렌더링하는 검사와 설치 후 실제 창 확인으로 남긴다. 아직 설치본을 이 화면으로 교체하지 않았다.
+- 화면 이미지는 합성 개체/도형의 실제 SwiftUI 렌더링으로 남겼다. 최신 설치 및 남은 실제 창 검증 상태는 완료 절을 따른다.
 
 ### PR 03A-1 진행
 
@@ -94,7 +128,7 @@
 - Node RED: `npm test --prefix engine` 종료 1, 20건 중 기존 17 통과·신규 3 실패·skip 0. GREEN 종료 0, 20 통과·실패/skip 0. 별칭으로 같은 기술을 중복 입력하는 경우도 거절한다.
 - Swift RED: [CI 40808265569](https://github.com/dding94/poketokenbar-battle/actions/runs/40808265569), `ba79906`. `swift test --filter "BattleEngineTests|BattleSnapshotTests"` 종료 1, 10건 실행(기존 4 통과·스냅샷 6 실패), 11개 실패 assertion/오류·skip 0. 테스트 컴파일이 아닌 실제 stub 동작 실패다.
 - 스냅샷 schema 1, instanceID·엔진 해시·규칙/정책 버전·전투 입력·공개 능력치만 저장한다. 성장량/단계 진행도는 포함하지 않는다. 개인 데이터 없이 합성 `CompanionState`의 실제 Codable 형태를 인코딩/복원해 검사한다.
-- `BattleSnapshot`은 저장소 참조나 파일 쓰기 기능이 없는 값 타입이다. 누락된 성격/성별/특성/기술은 오류로 남기고 기본값으로 채우지 않는다. 원격 GREEN·전체 앱 게이트는 다음 검증이다.
+- `BattleSnapshot`은 저장소 참조나 파일 쓰기 기능이 없는 값 타입이다. 누락된 성격/성별/특성/기술은 오류로 남기고 기본값으로 채우지 않는다. 원격 GREEN·전체 앱 게이트 증거는 다음 완료 절에 있다.
 
 ### PR 02 완료 증거
 
@@ -174,8 +208,8 @@
 ## 아직 없는 것 / 검증하지 않은 것
 
 - `server/`, Cloudflare 리소스·자격 증명·배포 URL.
-- 배틀 화면(로컬 연습전 포함)·락스텝 프로토콜·소유권 이전·스타터 지급·그룹 화면.
-- CI의 skip 16건 및 macOS 15 이외 환경에서의 XCTest 검증.
+- 온라인 배틀·락스텝 프로토콜·소유권 이전·스타터 지급·그룹 화면. 로컬 연습전은 설치까지 완료했으며 사용자 직접 시험이 남았다.
+- CI의 기존 skip 16건, macOS 14의 전체 앱 회귀/UI 검증(엔진·스냅샷 XCTest와 코퍼스는 확인).
 - 저장소 public 전환 및 앱 안 고지의 실제 화면 확인(고지 코드·문자열 테스트는 완료).
 - 실제 GitHub 기능 PR. 계획서의 PR 00~13은 앞으로 수행할 작업 단위다.
 
@@ -192,7 +226,7 @@ REA 설치본 버전 확인은 수행했지만, 바이너리와 소스의 재현
 5. PR 02·03 다음 PR 03A(로컬 연습전)를 만들어 사용자가 맥 한 대에서 직접 시험하게 한다. 서버는 필요 없다.
 6. 원격 검증이 요청 범위에 포함되면 Cloudflare 계정의 실제 Free 플랜·기존 합산 사용량·대상 리소스를 확인한 뒤 진행한다. PR 07(두 맥 친선전)이 첫 번째 서버 통합 마일스톤이다.
 
-**30명·하루 100경기와 경기당 메시지 수는 부하 가정이며 실측값이 아니다.** 새 `npm run ...` 명령도 현재 존재하지 않으며 PR 01·04~06에서 정의할 인터페이스다.
+**30명·하루 100경기와 경기당 메시지 수는 부하 가정이며 실측값이 아니다.** 엔진용 npm 명령은 구현했다. 서버용 명령은 PR 04~06에서 정의한다.
 
 ## 사용자 결정을 다시 묻지 않을 것
 
@@ -208,6 +242,9 @@ REA 설치본 버전 확인은 수행했지만, 바이너리와 소스의 재현
 - 탈퇴·퇴사 시 개체는 동결, 표시명은 익명화, 기록은 ID로 유지한다.
 - 1차 범위에 친선전·관전·연승·챔피언 칭호·리벤지 매치를 넣는다.
 - 저장소는 사용자가 로컬에서 먼저 테스트한 뒤 public으로 전환한다. 원본처럼 비공식·비상업 팬 프로젝트로 운영하고 README와 앱 안에 고지를 둔다.
+- 배틀·연습전은 메뉴바 팝오버 안에서만 진행한다. 별도 창을 띄우지 않는다(2026-10-29).
+- 배틀 화면은 기존 팝오버 시각 언어(시안 A)에 타격감 요소(시안 C: 피해 숫자·상성 배지·타입 색)를 더한다(2026-10-29).
+- 연습전에 앱 부화 규칙으로 만든 레벨 맞춤 야생 상대를 넣는다. 순서는 PR 03B-4이고 세이브는 바꾸지 않는다(2026-10-29).
 
 제품 규칙을 바꿔야 하는 구체적인 구현 문제가 발견되면 그 영향과 대안을 설명한다. 복구코드나 접속키는 이메일과 다른 역할이며, 개인정보·키 원문은 로그나 Git에 남기지 않는다.
 
@@ -221,7 +258,7 @@ REA 설치본 버전 확인은 수행했지만, 바이너리와 소스의 재현
 - 다시 합류한 동료의 동결 해제 절차(제안: 방장 처리).
 - 포크의 문제 리포트 수신처(`AppIdentity.supportEmail`, 현재 nil이라 리포트 행 숨김).
 - 원본 앱이 함께 실행 중일 때 경고할지(두 앱이 같은 토큰 로그로 각자 개체를 키운다).
-- 연습전 상대를 내 다른 개체로만 할지, 앱의 부화 규칙으로 만든 야생 개체도 넣을지(PR 03A).
+- 연습전 전용 턴 제한(현재 30초) 단축, 상대 성향 정책 변형, 세이브와 분리한 연습 전적, 오늘의 상대(PR 03B-5, 착수 전 승인 필요).
 
 ## 핵심 코드 진입점
 
