@@ -1,6 +1,6 @@
 # 다음 AI를 위한 작업 인계
 
-최종 갱신: 2026-10-29(새 세션). **PR 00~03A 구현·검증 완료. 사용자 직접 시험 피드백(별도 창·디자인·단조로움)에 따라 PR 03B(메뉴바 연습전 개선)를 진행 중이며 지금은 03B-1(팝오버 이관)을 병렬 구현하고 있다. 설치본은 아직 `b27282c`(별도 창 버전)다. 먼저 아래 '현재 상태'를 읽는다.**
+최종 갱신: 2026-10-29(새 세션). **PR 00~03A 구현·검증 완료. 사용자 직접 시험 피드백(별도 창·디자인·단조로움)에 따라 PR 03B(메뉴바 연습전 개선)를 진행 중이다. 03B-1(팝오버 이관)은 CI GREEN(`aec2ae5`)이고 설치했다. 포크 메뉴바 항목이 화면에 보이는지와 사용자 직접 시험이 남았다. 먼저 아래 '현재 상태'를 읽는다.**
 
 ## 진행 중인 작업 (2026-10-29 기준, 창 재열기 후속 수정 검증 → 다음 세션 인계)
 
@@ -52,7 +52,14 @@
 - 인계받은 [CI 40816751007](https://github.com/dding94/poketokenbar-battle/actions/runs/40816751007)(`6159ece`)은 **성공**했다. 대상 필터 64건 통과·실패 0, 전체 `test-gate.sh` 1,592건 실행·16 skip·실패 0, 원본 bundle ID 결함 주입 PASS, secret-scan 성공. 창 재열기 수정은 GREEN이지만 아래 결정으로 창 자체를 없애므로 설치하지 않았다.
 - 사용자 피드백(설치본 `b27282c` 직접 시험): ① 상단바(메뉴바)로만 진행되길 기대했는데 별도 창이 떠서 당황 ② 디자인이 기대와 다름 ③ 게임 진행이 단조로움. 하나씩 개선한다. 결정은 아래 '사용자 결정'과 BATTLE_PLAN PR 03B.
 - 진단(읽기 전용 서브에이전트): 팝오버는 폭 360 고정·탭 콘텐츠 높이 520이고 닫힐 때 호스팅 트리를 해제해(`popoverDidClose`) 뷰 `@State`·`.task`에 둔 전투가 사라진다. 그래서 세션을 AppDelegate 수명으로 올린다. 게임성은 엔진 번들 600판 시뮬레이션(저장소 밖 scratch 스크립트)에서 평균 2.7턴·2턴 이하 57%, seed로 승자가 바뀌는 대진 8.5%(사용자 보유 개체 기준 2%), 직전과 같은 기술 재선택 88.5%였다.
-- 진행: 계약 골격 `1f5c3c7`(PracticeSession·`PracticeBattle.pause/resume`·`PopoverNavigation.showingPractice`·PracticeScreen stub, 동작 변경 없음, `swift build` 종료 0). 그 위에서 Core 세션·팝오버 UI·AppDelegate 연결을 파일이 겹치지 않게 병렬 구현한다. 조각마다 RED 커밋(테스트만) → GREEN 커밋. 통합 후 CI는 RED 1회·GREEN 1회로 확인하고, 이어서 창 코드·테스트·CI 필터를 정리한 뒤 설치해 실제 팝오버를 확인한다.
+- 진행: 계약 골격 `1f5c3c7`(PracticeSession·`PracticeBattle.pause/resume`·`PopoverNavigation.showingPractice`·PracticeScreen stub, 동작 변경 없음, `swift build` 종료 0). 그 위에서 Core 세션·팝오버 UI·AppDelegate 연결을 파일이 겹치지 않게 병렬 구현했다(조각마다 RED 커밋 → GREEN 커밋).
+- RED [CI 40822256059](https://github.com/dding94/poketokenbar-battle/actions/runs/40822256059), `0f33d54`: 대상 필터 111건 실행, 새 테스트 33건 실패(assertion 123개, 컴파일 오류 0) — 세션 16·전투 일시정지 1·실행 경로 10·팝오버 렌더 3·내비게이션 3. 기존 테스트와 UI 규칙 가드(한국어 리터럴·스크롤러 레인·@MainActor·현지화 열·보간)는 통과, 종료 1.
+- 첫 GREEN [CI 40822517233](https://github.com/dding94/poketokenbar-battle/actions/runs/40822517233), `f630c25`: 111건 중 1건 실패. 화면은 맞았으나 Vision이 "Lv.50"을 "LV.50"으로 읽었다. 연습 화면 OCR 비교를 대소문자 무시로 바꾸고 defect-log(표시·UI)에 기록했다(`aec2ae5`).
+- GREEN [CI 40822779398](https://github.com/dding94/poketokenbar-battle/actions/runs/40822779398), `aec2ae5`: 대상 111건 통과·실패 0, 전체 `test-gate.sh` 1,628건 실행·16 skip(기존 선택 시나리오)·실패 0, 로직 코어 라인 커버리지 94.05%, `PracticeSession.swift` `^0` 영역 0개, 원본 bundle ID 결함 주입 PASS, secret-scan 성공. `PracticeBattle.resume()`의 비실행 guard 1곳은 종료·취소 시 일시정지가 해제되므로 도달 불가다. 나머지 `^0`는 기존 미검증 분기다.
+- 정리 `f630c25`: 별도 창(`PracticeBattleView.swift`의 `PracticeWindowController`·이전 화면)·창 테스트·이전 렌더 테스트·전용 문구 23개 삭제, 커버리지 스크립트·로직 코어 목록에 세션 추가, README와 실패 문구의 '창' 표현 수정.
+- 설치: `PTB_SKIP_INSTALL=1 PTB_NATIVE_ARCH_ONLY=1 ./scripts/build-app.sh` 종료 0(소스는 `f630c25`와 `aec2ae5`가 동일). bundle ID·실행 파일·JIT entitlement·`codesign --verify --deep --strict`·arm64·엔진 SHA-256(`5c949cd…`, 저장소·Swift 상수 일치) 확인. 포크 프로세스만 종료하고 `/Applications/PokeTokenBar Battle.app` 교체(설치 binary = build binary), `--practice`로 실행. 원본 PID 30115 유지. 원본 폴더 220개 중 3개(`companion-state.json`·`last-snapshot.json`·`usage-cache.json`)의 수정 시각은 새 포크 실행 47초 전(05:27:05~07Z)이고, 실행 직후 포크 첫 갱신(05:27:56~57Z)은 포크 폴더에만 썼다. 기준 해시를 설치 10분 전에 떠서 원본 앱의 주기 저장이 섞였다.
+- **미확인:** 실행 중인 포크(PID 55464)는 정상 갱신하지만 `CGWindowListCopyWindowInfo`에 창이 0개다(원본은 메뉴바 항목·팝오버 창이 보임). 메뉴바 항목이 표시되지 않은 상태로 보이며, 그러면 `--practice` 팝오버도 열 수 없다. 노치·메뉴바 공간 부족 또는 시스템 설정의 메뉴 막대 허용 여부를 사용자에게 확인 중이다. 이전 세션의 CUA 시간 초과도 같은 원인일 수 있으나 확인하지 않았다.
+- 로컬 테스트 타입체크: XCTest 시그니처 스텁 모듈로 `swift build --build-tests`를 scratch 경로에서 돌리는 방식이 이번 세션 scratch에 있다(실행 불가·타입체크 전용, 콜드 약 67초·증분 약 3초). RED 푸시 전 컴파일 오류 0을 확인했고 CI도 컴파일 오류 없이 돌았다. 저장소에는 넣지 않았다.
 - 사용자에게 안내한 1단계 기본값: 직접 조작 중 팝오버가 닫히거나 다른 화면이면 30초 타이머까지 멈추고 다시 열면 남은 시간으로 이어간다. 자동 진행은 팝오버가 닫혀도 계속되고 디스플레이가 꺼질 때만 멈춘다. 진행 중이거나 결과를 아직 안 봤으면 팝오버가 연습전 화면으로 다시 열린다. 메뉴바에는 진행 `⚔︎`·결과 `⚑` 한 글자와 툴팁만 둔다. `--practice`·Finder 재열기는 창 대신 팝오버를 연다. 앱 재시작 뒤 전투 복원은 PR 11로 미룬다.
 - 이 맥은 여전히 Command Line Tools뿐이라 XCTest를 실행할 수 없다. 테스트 컴파일 오류를 CI 전에 잡는 스텁 XCTest 모듈을 scratch에 만드는 중이다. 그 검사는 통과 증거가 아니며 CI가 기준이다.
 - 승인 범위는 그대로다: 무료 분량 안의 수동 Actions 검증(필요한 커밋·푸시), 포크 앱 설치·실행. 공개 전환·PR 생성·배포는 하지 않는다.
