@@ -138,8 +138,12 @@ final class PokeAPIClientCancellationTests: XCTestCase {
         }
         let triggered = await client.didTriggerRESTIndexBuild
         XCTAssertTrue(triggered)
+        // Wait for the whole crawl (one request per species but Ditto): tearDown unregisters the stub, and a crawl
+        // still running then would reach the real PokéAPI. Slow runners need more than the quiesce window.
+        let crawl = PokemonAssets.animatedSpeciesIDs.filter { $0 != PokemonOdds.dittoSpeciesID }.count
+        let finished = await waitUntil(timeout: 60) { PokeAPIStubProtocol.count("species") >= crawl }
+        XCTAssertTrue(finished, "the crawl asked for \(PokeAPIStubProtocol.count("species")) of \(crawl) species")
         await quiesce()
-        XCTAssertGreaterThan(PokeAPIStubProtocol.count("species"), 0, "the crawl ran against the stub")
     }
 
     func testCancelledDetailsRequestThrowsInsteadOfServingAndCachingTheStaleDiskEntry() async throws {
