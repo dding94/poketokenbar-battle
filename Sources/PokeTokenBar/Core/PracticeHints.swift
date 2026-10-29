@@ -37,13 +37,25 @@ struct PracticeTypeChart: Decodable, Equatable, Sendable {
         }
         return product
     }
+
+    /// What a damaging move does to `defenders`, as a hint: the type multiplier, except that fixed-damage
+    /// moves (Night Shade, Seismic Toss, one-hit KOs) only ever hit as x1 or are immune (x0). nil for status
+    /// moves, variable-type moves (their real type is not public) and unknown types.
+    func effectiveness(of move: PracticeMoveInfo, against defenders: [String]) -> Double? {
+        guard !move.isStatus, !move.variableType,
+              let multiplier = multiplier(attack: move.type, defenders: defenders) else { return nil }
+        return move.fixedDamage ? (multiplier == 0 ? 0 : 1) : multiplier
+    }
 }
 
 /// What the selection screen says about a pairing, from public information only.
 struct PracticeMatchup: Equatable, Sendable {
     enum Order: Equatable, Sendable { case playerFirst, opponentFirst, speedTie }
-    /// Best multiplier among the player's damaging moves against the opponent's types (1 when it has
-    /// none), and the moves that reach it (Showdown ids, in the player's move order).
+    /// Best multiplier among the player's damaging moves against the opponent's types, 0 when the player has
+    /// no damaging move at all. Fixed-damage moves count as 1 (0 when immune) and variable-type moves as 1.
+    /// `bestMoveIDs` are the moves that reach it (Showdown ids, in the player's move order) whenever
+    /// `bestOffense != 1`, so below 1 and 0 name the least bad moves; a neutral best, or no damaging move,
+    /// leaves it empty.
     var bestOffense: Double
     var bestMoveIDs: [String]
     /// Worst case of the opponent's own types against the player's types, as if it used moves of

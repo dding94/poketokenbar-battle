@@ -87,16 +87,16 @@ final class PracticeSession {
     var matchup: PracticeMatchup? {
         guard let chart = typeChart, let player = player?.snapshot, let opponent = opponent?.snapshot else { return nil }
         let opponentTypes = opponent.publicInfo.types
+        // `effectiveness` is nil for variable-type moves (real type unknown), which then count as neutral.
         let offense: [(id: String, multiplier: Double)] = player.set.moves.compactMap { slug in
-            guard let info = moveInfo[Self.showdownID(slug)], !info.isStatus,
-                  let multiplier = chart.multiplier(attack: info.type, defenders: opponentTypes) else { return nil }
-            return (info.id, multiplier)
+            guard let info = moveInfo[Self.showdownID(slug)], !info.isStatus else { return nil }
+            return (info.id, chart.effectiveness(of: info, against: opponentTypes) ?? 1)
         }
-        let best = offense.map(\.multiplier).max() ?? 1
+        let best = offense.map(\.multiplier).max() ?? 0
         let threat = opponentTypes.compactMap { chart.multiplier(attack: $0, defenders: player.publicInfo.types) }.max() ?? 1
         let playerSpeed = player.publicInfo.stats["spe"] ?? 0, opponentSpeed = opponent.publicInfo.stats["spe"] ?? 0
         return PracticeMatchup(
-            bestOffense: best, bestMoveIDs: best > 1 ? offense.filter { $0.multiplier == best }.map(\.id) : [],
+            bestOffense: best, bestMoveIDs: best != 1 && !offense.isEmpty ? offense.filter { $0.multiplier == best }.map(\.id) : [],
             threat: threat,
             order: playerSpeed > opponentSpeed ? .playerFirst : playerSpeed < opponentSpeed ? .opponentFirst : .speedTie,
             playerSpeed: playerSpeed, opponentSpeed: opponentSpeed,
@@ -106,13 +106,10 @@ final class PracticeSession {
     /// public types (`battle.view`); nil for unknown moves such as recharge or Struggle.
     func moveHint(_ moveID: String) -> PracticeMoveHint? {
         guard let info = moveInfo[moveID] else { return nil }
-        let multiplier: Double?
-        if info.isStatus { multiplier = nil }
-        else if let chart = typeChart, let types = battle?.view?.p2.types {
-            multiplier = chart.multiplier(attack: info.type, defenders: types)
-        } else { multiplier = nil }
-        return PracticeMoveHint(info: info, multiplier: multiplier,
-                                stab: battle?.view?.p1.types.contains(info.type) == true)
+        let multiplier = battle?.view.flatMap { view in typeChart?.effectiveness(of: info, against: view.p2.types) }
+        // Fixed damage has no STAB, and a variable-type move's real type is hidden.
+        let stab = !info.fixedDamage && !info.variableType && battle?.view?.p1.types.contains(info.type) == true
+        return PracticeMoveHint(info: info, multiplier: multiplier, stab: stab)
     }
     /// Automatic battles only: plays the rest of the battle at once without staging, so the result shows
     /// next. The playback still receives every event (summary and log stay complete).
@@ -207,7 +204,10 @@ final class PracticeSession {
                   let arguments = try? BattleJSON.encode(moves),
                   let text = try? engine.call(.describeMoves, arguments: [arguments]),
                   let described: Described = try? BattleJSON.decode(text) else { continue }
-            for info in described.moves { moveInfo[info.id] = info }
+            // Aliases ("vice-grip" -> "visegrip") are looked up by the saved slug, battles by the canonical id.
+            for (slug, info) in zip(moves, described.moves) {
+                moveInfo[info.id] = info; moveInfo[Self.showdownID(slug)] = info
+            }
         }
     }
     /// Showdown's id for a move slug or name: lowercase letters and digits only ("volt-tackle" -> "volttackle").
