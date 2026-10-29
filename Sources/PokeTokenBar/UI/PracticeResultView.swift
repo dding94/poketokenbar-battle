@@ -7,6 +7,8 @@ import SwiftUI
 struct PracticeResultView: View {
     @Bindable var session: PracticeSession
     let battle: PracticeBattle
+    /// What this battle did to the practice record; `PracticeScreen` passes `session.lastRecord`.
+    let record: PracticeRecordUpdate?
     let l: L
     let artwork: Bool
 

@@ -351,6 +351,8 @@ struct PracticeSideCard: View {
     var reveal: PracticeReveal?
     /// A wild opponent reads "야생 이상해꽃" as in the games: the tag takes the "Foe" label's place.
     var wild = false
+    /// How the opponent picks its moves (`PracticeTemperament`); nil for my own side.
+    var temperament: PracticeTemperament?
 
     private var revealedMoves: [String] { reveal?.moves ?? side.moves }
     private var revealedAbility: String? {

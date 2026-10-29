@@ -7,9 +7,15 @@ import SwiftUI
 @MainActor
 struct PracticeSelectionView: View {
     @Bindable var session: PracticeSession
+    /// The record line and today's opponent; `PracticeScreen` passes the session's values.
+    let progress: PracticeSelectionProgress
     let l: L
     let artwork: Bool
     @State private var changingPlayer = false
+
+    /// The manual turn limit the mode picker names: Core's practice limit (03B-5, 15 s). Until Core exposes its
+    /// constant this mirrors it; switch to Core's value when both land.
+    static let manualTurnSeconds = 15
 
     private var eligible: [PracticeCandidate] { session.roster?.eligible ?? [] }
 
@@ -224,13 +230,86 @@ struct PracticeSelectionView: View {
             .lineLimit(1)
     }
 
-    /// One opponent; a wild one adds its rarity, shininess and the wild tag on a second line, the way
-    /// Home's companion header shows them.
+    /// One opponent row; selected, it opens the paired stats and the matchup card under it.
     private func opponentRow(_ candidate: PracticeCandidate, number: Int?) -> some View {
         let selected = candidate.id == session.opponentID
+        return PracticeOpponentRow(candidate: candidate, temperament: candidate.temperament, selected: selected,
+                                   number: number, l: l, artwork: artwork,
+                                   onSelect: { session.opponentID = candidate.id }) {
+            if selected, let mine = session.player?.snapshot?.publicInfo.stats,
+               let theirs = candidate.snapshot?.publicInfo.stats {
+                PracticeStatComparison(mine: mine, theirs: theirs, l: l)
+                if let matchup = session.matchup {
+                    PracticeMatchupCard(matchup: matchup, playerSnapshot: session.player?.snapshot,
+                                        playerLevel: session.player?.snapshot?.set.level ?? 0,
+                                        opponentLevel: candidate.snapshot?.set.level ?? 0, l: l, artwork: artwork)
+                }
+                Text(l.practiceRevealHint).font(.caption2).foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var blockedSection: some View {
+        let blocked = session.roster?.candidates.filter { $0.snapshot == nil } ?? []
+        if !blocked.isEmpty {
+            DisclosureGroup(l.practiceBlocked(blocked.count)) {
+                VStack(alignment: .leading, spacing: 3) {
+                    ForEach(blocked) { row in
+                        Text("\(row.name) — \(row.blockedReason ?? l.practiceMissingInfo)")
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+                .padding(.top, 4)
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+    }
+
+    // MARK: Mode
+
+    private var modeSection: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Picker(l.practiceMode, selection: $session.mode) {
+                Text(l.practiceManualPerTurn(Self.manualTurnSeconds)).tag(PracticeBattle.Mode.manual)
+                Text(l.practiceAuto).tag(PracticeBattle.Mode.automatic)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            Text(session.mode == .manual ? l.practiceAutoPickHint : l.practiceAutoModeHint)
+                .font(.caption2).foregroundStyle(.secondary)
+        }
+    }
+}
+
+/// One opponent in the selection list: a radio, the sprite, and the name and level over the types. A wild one adds
+/// its shininess, rarity and the wild tag, the way Home's companion header shows them. Selected, `detail` opens
+/// under it.
+@MainActor
+struct PracticeOpponentRow<Detail: View>: View {
+    let candidate: PracticeCandidate
+    /// The tag next to the types (`PracticeCandidate.temperament`); nil hides it.
+    let temperament: PracticeTemperament?
+    let selected: Bool
+    var number: Int?
+    let l: L
+    let artwork: Bool
+    let onSelect: () -> Void
+    let detail: Detail
+
+    init(candidate: PracticeCandidate, temperament: PracticeTemperament?, selected: Bool, number: Int? = nil,
+         l: L, artwork: Bool, onSelect: @escaping () -> Void, @ViewBuilder detail: () -> Detail) {
+        self.candidate = candidate; self.temperament = temperament; self.selected = selected; self.number = number
+        self.l = l; self.artwork = artwork; self.onSelect = onSelect; self.detail = detail()
+    }
+
+    var body: some View {
         let font: Font = .callout.weight(selected ? .semibold : .regular)
         return VStack(alignment: .leading, spacing: 8) {
-            Button { session.opponentID = candidate.id } label: {
+            Button(action: onSelect) {
                 HStack(spacing: 8) {
                     Image(systemName: selected ? "largecircle.fill.circle" : "circle")
                         .foregroundStyle(selected ? Color.accentColor : Color.secondary)
@@ -259,57 +338,13 @@ struct PracticeSelectionView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            if selected, let mine = session.player?.snapshot?.publicInfo.stats,
-               let theirs = candidate.snapshot?.publicInfo.stats {
-                PracticeStatComparison(mine: mine, theirs: theirs, l: l)
-                if let matchup = session.matchup {
-                    PracticeMatchupCard(matchup: matchup, playerSnapshot: session.player?.snapshot,
-                                        playerLevel: session.player?.snapshot?.set.level ?? 0,
-                                        opponentLevel: candidate.snapshot?.set.level ?? 0, l: l, artwork: artwork)
-                }
-                Text(l.practiceRevealHint).font(.caption2).foregroundStyle(.tertiary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+            if selected { detail }
         }
         .padding(8)
         .background(selected ? Color.accentColor.opacity(0.08) : Color.secondary.opacity(0.04))
         .clipShape(RoundedRectangle(cornerRadius: 10))
         .overlay(RoundedRectangle(cornerRadius: 10)
             .strokeBorder(selected ? Color.accentColor.opacity(0.35) : Color.clear))
-    }
-
-    @ViewBuilder
-    private var blockedSection: some View {
-        let blocked = session.roster?.candidates.filter { $0.snapshot == nil } ?? []
-        if !blocked.isEmpty {
-            DisclosureGroup(l.practiceBlocked(blocked.count)) {
-                VStack(alignment: .leading, spacing: 3) {
-                    ForEach(blocked) { row in
-                        Text("\(row.name) — \(row.blockedReason ?? l.practiceMissingInfo)")
-                            .fixedSize(horizontal: false, vertical: true)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                }
-                .padding(.top, 4)
-            }
-            .font(.caption)
-            .foregroundStyle(.secondary)
-        }
-    }
-
-    // MARK: Mode
-
-    private var modeSection: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Picker(l.practiceMode, selection: $session.mode) {
-                Text(l.practiceManualPerTurn).tag(PracticeBattle.Mode.manual)
-                Text(l.practiceAuto).tag(PracticeBattle.Mode.automatic)
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            Text(session.mode == .manual ? l.practiceAutoPickHint : l.practiceAutoModeHint)
-                .font(.caption2).foregroundStyle(.secondary)
-        }
     }
 }
 

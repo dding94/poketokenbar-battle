@@ -1678,7 +1678,7 @@ extension L {
     var practiceYou: String { lang == .ko ? "나" : "You" }
     var practiceFoe: String { lang == .ko ? "상대" : "Foe" }
     var practiceRevealHint: String { lang == .ko ? "기술·특성은 배틀 중 처음 쓸 때 공개돼요" : "Moves and abilities are revealed the first time they are used" }
-    var practiceManualPerTurn: String { lang == .ko ? "직접 조작 · 턴당 30초" : "Manual · 30s per turn" }
+    func practiceManualPerTurn(_ seconds: Int) -> String { lang == .ko ? "직접 조작 · 턴당 30초" : "Manual · 30s per turn" }   // RED stub
     var practiceAutoPickHint: String { lang == .ko ? "시간이 지나면 기술이 자동으로 골라져요" : "When time runs out, a move is picked for you" }
     var practiceAutoModeHint: String { lang == .ko ? "두 개체가 같은 자동 정책으로 겨뤄요" : "Both Pokémon follow the same automatic policy" }
     var practiceStartBattle: String { lang == .ko ? "배틀 시작" : "Start battle" }
@@ -1902,4 +1902,22 @@ extension L {
     }
     var practiceWildTag: String { lang == .ko ? "야생" : "Wild" }
     var practiceOwnedHeader: String { lang == .ko ? "내 개체" : "Your collection" }
+    // Practice records, today's opponent and opponent temperaments (03B-5). RED stubs.
+    var practiceSaveUntouched: String { "" }
+    func practiceRecordTotals(wins: Int, losses: Int, draws: Int) -> String { "" }
+    func practiceRecordStreak(streak: Int, best: Int) -> String? { nil }
+    var practiceRecordEmpty: String { "" }
+    var practiceDailyTitle: String { "" }
+    func practiceDailyStarsSpoken(earned: Int, total: Int) -> String { "" }
+    func practiceDailyGoal(_ goal: PracticeDailyGoal) -> String { "" }
+    func practiceDailyGoalShort(_ goal: PracticeDailyGoal) -> String { "" }
+    var practiceDailySearching: String { "" }
+    var practiceDailyUnavailable: String { "" }
+    var practiceTodayStars: String { "" }
+    func practiceTemperament(_ temperament: PracticeTemperament) -> String { "" }
+    func practiceTemperamentHint(_ temperament: PracticeTemperament) -> String { "" }
+    var practiceStreakStarted: String { "" }
+    func practiceStreakContinued(_ streak: Int) -> String { "" }
+    func practiceStreakEnded(_ streak: Int) -> String { "" }
+    var practiceBestStreak: String { "" }
 }

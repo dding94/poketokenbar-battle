@@ -131,9 +131,11 @@ final class PracticeScreenRenderingTests: XCTestCase {
     /// Spaces and letter case are ignored: Vision reads small "Lv.50" as "LV.50" on CI. The multiplication
     /// sign reads as a letter x as often as not, so "×2" and "x2" are the same needle. Thin glyphs collapse
     /// too: CI read "Iron Tail" as "Iron Tall", so i, l, 1 and | compare equal. Dashes read as hyphens, so the
-    /// level range "Lv.47–53" matches however its en dash is recognized.
+    /// level range "Lv.47–53" matches however its en dash is recognized. Apostrophes are dropped: "Today's"
+    /// comes back straight, curly or missing.
     private static func normalized(_ text: String) -> String {
         String(text.replacingOccurrences(of: " ", with: "").replacingOccurrences(of: "×", with: "x").lowercased()
+            .filter { !"'’‘`".contains($0) }
             .map { "l1|".contains($0) ? "i" : "–—−".contains($0) ? "-" : $0 })
     }
 
@@ -171,7 +173,8 @@ final class PracticeScreenRenderingTests: XCTestCase {
 
     // MARK: Stages
 
-    /// Selection: my entry with its level, the opponent list, the 30 s manual mode and a start button.
+    /// Selection: my entry with its level, the opponent list, the manual mode with the practice turn limit and a
+    /// start button.
     func testSelectionShowsContendersModeAndStartButton() async throws {
         let session = makeSession()
         XCTAssertEqual(session.roster?.eligible.count, 2, "the synthetic save holds two eligible Pokémon")
@@ -180,7 +183,8 @@ final class PracticeScreenRenderingTests: XCTestCase {
         // The level sits next to a Korean name that en-US Vision mangles ("Lv.50" read as "#5450"), so the level
         // is asserted by data and OCR only checks that a level label renders.
         XCTAssertEqual(session.player?.snapshot?.set.level, 50)
-        let needles = ["Lv.", "Start battle", "30", "200"]   // level label, CTA, manual timer, rules caption
+        // level label, CTA, manual timer, rules caption
+        let needles = ["Lv.", "Start battle", "\(PracticeSelectionView.manualTurnSeconds)s per turn", "200"]
         let (text, bitmap) = try await waitForText(needles, in: host)
         assertRendered(needles, in: text)
         assertPopoverSized(host)
@@ -194,9 +198,11 @@ final class PracticeScreenRenderingTests: XCTestCase {
         session.start()
         XCTAssertEqual(session.battle?.phase, .running)
         XCTAssertEqual(session.battle?.request.moves.first?.id, "thunderbolt")
+        let seconds = try XCTUnwrap(session.battle?.remainingSeconds)
         let host = host(session)
-        // artwork: false renders move identifiers, so Pikachu's only move reads "Thunderbolt".
-        let needles = ["Thunderbolt", "PP", "Turn 1", "30s", "Forfeit"]
+        // artwork: false renders move identifiers, so Pikachu's only move reads "Thunderbolt". The clock shows
+        // whatever limit Core gives a practice turn.
+        let needles = ["Thunderbolt", "PP", "Turn 1", "\(seconds)s", "Forfeit"]
         let (text, bitmap) = try await waitForText(needles, in: host)
         assertRendered(needles, in: text)
         assertPopoverSized(host)
@@ -645,9 +651,12 @@ final class PracticeScreenRenderingTests: XCTestCase {
         XCTAssertEqual(foe.name, wild.name, "the foe's name follows the battle, not the selection")
         XCTAssertEqual(foe.snapshot?.instanceID, wild.snapshot?.instanceID, "the foe's snapshot follows the battle")
         XCTAssertTrue(foe.wild, "the foe keeps its wild tag")
+        XCTAssertNotNil(wild.temperament, "a wild opponent with a snapshot has a temperament")
+        XCTAssertEqual(foe.temperament, wild.temperament, "the foe's temperament follows the battle")
         let mine = board.sideCard(.player, view.p1)
         XCTAssertEqual(mine.name, player.name)
         XCTAssertEqual(mine.snapshot?.instanceID, player.snapshot?.instanceID)
+        XCTAssertNil(mine.temperament, "my own side runs no temperament")
 
         let host = host(session)
         let (_, bitmap) = try await waitForText(["Forfeit"], in: host)
@@ -680,6 +689,324 @@ final class PracticeScreenRenderingTests: XCTestCase {
         XCTAssertEqual(session.playerID, player, "the same player is re-assigned, so no player change fires")
         try await waitForWild(session) { $0 == .searching }
         XCTAssertEqual(session.wildState, .searching, "the screen must search once the player is back")
+    }
+
+    // MARK: Records, today's opponent and temperaments (03B-5)
+    //
+    // The session keeps its defaults until Core lands records and today's opponent, so these tests feed the new
+    // views plain values: `PracticeSelectionProgress`, `PracticeRecordUpdate`, a hand-made daily candidate and
+    // explicit temperaments. Tags and stars are too small or symbolic for Vision (defect-log, 표시·UI): they are
+    // checked by size and pixels, and OCR reads only the caption-sized words.
+
+    /// A candidate with a hand-made snapshot. Rows and cards read only its set and public types, so no engine runs.
+    static func syntheticCandidate(id: String, name: String, species: Int, level: Int, types: [String],
+                                   origin: PracticeOrigin = .owned) -> PracticeCandidate {
+        let set = BattleSet(speciesNum: species, form: nil, level: level, gender: .male, nature: "adamant",
+                            ability: "overgrow", moves: ["tackle"], ivs: [:], shiny: false)
+        let info = BattlePublicInfo(speciesNum: species, species: name, level: level, types: types,
+                                    stats: ["hp": 80, "atk": 82, "def": 83, "spa": 100, "spd": 100, "spe": 80])
+        let snapshot = BattleSnapshot(schemaVersion: 1, instanceID: id, engineHash: "", rulesVersion: "",
+                                      policyVersion: "", set: set, publicInfo: info)
+        return PracticeCandidate(id: id, name: name, snapshot: snapshot, blockedReason: nil, origin: origin)
+    }
+
+    /// Today's opponent as Core hands it over: a wild candidate whose id carries the daily prefix.
+    static var dailyCandidate: PracticeCandidate {
+        syntheticCandidate(id: PracticeDaily.idPrefix + "2026-10-30", name: "이상해꽃", species: 3, level: 52,
+                           types: ["Grass", "Poison"], origin: .wild(rarity: .rare, shiny: false))
+    }
+
+    /// 12 wins, 5 losses, a draw, a 3-win streak with a best of 7, and today's first star.
+    static var sampleRecords: PracticeRecords {
+        PracticeRecords(wins: 12, losses: 5, draws: 1, streak: 3, bestStreak: 7, dailyDay: "2026-10-30", dailyStars: [.win])
+    }
+
+    /// Room the result screen must leave for log lines. Its least height already holds the log card's title and
+    /// padding (the scrolling lines shrink to nothing), so this is about three lines on top.
+    private static let resultLogMinimum: CGFloat = 48
+
+    /// Raw RGBA bytes of a capture, to tell two renders apart.
+    private static func pixels(_ bitmap: NSBitmapImageRep) -> Data {
+        guard let data = bitmap.bitmapData else { return Data() }
+        return Data(bytes: data, count: bitmap.bytesPerRow * bitmap.pixelsHigh)
+    }
+
+    /// Saturated gold-to-orange pixels. Earned stars are drawn gold, which OCR cannot read; more earned stars
+    /// draw more of it.
+    private static func goldPixels(_ bitmap: NSBitmapImageRep) -> Int {
+        guard let data = bitmap.bitmapData, bitmap.bitsPerPixel == 32 else { return 0 }
+        var count = 0
+        for y in 0..<bitmap.pixelsHigh {
+            let row = data + y * bitmap.bytesPerRow
+            for x in 0..<bitmap.pixelsWide {
+                let r = row[x * 4], g = row[x * 4 + 1], b = row[x * 4 + 2]
+                if r > 215, g > 120, g < 215, b < 90 { count += 1 }
+            }
+        }
+        return count
+    }
+
+    /// Recognized lines with their boxes (Vision's normalized coordinates: a larger y is higher on screen).
+    private func recognizedLines(_ bitmap: NSBitmapImageRep) throws -> [(text: String, box: CGRect)] {
+        let request = VNRecognizeTextRequest()
+        request.recognitionLevel = .accurate
+        request.recognitionLanguages = ["en-US"]
+        try VNImageRequestHandler(cgImage: XCTUnwrap(bitmap.cgImage)).perform([request])
+        return (request.results ?? []).compactMap { observation in
+            observation.topCandidates(1).first.map { ($0.string, observation.boundingBox) }
+        }
+    }
+
+    /// The record line: totals with the running streak and the best one; before any battle a first-time line
+    /// instead of zeros.
+    func testRecordsLineShowsTotalsStreakAndBest() async throws {
+        let width = PopoverMetrics.scrollContentWidth
+        let host = hostView(PracticeRecordsLine(records: Self.sampleRecords, l: L(.en)).padding(8), width: width, height: 40)
+        let needles = ["12W 5L 1D", "3-win streak", "best 7"]
+        let (text, bitmap) = try await waitForText(needles, in: host)
+        try save(bitmap, as: "practice-records-line.png")
+        assertRendered(needles, in: text)
+
+        let first = hostView(PracticeRecordsLine(records: PracticeRecords(), l: L(.en)).padding(8), width: width, height: 40)
+        let (firstText, _) = try await waitForText(["No record yet"], in: first)
+        assertRendered(["No record yet"], in: firstText)
+        XCTAssertFalse(Self.normalized(firstText).contains("0w"), "no zero totals before the first battle: \(firstText)")
+    }
+
+    /// What an empty hosting view reports as its fitting width (10pt, not 0), the baseline for "draws nothing".
+    private static var emptyWidth: CGFloat { NSHostingView(rootView: EmptyView()).fittingSize.width }
+
+    /// The record line stays one unscaled line with three-digit totals in both languages.
+    func testRecordsLineFitsTheScrollColumn() {
+        let records = PracticeRecords(wins: 999, losses: 999, draws: 99, streak: 99, bestStreak: 999)
+        for lang in [AppLanguage.en, .ko] {
+            let size = NSHostingView(rootView: PracticeRecordsLine(records: records, l: L(lang))).fittingSize
+            XCTAssertGreaterThan(size.width, Self.emptyWidth + 100, "\(lang.rawValue): no record line: \(size)")
+            XCTAssertLessThanOrEqual(size.width, PopoverMetrics.scrollContentWidth, "\(lang.rawValue): \(size)")
+        }
+    }
+
+    /// The tag shows for every temperament in a width an opponent row can take, drops to its symbol when asked,
+    /// and is not there at all without a temperament.
+    func testTemperamentTagSizes() {
+        let empty = Self.emptyWidth
+        for lang in [AppLanguage.en, .ko] {
+            for temperament in PracticeTemperament.allCases {
+                let full = NSHostingView(rootView: PracticeTemperamentTag(temperament: temperament, l: L(lang))).fittingSize
+                let compact = NSHostingView(rootView: PracticeTemperamentTag(temperament: temperament, l: L(lang),
+                                                                             compact: true)).fittingSize
+                XCTAssertGreaterThan(full.width, empty + 10, "\(lang.rawValue) \(temperament): no tag: \(full)")
+                XCTAssertLessThanOrEqual(full.width, 80, "\(lang.rawValue) \(temperament): \(full)")
+                XCTAssertLessThan(compact.width, full.width, "\(lang.rawValue) \(temperament): the compact tag keeps its word")
+            }
+        }
+        XCTAssertEqual(NSHostingView(rootView: PracticeTemperamentTag(temperament: nil, l: L(.en))).fittingSize.width, empty,
+                       "no temperament, no tag")
+    }
+
+    /// Owned, wild and today's rows are one row view, and it draws the temperament next to the types. The widest
+    /// English rows still fit the scroll column: shiny, legendary, two long types, the wild tag and any temperament,
+    /// and an owned row with its number.
+    func testOpponentRowsDrawTheTemperamentAndFitTheColumn() async throws {
+        let wild = Self.syntheticCandidate(id: "wild-widest", name: "Crabominable", species: 308, level: 100,
+                                           types: ["Fighting", "Psychic"], origin: .wild(rarity: .legendary, shiny: true))
+        let owned = Self.syntheticCandidate(id: "owned-widest", name: "Crabominable", species: 308, level: 100,
+                                            types: ["Fighting", "Psychic"])
+        let width = PopoverMetrics.scrollContentWidth
+        for (candidate, number) in [(wild, nil), (owned, 12)] as [(PracticeCandidate, Int?)] {
+            func row(_ temperament: PracticeTemperament?, _ lang: AppLanguage = .en) -> some View {
+                PracticeOpponentRow(candidate: candidate, temperament: temperament, selected: false, number: number,
+                                    l: L(lang), artwork: false, onSelect: {}) { EmptyView() }
+            }
+            let with = try Self.capture2x(hostView(row(.aggressive), width: width, height: 64))
+            if number == nil { try save(with, as: "practice-row-temperament.png") }
+            let without = try Self.capture2x(hostView(row(nil), width: width, height: 64))
+            XCTAssertNotEqual(Self.pixels(with), Self.pixels(without), "\(candidate.id): the row draws no temperament")
+            for lang in [AppLanguage.en, .ko] {
+                for temperament in PracticeTemperament.allCases {
+                    let size = NSHostingController(rootView: row(temperament, lang))
+                        .sizeThatFits(in: CGSize(width: width, height: .greatestFiniteMagnitude))
+                    XCTAssertLessThanOrEqual(size.width, width + 0.5, "\(candidate.id) \(lang.rawValue) \(temperament): \(size)")
+                }
+            }
+        }
+    }
+
+    /// Today's opponent: the title, the three goals worded from their numbers with today's stars, and the
+    /// opponent's row. Earned stars are gold, so more stars draw more gold; the card fits the column in both
+    /// languages.
+    func testDailyCardShowsGoalsStarsAndTheOpponent() async throws {
+        func card(_ stars: Set<PracticeDailyGoal>, _ lang: AppLanguage = .en) -> some View {
+            PracticeDailyCard(candidate: Self.dailyCandidate, state: .ready, stars: stars, l: L(lang), onRetry: {}) { candidate in
+                PracticeOpponentRow(candidate: candidate, temperament: .tactical, selected: false, l: L(lang),
+                                    artwork: false, onSelect: {}) { EmptyView() }
+            }
+        }
+        let width = PopoverMetrics.scrollContentWidth
+        let needles = ["Today's opponent", "Win within \(PracticeDailyGoal.quickTurns)", "HP left", "1/3"]
+        let (text, bitmap) = try await waitForText(needles, in: hostView(card([.win]), width: width, height: 200))
+        try save(bitmap, as: "practice-daily-card.png")
+        assertRendered(needles, in: text)
+
+        let none = Self.goldPixels(try Self.capture2x(hostView(card([]), width: width, height: 200)))
+        let one = Self.goldPixels(try Self.capture2x(hostView(card([.win]), width: width, height: 200)))
+        let all = Self.goldPixels(try Self.capture2x(hostView(card(Set(PracticeDailyGoal.allCases)), width: width, height: 200)))
+        XCTAssertLessThan(none, one, "an earned star is drawn gold")
+        XCTAssertLessThan(one, all, "every earned star is drawn gold")
+        for lang in [AppLanguage.en, .ko] {
+            let size = NSHostingController(rootView: card([.win], lang))
+                .sizeThatFits(in: CGSize(width: width, height: .greatestFiniteMagnitude))
+            XCTAssertLessThanOrEqual(size.width, width + 0.5, "\(lang.rawValue): \(size)")
+        }
+    }
+
+    /// While today's opponent is missing, its row's place says what the search is doing, like the wild notice:
+    /// searching, or unavailable with a retry. The goals stay, so today's stars do not vanish with the network.
+    func testDailyCardWithoutTheOpponentShowsTheSearchAndARetry() async throws {
+        let width = PopoverMetrics.scrollContentWidth
+        func card(_ state: PracticeWildState) -> some View {
+            PracticeDailyCard(candidate: nil, state: state, stars: [.win], l: L(.en), onRetry: {}) { _ in EmptyView() }
+        }
+        let needles = ["Finding today's opponent", "Win within"]
+        let (text, bitmap) = try await waitForText(needles, in: hostView(card(.searching), width: width, height: 160))
+        try save(bitmap, as: "practice-daily-searching.png")
+        assertRendered(needles, in: text)
+
+        let failed = ["Couldn't find today's opponent", "Retry", "Win within"]
+        let (failedText, failedBitmap) = try await waitForText(failed, in: hostView(card(.unavailable), width: width, height: 160))
+        try save(failedBitmap, as: "practice-daily-unavailable.png")
+        assertRendered(failed, in: failedText)
+    }
+
+    /// The selection screen with progress: the record line first, then my entry, then today's opponent above the
+    /// wild ones, with the mode and the start button pinned at the bottom of the 520pt body. Sample progress
+    /// until Core fills the session; the screen reads it only through `PracticeSelectionProgress`.
+    func testSelectionShowsRecordsAndTodaysOpponentAboveTheWildOnes() async throws {
+        let session = makeSession(Self.stagedState(),
+                                  wildSource: PracticeWildSource(provider: WildLineProvider(), details: WildLineProvider()))
+        session.findWildOpponents()
+        try await waitForWild(session) { $0 == .ready }
+        XCTAssertEqual(session.wildState, .ready, "the stubbed search must finish offline")
+        let progress = PracticeSelectionProgress(records: Self.sampleRecords, daily: Self.dailyCandidate, dailyState: .ready)
+        for lang in [AppLanguage.en, .ko] {
+            let view = PracticeSelectionView(session: session, progress: progress, l: L(lang), artwork: false)
+            let host = hostView(view, width: PopoverMetrics.contentWidth, height: Self.boardBodyHeight)
+            guard lang == .en else {
+                let (_, bitmap) = try await waitForText(["1/3"], in: host)
+                try save(bitmap, as: "practice-step5-selection-ko.png")
+                continue
+            }
+            let needles = ["12W 5L 1D", "3-win streak", "Today's opponent", "Win within", "Wild opponents", "Start battle"]
+            let (text, bitmap) = try await waitForText(needles, in: host)
+            try save(bitmap, as: "practice-step5-selection-en.png")
+            assertRendered(needles, in: text)
+            let lines = try recognizedLines(bitmap)
+            func top(_ needle: String) throws -> CGFloat {
+                try XCTUnwrap(lines.first { Self.normalized($0.text).contains(Self.normalized(needle)) }, needle).box.midY
+            }
+            XCTAssertGreaterThan(try top("3-win streak"), try top("Today's opponent"), "the record line leads")
+            XCTAssertGreaterThan(try top("Today's opponent"), try top("Wild opponents"), "today's opponent sits above the wild ones")
+        }
+    }
+
+    /// The result card words the streak change: continued, started and ended, and only today's opponent shows
+    /// today's stars. The stars this battle earned are highlighted, which only pixels show.
+    func testResultRecordWordsTheStreakAndHighlightsNewStars() async throws {
+        func host(_ update: PracticeRecordUpdate) -> NSView {
+            hostView(PracticeResultRecord(update: update, l: L(.en)), width: PopoverMetrics.contentWidth, height: 70)
+        }
+        let continued = PracticeRecordUpdate(outcome: .win, streak: 4, bestStreak: 4, endedStreak: nil, daily: true,
+                                             newStars: [.quickWin], stars: [.win, .quickWin])
+        let needles = ["4-win streak", "Today's stars"]
+        let (text, bitmap) = try await waitForText(needles, in: host(continued))
+        try save(bitmap, as: "practice-result-record.png")
+        assertRendered(needles, in: text)
+
+        let ended = PracticeRecordUpdate(outcome: .loss, streak: 0, bestStreak: 7, endedStreak: 7, daily: false,
+                                         newStars: [], stars: [])
+        let (endedText, _) = try await waitForText(["Streak ended at 7"], in: host(ended))
+        assertRendered(["Streak ended at 7"], in: endedText)
+        XCTAssertFalse(Self.normalized(endedText).contains(Self.normalized("Today's stars")),
+                       "only today's opponent shows today's stars: \(endedText)")
+
+        let started = PracticeRecordUpdate(outcome: .win, streak: 1, bestStreak: 7, endedStreak: nil, daily: false,
+                                           newStars: [], stars: [])
+        let (startedText, _) = try await waitForText(["Streak started"], in: host(started))
+        assertRendered(["Streak started"], in: startedText)
+
+        // The same stars, once all earned earlier and once partly by this battle: only the highlight differs.
+        let earlier = PracticeRecordUpdate(outcome: .win, streak: 4, bestStreak: 4, endedStreak: nil, daily: true,
+                                           newStars: [], stars: [.win, .quickWin])
+        let fresh = try Self.capture2x(host(continued))
+        let old = try Self.capture2x(host(earlier))
+        XCTAssertNotEqual(Self.pixels(fresh), Self.pixels(old), "a star earned by this battle is highlighted")
+    }
+
+    /// The result screen with the record card fits its 520pt body in both languages: the card takes room from the
+    /// log, never from the actions. Measured as the screen's least height (the log shrinks first) plus room for
+    /// two log lines; in English the actions are also read off the rendered body.
+    func testResultWithTheRecordCardFitsTheBody() async throws {
+        let session = makeSession(Self.stagedState())
+        try chooseVoltTackle(session)
+        for _ in 0..<120 where session.battle?.phase != .finished || session.playback?.isPlaying != false {
+            now += 0.5
+            session.tick()
+        }
+        let battle = try XCTUnwrap(session.battle)
+        XCTAssertEqual(battle.phase, .finished, "Volt Tackle knocks Magikarp out in one turn")
+        let record = PracticeRecordUpdate(outcome: .win, streak: 4, bestStreak: 4, endedStreak: nil, daily: true,
+                                          newStars: [.quickWin, .healthyWin], stars: Set(PracticeDailyGoal.allCases))
+        let width = PopoverMetrics.contentWidth
+        for lang in [AppLanguage.en, .ko] {
+            func least(_ record: PracticeRecordUpdate?) -> CGFloat {
+                let view = PracticeResultView(session: session, battle: battle, record: record, l: L(lang), artwork: false)
+                return NSHostingController(rootView: view.frame(width: width))
+                    .sizeThatFits(in: CGSize(width: width, height: 0)).height
+            }
+            let with = least(record), bare = least(nil)
+            XCTAssertGreaterThan(with, bare, "\(lang.rawValue): the record card is on the result screen")
+            XCTAssertLessThanOrEqual(with + Self.resultLogMinimum, Self.boardBodyHeight,
+                                     "\(lang.rawValue): the result needs \(with)pt plus its log in a \(Self.boardBodyHeight)pt body")
+            let view = PracticeResultView(session: session, battle: battle, record: record, l: L(lang), artwork: false)
+            let host = hostView(view, width: width, height: Self.boardBodyHeight)
+            guard lang == .en else {
+                let (_, bitmap) = try await waitForText(["%"], in: host)
+                try save(bitmap, as: "practice-step5-result-ko.png")
+                continue
+            }
+            let needles = ["Victory", "4-win streak", "Today's stars", "Rematch", "New opponent", "Again on auto"]
+            let (text, bitmap) = try await waitForText(needles, in: host)
+            try save(bitmap, as: "practice-step5-result-en.png")
+            assertRendered(needles, in: text)
+        }
+    }
+
+    /// The foe's card shows its temperament, read off the battle's opponent; my own card has none.
+    func testFoeCardDrawsItsTemperament() async throws {
+        let session = makeSession(Self.stagedState())
+        session.mode = .manual
+        session.start()
+        let battle = try XCTUnwrap(session.battle)
+        let view = try XCTUnwrap(battle.view)
+        let board = PracticeBattleBoard(session: session, battle: battle, l: L(.en), artwork: false)
+        let foe = board.sideCard(.opponent, view.p2)
+        XCTAssertNotNil(foe.temperament, "an opponent with a snapshot has a temperament")
+        XCTAssertEqual(foe.temperament, battle.opponent?.temperament)
+        XCTAssertNil(board.sideCard(.player, view.p1).temperament)
+
+        var tagged = foe, bare = foe
+        tagged.temperament = .aggressive
+        bare.temperament = nil
+        let width = PopoverMetrics.contentWidth
+        let with = try Self.capture2x(hostView(tagged, width: width, height: 90))
+        let without = try Self.capture2x(hostView(bare, width: width, height: 90))
+        XCTAssertNotEqual(Self.pixels(with), Self.pixels(without), "the foe card draws no temperament")
+        for lang in [AppLanguage.en, .ko] {
+            let host = hostView(PracticeBattleBoard(session: session, battle: battle, l: L(lang), artwork: false),
+                                width: width, height: Self.boardBodyHeight)
+            let (_, bitmap) = try await waitForText(["Lv."], in: host)
+            try save(bitmap, as: "practice-step5-board-\(lang.rawValue).png")
+        }
     }
 }
 

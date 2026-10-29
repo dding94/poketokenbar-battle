@@ -53,11 +53,11 @@ struct PracticeScreen: View {
     private var content: some View {
         switch stage {
         case .selection:
-            PracticeSelectionView(session: session, l: l, artwork: artwork)
+            PracticeSelectionView(session: session, progress: PracticeSelectionProgress(session), l: l, artwork: artwork)
         case .battle(let battle):
             PracticeBattleBoard(session: session, battle: battle, l: l, artwork: artwork)
         case .result(let battle):
-            PracticeResultView(session: session, battle: battle, l: l, artwork: artwork)
+            PracticeResultView(session: session, battle: battle, record: session.lastRecord, l: l, artwork: artwork)
         }
     }
 
@@ -95,7 +95,7 @@ struct PracticeScreen: View {
                 // While a turn is being staged the clock is held; show the turn on screen, not the engine's next one.
                 let turn = session.playback?.beat?.turn ?? battle.view?.turn ?? 1
                 text = l.practiceTurnClock(turn, battle.remainingSeconds)
-                urgent = battle.remainingSeconds <= 10 && !battle.isPaused
+                urgent = Self.clockIsUrgent(remaining: battle.remainingSeconds, paused: battle.isPaused)
             }
         }
         return Text(text)
@@ -106,6 +106,9 @@ struct PracticeScreen: View {
             .padding(.horizontal, 8).padding(.vertical, 3)
             .background((urgent ? Color.orange : Color.secondary).opacity(0.12), in: Capsule())
     }
+
+    /// The turn clock turns orange near the end of a manual turn.
+    static func clockIsUrgent(remaining: Int, paused: Bool) -> Bool { remaining <= 10 && !paused }   // RED stub
 
     private var caption: some View {
         let text: String
