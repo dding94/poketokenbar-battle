@@ -1,8 +1,8 @@
 # 다음 AI를 위한 작업 인계
 
-최종 갱신: 2026-10-29. **PR 00·01·02 검증을 완료했다. 다음은 PR 03 → PR 03A다. 배틀 화면은 아직 없다.**
+최종 갱신: 2026-10-29. **PR 00·01·02·03 검증을 완료했다. PR 03A의 읽기 전용 연습전 테스트를 실행 중이다. 배틀 화면은 아직 없다.**
 
-## 진행 중인 작업 (2026-10-29 기준, PR 02 검증 완료 → PR 03 착수)
+## 진행 중인 작업 (2026-10-29 기준, PR 03 검증 완료 → PR 03A 착수)
 
 - 브랜치: `feat/local-practice-battle` (`main` 5e9af78에서 분기). 인수 시 모든 변경은 미커밋이었다. 사용자 승인으로 문서(`372eba0`)·PR 00(`c04769a`)·프로브(`0ddc584`)를 나누어 커밋·푸시했고 CI 수정은 `f1dad46`, `cc0b9fe`다. 이후 사용자 승인으로 별도 포크 앱을 설치·실행했으나 아래 격리 누락을 발견해 종료했다. 배포·공개 전환은 하지 않았다.
 - 문서 개정: `docs/BATTLE_PLAN.md`(새 구조, PR 00~13 + PR 03A, 부록 A), `docs/AI_HANDOFF.md`, `AGENTS.md`, `README.md`(고지), `CLAUDE.md`(첫 단락 경고 한 줄).
@@ -52,6 +52,18 @@
 1. PR 03 자동 선택 정책 v1과 최초 공개 이벤트를 구현하고 변경된 정책으로 결정성 코퍼스를 다시 실행한다.
 2. PR 02 → PR 03 → PR 03A(로컬 연습전) 순서로 진행한다. 설치·실행 및 계속 진행은 사용자가 승인했다.
 3. 사용자에게 연습전 시험 방법을 안내하고 멈춘다. 공개 전환은 필요하지 않아 private를 유지한다.
+
+### PR 03A-1 진행
+
+- RED [CI 40811448759](https://github.com/dding94/poketokenbar-battle/actions/runs/40811448759), `bb7a080`: `swift test --enable-code-coverage --filter "BattleEngineTests|BattleSnapshotTests|PracticeBattleTests"` 종료 1, 20건 실행·22 assertion 실패·skip 0. 연습전 8건 중 7건 실패, 기존 12건 및 잘못된 출전 거절 1건은 통과했다. 컴파일 오류 없이 실제 stub 동작을 확인했다.
+- 후보 목록은 값 복사한 CompanionState에서 활성/미방출 졸업 개체만 가져온다. 누락 정보는 한국어 이유와 함께 보류한다. 세션은 BattleSnapshot과 엔진만 소유하며 세이브/CompanionStore/네트워크 참조를 받지 않는다.
+- 30초 단조 시계 기한, 0.6초 자동 진행, 숨은 제한 거절 후 재선택, 정상 결과/기술 오류 분리, 닫기/재시작 시 엔진 해제를 구현했다. 로컬 `swift build` 종료 0. 원격 GREEN은 다음 검증이다.
+
+### PR 03 완료 증거
+
+- [CI 40811051440](https://github.com/dding94/poketokenbar-battle/actions/runs/40811051440), `7fa203c`, macOS 14·15: 각각 `swift test --enable-code-coverage --filter "BattleEngineTests|BattleSnapshotTests"` 종료 0, 12건 통과·실패/skip 0. `npm test` 종료 0, 31건 통과·실패/skip 0. `npm run corpus` 종료 0, 2,200판 Node/JSC 불일치 0·inputLog 재생/상태 왕복 실패 0·200턴 무승부 200건. `npm run compatibility` 종료 0, 649종/106폼/541기술 차이 0(조건 불충족 54개는 효과 성공으로 세지 않음).
+- 로컬 같은 코퍼스 종료 0. `PTB_FULL_ENGINE=1 npm run corpus:generate && npm run corpus:node` 뒤 최소화 결과와 비교 종료 0, 2,200판 동일. 제품 SHA-256 `5c949cd65373b2dde2b31660643e561a781fac06f9b237d28567a15acccb28da`.
+- 첫 수동 실행 요청은 gh의 기본 저장소가 upstream으로 해석되어 403·러너 미실행이었다. 이후 모든 gh 명령에 `-R dding94/poketokenbar-battle`를 명시한다. 엔진 전용 scope라 앱 전체/비밀값 job은 미실행이며 PR 03A 마지막 게이트에서 검증한다.
 
 ### PR 03 진행
 
