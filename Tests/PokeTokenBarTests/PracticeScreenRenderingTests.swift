@@ -112,8 +112,11 @@ final class PracticeScreenRenderingTests: XCTestCase {
         return (text, bitmap)
     }
 
-    /// Spaces and letter case are ignored: Vision reads small "Lv.50" as "LV.50" on CI.
-    private static func normalized(_ text: String) -> String { text.replacingOccurrences(of: " ", with: "").lowercased() }
+    /// Spaces and letter case are ignored: Vision reads small "Lv.50" as "LV.50" on CI. The multiplication
+    /// sign reads as a letter x as often as not, so "×2" and "x2" are the same needle.
+    private static func normalized(_ text: String) -> String {
+        text.replacingOccurrences(of: " ", with: "").replacingOccurrences(of: "×", with: "x").lowercased()
+    }
 
     private func assertRendered(_ needles: [String], in text: String,
                                 file: StaticString = #filePath, line: UInt = #line) {
@@ -276,5 +279,71 @@ final class PracticeScreenRenderingTests: XCTestCase {
         assertRendered(needles, in: text)
         XCTAssertTrue(session.resultSeen, "the result screen reports it was shown")
         assertPopoverSized(host)
+    }
+
+    // MARK: Decision hints
+
+    /// Selection: the matchup card under the selected opponent names the super-effective hit (Thunderbolt and
+    /// Volt Tackle are ×2 on Magikarp) and who moves first, with both public Speed stats.
+    func testSelectionShowsMatchupHints() async throws {
+        let session = makeSession(Self.stagedState())
+        XCTAssertEqual(session.player?.snapshot?.set.speciesNum, 25, "Pikachu is the default entry")
+        XCTAssertEqual(session.opponent?.snapshot?.set.speciesNum, 129, "Magikarp is the default opponent")
+        let mine = try XCTUnwrap(session.player?.snapshot?.publicInfo.stats["spe"])
+        let theirs = try XCTUnwrap(session.opponent?.snapshot?.publicInfo.stats["spe"])
+        let host = host(session)
+        // The stat bars show both numbers too, but never joined by "vs": only the speed line reads "98 vs 88".
+        let needles = ["\(mine) vs \(theirs)", "Start battle"]
+        let (text, bitmap) = try await waitForText(needles, in: host)
+        try save(bitmap, as: "practice-popover-matchup.png")
+        assertRendered(needles, in: text)
+        assertMultiplier("2", in: text)
+        assertPopoverSized(host)
+    }
+
+    /// A multiplier ("×2", often read as "x2") as a word of its own. A substring check would also pass on the
+    /// speed control's "1× 2×", which joins into "1x2x" once spaces are dropped.
+    private func assertMultiplier(_ value: String, in text: String,
+                                  file: StaticString = #filePath, line: UInt = #line) {
+        XCTAssertNotNil(text.range(of: "(^|\\s)[x×]\\s?\(value)(\\s|$)", options: [.regularExpression, .caseInsensitive]),
+                        "×\(value) not rendered. Seen: \(text)", file: file, line: line)
+    }
+
+    /// Manual battle: every move card carries its power line, and the cards add the matchup badge, STAB and
+    /// priority markers (Thunderbolt and Volt Tackle are super effective STAB moves; Quick Attack has priority).
+    func testBattleMoveCardsShowPowerEffectivenessAndMarkers() async throws {
+        let session = makeSession(Self.stagedState())
+        session.mode = .manual
+        session.start()
+        XCTAssertEqual(session.battle?.phase, .running)
+        let host = host(session)
+        let needles = ["Pow 90", "STAB", "Priority", "Quick Attack", "Forfeit"]
+        let (text, bitmap) = try await waitForText(needles, in: host)
+        try save(bitmap, as: "practice-popover-hints.png")
+        assertRendered(needles, in: text)
+        assertMultiplier("2", in: text)
+        assertPopoverSized(host)
+    }
+
+    /// Automatic battle: the speed control and "Skip to result" sit in the bottom bar, and skipping plays the
+    /// rest of the battle at once so the result screen follows.
+    func testAutomaticBattleOffersSpeedControlAndSkipToResult() async throws {
+        let session = makeSession(Self.stagedState())
+        session.mode = .automatic
+        session.start()
+        XCTAssertEqual(session.battle?.phase, .running)
+        let host = host(session)
+        let needles = ["2×", "Skip to result", "Forfeit"]
+        let (text, _) = try await waitForText(needles, in: host)
+        assertRendered(needles, in: text)
+        assertPopoverSized(host)
+
+        session.skipToResult()
+        XCTAssertEqual(session.battle?.phase, .finished, "skipping plays the battle to its end")
+        XCTAssertNotEqual(session.playback?.isPlaying, true, "nothing is left to stage")
+        let result = ["Rematch", "New opponent"]
+        let (after, _) = try await waitForText(result, in: host)
+        assertRendered(result, in: after)
+        XCTAssertTrue(session.resultSeen, "the result screen reports it was shown")
     }
 }
