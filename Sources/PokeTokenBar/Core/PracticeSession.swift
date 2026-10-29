@@ -69,6 +69,23 @@ final class PracticeSession {
     /// Menu bar suffix for the current state (`PracticeStatusBadge`).
     var statusBadge: String? { PracticeStatusBadge.text(phase: battle?.phase, resultSeen: resultSeen) }
 
+    /// Loaded with the engine in `prepare` (`typeChart`); nil until then or when the engine failed.
+    private(set) var typeChart: PracticeTypeChart?
+    /// Public data of the roster's moves keyed by Showdown id (`describeMoves`), filled in `prepare`.
+    private(set) var moveInfo: [String: PracticeMoveInfo] = [:]
+    /// Staging speed for turns; a change applies to the beat on screen at once (`PracticePlayback.timeScale`),
+    /// and `instant` skips staging like a hidden screen does.
+    var playbackSpeed: PracticePlaybackSpeed = .normal
+    /// Pairing summary for the current selection from public information only; nil without both sides
+    /// or a type chart.
+    var matchup: PracticeMatchup? { nil }
+    /// Card hint for one of the player's moves in the running battle, against the opponent's current
+    /// public types (`battle.view`); nil for unknown moves such as recharge or Struggle.
+    func moveHint(_ moveID: String) -> PracticeMoveHint? { nil }
+    /// Automatic battles only: plays the rest of the battle at once without staging, so the result shows
+    /// next. The playback still receives every event (summary and log stay complete).
+    func skipToResult() {}
+
     /// Creates the engine once and rebuilds the roster from `state`. Keeps a still-eligible selection,
     /// otherwise defaults to the first eligible candidate (player) and the next one (opponent). Leaves a
     /// running battle untouched. Failures land in `loadError`.

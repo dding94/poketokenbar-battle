@@ -192,6 +192,9 @@ final class PracticePlayback {
     private(set) var history: [PracticeBeat] = []
     /// The screen's VS splash has played for this battle; the screen sets it, so a reopened popover skips it.
     var introShown = false
+    /// Multiplies beat durations (0.5 when fast). `PracticeSession.playbackSpeed` sets it; a change also
+    /// shortens or lengthens the beat on screen.
+    var timeScale: Double = 1
     /// A beat is on screen or queued.
     var isPlaying: Bool { beat != nil || !queue.isEmpty }
     var summary: PracticeSummary {
