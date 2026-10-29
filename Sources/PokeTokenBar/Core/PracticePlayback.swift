@@ -194,7 +194,12 @@ final class PracticePlayback {
     var introShown = false
     /// Multiplies beat durations (0.5 when fast). `PracticeSession.playbackSpeed` sets it; a change also
     /// shortens or lengthens the beat on screen.
-    var timeScale: Double = 1
+    var timeScale: Double = 1 {
+        didSet {
+            guard timeScale != oldValue, beat != nil else { return }
+            beatEnd = beatStart + beatLength * max(0, timeScale)
+        }
+    }
     /// A beat is on screen or queued.
     var isPlaying: Bool { beat != nil || !queue.isEmpty }
     var summary: PracticeSummary {
@@ -222,6 +227,9 @@ final class PracticePlayback {
 
     @ObservationIgnored private var queue: [PracticeBeat] = []
     @ObservationIgnored private var beatEnd: TimeInterval = 0
+    /// When the beat on screen started and how long it lasts at scale 1; a scale change recomputes `beatEnd` from them.
+    @ObservationIgnored private var beatStart: TimeInterval = 0
+    @ObservationIgnored private var beatLength: TimeInterval = 0
     /// What the screen will show after every queued beat; the base for the next beat's `after`.
     @ObservationIgnored private var queued: [PracticeSide: PracticeDisplaySide] = [:]
     @ObservationIgnored private var turn = 0
@@ -379,7 +387,9 @@ final class PracticePlayback {
         guard beat == nil, !queue.isEmpty else { return }
         let next = queue.removeFirst()
         beat = next
-        beatEnd = clock() + (next.actor == nil ? Self.residualBeat : Self.actionBeat)
+        beatStart = clock()
+        beatLength = next.actor == nil ? Self.residualBeat : Self.actionBeat
+        beatEnd = beatStart + beatLength * max(0, timeScale)
     }
     private func commit(_ finished: PracticeBeat) {
         display = finished.after

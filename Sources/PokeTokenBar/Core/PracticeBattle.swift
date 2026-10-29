@@ -166,6 +166,13 @@ final class PracticeBattle {
         release()
         if phase != .finished { phase = .cancelled }
     }
+    /// Plays automatic turns for both sides until the battle ends or `maxSteps` turns have run, ignoring
+    /// the clock and a pause (the engine's own 200-turn cap ends a stalemate). Every event is appended as
+    /// usual, so staging and the result log stay complete.
+    func runToEnd(maxSteps: Int = 250) {
+        var steps = 0
+        while phase == .running, steps < maxSteps { advance(slot: nil); steps += 1 }
+    }
     /// Freezes the manual deadline and the automatic step, keeping the remaining time.
     func pause() {
         guard phase == .running, !isPaused else { return }

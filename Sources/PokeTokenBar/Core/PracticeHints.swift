@@ -22,7 +22,15 @@ struct PracticeTypeChart: Decodable, Equatable, Sendable {
     let damage: [String: [String: Double]]
 
     /// Product over the defender's types; nil when any type is unknown or `defenders` is empty.
-    func multiplier(attack: String, defenders: [String]) -> Double? { nil }
+    func multiplier(attack: String, defenders: [String]) -> Double? {
+        guard !defenders.isEmpty, let row = damage[attack] else { return nil }
+        var product = 1.0
+        for defender in defenders {
+            guard let factor = row[defender] else { return nil }
+            product *= factor
+        }
+        return product
+    }
 }
 
 /// What the selection screen says about a pairing, from public information only.
@@ -56,5 +64,11 @@ struct PracticeMoveHint: Equatable, Sendable {
 enum PracticePlaybackSpeed: String, CaseIterable, Sendable {
     case normal, fast, instant
     /// Beat durations are multiplied by this; `instant` never stages.
-    var timeScale: Double { 1 }
+    var timeScale: Double {
+        switch self {
+        case .normal: return 1
+        case .fast: return 0.5
+        case .instant: return 0
+        }
+    }
 }

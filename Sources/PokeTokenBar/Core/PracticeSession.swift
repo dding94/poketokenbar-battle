@@ -75,16 +75,55 @@ final class PracticeSession {
     private(set) var moveInfo: [String: PracticeMoveInfo] = [:]
     /// Staging speed for turns; a change applies to the beat on screen at once (`PracticePlayback.timeScale`),
     /// and `instant` skips staging like a hidden screen does.
-    var playbackSpeed: PracticePlaybackSpeed = .normal
+    var playbackSpeed: PracticePlaybackSpeed = .normal {
+        didSet {
+            guard playbackSpeed != oldValue else { return }
+            playback?.timeScale = playbackSpeed.timeScale
+            skipPlaybackIfHidden(); refreshHold()
+        }
+    }
     /// Pairing summary for the current selection from public information only; nil without both sides
     /// or a type chart.
-    var matchup: PracticeMatchup? { nil }
+    var matchup: PracticeMatchup? {
+        guard let chart = typeChart, let player = player?.snapshot, let opponent = opponent?.snapshot else { return nil }
+        let opponentTypes = opponent.publicInfo.types
+        let offense: [(id: String, multiplier: Double)] = player.set.moves.compactMap { slug in
+            guard let info = moveInfo[Self.showdownID(slug)], !info.isStatus,
+                  let multiplier = chart.multiplier(attack: info.type, defenders: opponentTypes) else { return nil }
+            return (info.id, multiplier)
+        }
+        let best = offense.map(\.multiplier).max() ?? 1
+        let threat = opponentTypes.compactMap { chart.multiplier(attack: $0, defenders: player.publicInfo.types) }.max() ?? 1
+        let playerSpeed = player.publicInfo.stats["spe"] ?? 0, opponentSpeed = opponent.publicInfo.stats["spe"] ?? 0
+        return PracticeMatchup(
+            bestOffense: best, bestMoveIDs: best > 1 ? offense.filter { $0.multiplier == best }.map(\.id) : [],
+            threat: threat,
+            order: playerSpeed > opponentSpeed ? .playerFirst : playerSpeed < opponentSpeed ? .opponentFirst : .speedTie,
+            playerSpeed: playerSpeed, opponentSpeed: opponentSpeed,
+            levelGap: opponent.publicInfo.level - player.publicInfo.level)
+    }
     /// Card hint for one of the player's moves in the running battle, against the opponent's current
     /// public types (`battle.view`); nil for unknown moves such as recharge or Struggle.
-    func moveHint(_ moveID: String) -> PracticeMoveHint? { nil }
+    func moveHint(_ moveID: String) -> PracticeMoveHint? {
+        guard let info = moveInfo[moveID] else { return nil }
+        let multiplier: Double?
+        if info.isStatus { multiplier = nil }
+        else if let chart = typeChart, let types = battle?.view?.p2.types {
+            multiplier = chart.multiplier(attack: info.type, defenders: types)
+        } else { multiplier = nil }
+        return PracticeMoveHint(info: info, multiplier: multiplier,
+                                stab: battle?.view?.p1.types.contains(info.type) == true)
+    }
     /// Automatic battles only: plays the rest of the battle at once without staging, so the result shows
     /// next. The playback still receives every event (summary and log stay complete).
-    func skipToResult() {}
+    func skipToResult() {
+        guard let battle, battle.phase == .running, battle.mode == .automatic else { return }
+        // Beats already queued come first, so the history keeps its order.
+        playback?.skipToEnd()
+        step { $0.runToEnd() }
+        playback?.skipToEnd()
+        refreshHold()
+    }
 
     /// Creates the engine once and rebuilds the roster from `state`. Keeps a still-eligible selection,
     /// otherwise defaults to the first eligible candidate (player) and the next one (opponent). Leaves a
@@ -97,6 +136,7 @@ final class PracticeSession {
         self.engine = engine; loadError = nil
         let roster = PracticeRoster(state: state, activeName: activeName, engine: engine)
         self.roster = roster
+        loadHints(engine: engine, roster: roster)
         let ids = roster.eligible.map(\.id)
         let player = playerID.flatMap { ids.contains($0) ? $0 : nil } ?? ids.first
         let opponent = opponentID.flatMap { ids.contains($0) && $0 != player ? $0 : nil } ?? ids.first { $0 != player }
@@ -109,7 +149,9 @@ final class PracticeSession {
         let next = PracticeBattle(engine: engine, clock: clock)
         battle = next
         next.start(player: player, opponent: opponent, mode: mode)
-        playback = PracticePlayback(clock: clock)
+        let staging = PracticePlayback(clock: clock)
+        staging.timeScale = playbackSpeed.timeScale
+        playback = staging
         stageEvents()
         resultSeen = true
         refreshHold()
@@ -149,9 +191,29 @@ final class PracticeSession {
     func releaseIfIdle() {
         guard !isActive else { return }
         stopDriver(); battle?.cancel(); battle = nil; dropPlayback(); resultSeen = true
-        roster = nil; engine = nil
+        roster = nil; engine = nil; typeChart = nil; moveInfo = [:]
     }
 
+    /// Loads the type chart once per engine and the public data of every roster move. A failure keeps
+    /// what is already loaded and the hints simply stay out; it never blocks the practice screen.
+    private func loadHints(engine: BattleEngine, roster: PracticeRoster) {
+        if typeChart == nil, let text = try? engine.call(.typeChart) {
+            typeChart = try? BattleJSON.decode(text)
+        }
+        struct Described: Decodable { let moves: [PracticeMoveInfo] }
+        for candidate in roster.eligible {
+            guard let moves = candidate.snapshot?.set.moves,
+                  !moves.allSatisfy({ moveInfo[Self.showdownID($0)] != nil }),
+                  let arguments = try? BattleJSON.encode(moves),
+                  let text = try? engine.call(.describeMoves, arguments: [arguments]),
+                  let described: Described = try? BattleJSON.decode(text) else { continue }
+            for info in described.moves { moveInfo[info.id] = info }
+        }
+    }
+    /// Showdown's id for a move slug or name: lowercase letters and digits only ("volt-tackle" -> "volttackle").
+    private static func showdownID(_ text: String) -> String {
+        String(text.lowercased().filter { $0.isASCII && ($0.isLetter || $0.isNumber) })
+    }
     private func candidate(_ id: String?) -> PracticeCandidate? {
         guard let id else { return nil }
         return roster?.eligible.first { $0.id == id }
@@ -186,8 +248,11 @@ final class PracticeSession {
         if !fresh.isEmpty { playback.enqueue(fresh) }
         skipPlaybackIfHidden()
     }
+    /// Nobody watches a hidden screen, and `instant` asks for no staging: both play every beat at once.
     private func skipPlaybackIfHidden() {
-        if !pauseReasons.isDisjoint(with: [.popoverClosed, .screenHidden]) { playback?.skipToEnd() }
+        if playbackSpeed == .instant || !pauseReasons.isDisjoint(with: [.popoverClosed, .screenHidden]) {
+            playback?.skipToEnd()
+        }
     }
     /// Holds the battle while beats play and lets go when they are done, then re-applies the pause.
     private func refreshHold() {
