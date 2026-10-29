@@ -6,6 +6,7 @@ struct PracticeCandidate: Identifiable {
     let name: String
     let snapshot: BattleSnapshot?
     let blockedReason: String?
+    var origin: PracticeOrigin = .owned
 }
 struct PracticeRoster {
     let candidates: [PracticeCandidate]

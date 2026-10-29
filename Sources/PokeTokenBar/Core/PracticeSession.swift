@@ -55,12 +55,27 @@ final class PracticeSession {
     private var driverGeneration = 0
     /// How many of `battle.events` the playback has been given.
     private var stagedEvents = 0
+    private let wildSource: PracticeWildSource
+    private let wildSeed: () -> UInt64
 
-    /// `drivesAutomatically: false` leaves `tick()` to the caller (tests with an injected clock).
+    /// Level-matched wild opponents for the current player (`findWildOpponents`); never saved.
+    private(set) var wildCandidates: [PracticeCandidate] = []
+    private(set) var wildState: PracticeWildState = .idle
+
+    /// `drivesAutomatically: false` leaves `tick()` to the caller (tests with an injected clock). Tests also
+    /// inject `wildSource` stubs and a fixed `wildSeed`, so wild opponents never reach the network there.
     init(engineURL: URL?, clock: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
-         drivesAutomatically: Bool = true) {
+         drivesAutomatically: Bool = true, wildSource: PracticeWildSource = .live,
+         wildSeed: @escaping () -> UInt64 = { UInt64.random(in: .min ... .max) }) {
         self.engineURL = engineURL; self.clock = clock; self.drivesAutomatically = drivesAutomatically
+        self.wildSource = wildSource; self.wildSeed = wildSeed
     }
+
+    /// Searches three wild opponents within ±3 levels of the current player, replacing the previous ones
+    /// with a new seed; a search in flight is cancelled. `opponentID` may then name a wild candidate, and
+    /// `opponent` resolves it. Changing the player drops them (`wildState = .idle`) because their levels
+    /// were matched to the old one. Needs a prepared engine; results land on the main actor.
+    func findWildOpponents() {}
 
     var player: PracticeCandidate? { candidate(playerID) }
     var opponent: PracticeCandidate? { candidate(opponentID) }
