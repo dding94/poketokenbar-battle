@@ -148,6 +148,7 @@ final class PracticeBattle {
             advance(slot: nil)
         }
     }
+    func prepareSelection() {}
     func cancel() {
         release()
         if phase != .finished { phase = .cancelled }

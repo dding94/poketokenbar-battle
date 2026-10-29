@@ -144,4 +144,14 @@ final class PracticeBattleTests: XCTestCase {
         XCTAssertNil(PracticeText.log("", names: [:]))
     }
 
+    func testChangingSelectionClearsPreviousBattlePreviewAndResult() throws {
+        let engine = try engine(); let model = PracticeBattle(engine: engine)
+        model.start(player: try candidate("a", species: 25, moves: ["thunderbolt"], engine: engine),
+                    opponent: try candidate("b", species: 129, moves: ["splash"], engine: engine), mode: .manual, seed: [1,2,3,4])
+        model.choose(slot: 1); XCTAssertEqual(model.phase, .finished)
+        model.prepareSelection()
+        XCTAssertEqual(model.phase, .ready); XCTAssertNil(model.view); XCTAssertNil(model.result)
+        XCTAssertTrue(model.messages.isEmpty); XCTAssertTrue(model.request.moves.isEmpty)
+    }
+
 }
