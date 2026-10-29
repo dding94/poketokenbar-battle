@@ -98,6 +98,8 @@ final class PracticeBattle {
     private(set) var request = BattleRequest(kind: "none", moves: [])
     private(set) var result: BattleResult?
     private(set) var messages: [String] = []
+    /// Typed form of the same log for staging (`PracticePlayback`), plus reveals, timeouts and the end.
+    private(set) var events: [PracticeEvent] = []
     private(set) var notice: String?
     private(set) var remainingSeconds = 30
     /// True while `pause()` holds the battle; `tick()` and `choose` do nothing then.

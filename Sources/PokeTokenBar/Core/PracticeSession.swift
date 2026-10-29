@@ -11,6 +11,9 @@ enum PracticePauseReason: Hashable, CaseIterable, Sendable {
     case screenHidden
     /// The display slept (`AppDelegate.setDisplayAwake(false)`).
     case displayAsleep
+    /// The last engine step is still being staged on screen (`PracticePlayback`). Holds both modes,
+    /// so the manual 30 s starts after the turn has played and automatic turns do not overlap.
+    case playback
 }
 
 /// App-lifetime owner of the local practice battle.
@@ -27,6 +30,8 @@ final class PracticeSession {
     private(set) var loadError: String?
     /// The current battle; nil on the selection screen.
     private(set) var battle: PracticeBattle?
+    /// Stages the current battle's events on screen; created with the battle, dropped with it.
+    private(set) var playback: PracticePlayback?
     private(set) var pauseReasons: Set<PracticePauseReason> = []
     /// False from the moment a battle finishes until the result screen reports it was shown.
     private(set) var resultSeen = true
