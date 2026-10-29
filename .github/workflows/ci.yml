@@ -43,7 +43,7 @@ jobs:
         run: swift --version
 
       - name: Fork isolation tests
-        run: swift test --filter "AppIdentityTests|SupportMailTests|UpdateCheckerTests|BattleEngineTests|BattleSnapshotTests|PracticeBattleTests|PracticeSessionTests|PracticePlaybackTests|PracticeWordingTests|PracticeScreenRenderingTests|PracticeLaunchTests|PopoverNavigationTests|LocalizedUILiteralTests|ScrollerLaneTests|SwiftUIIsolationTests|LocalizationColumnTests|LocalizationInterpolationTests"
+        run: swift test --filter "AppIdentityTests|SupportMailTests|UpdateCheckerTests|BattleEngineTests|BattleSnapshotTests|PracticeBattleTests|PracticeSessionTests|PracticePlaybackTests|PracticeHintsTests|PracticeWordingTests|PracticeScreenRenderingTests|PracticeLaunchTests|PopoverNavigationTests|LocalizedUILiteralTests|ScrollerLaneTests|SwiftUIIsolationTests|LocalizationColumnTests|LocalizationInterpolationTests"
 
       # test-gate.sh runs `swift test --enable-code-coverage` and then enforces a
       # line-coverage floor on the logic-core files. It replaces a bare `swift test`:
