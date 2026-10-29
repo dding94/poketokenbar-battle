@@ -28,7 +28,7 @@ export function speciesFor(num, form) {
   return Dex.species.get(mapped[num]?.[form] || species.name);
 }
 const stats={hp:'hp',attack:'atk',defense:'def','special-attack':'spa','special-defense':'spd',speed:'spe'};
-const slug = v => typeof v==='string'&&/^[a-z0-9-]+$/.test(v);
+export const slug = v => typeof v==='string'&&/^[a-z0-9-]+$/.test(v);
 export function makeSet(s) {
   if(!keys(s,['speciesNum','form','level','gender','nature','ability','moves','ivs','shiny']))fail('invalid_set');
   const species=speciesFor(s.speciesNum,s.form);

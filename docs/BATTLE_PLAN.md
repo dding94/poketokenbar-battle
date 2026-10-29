@@ -593,6 +593,8 @@ npm run test:acceptance
 |---|---|
 | `version()` | `{"engine":"@pkmn/sim@x.y.z","adapter":"1","rules":"gen9-notera-noitems-v1"}` |
 | `describeSet(set)` | 검증한 SET의 공개 정보 `{speciesNum,species,level,types,stats}`. 9세대 폼/EV 0 능력치를 계산하며 기술·특성은 반환하지 않음(PR 02 추가) |
+| `describeMoves(ids)` | 기술 slug/id 1~8개 → `{"moves":[{id,name,type,category,basePower,accuracy(항상 명중이면 null),priority,pp}]}`. 9세대 데이터의 순수 조회이며 전투 상태·난수를 쓰지 않는다. 알 수 없는 기술은 `invalid_moves`(PR 03B-3 추가) |
+| `typeChart()` | `{"types":[18종],"damage":{공격:{방어:배수}}}`. 타입만으로 계산하고(부유·볼트흡수 같은 특성 면역은 공개 전 정보라 제외) 테라스탈 전용 Stellar는 뺀다(PR 03B-3 추가) |
 | `createBattle(config)` | config = `{"seed","policySeed","p1":{"name","set":SET},"p2":{...}}` → `{"ok":true,"id"}`. 알 수 없는 종·폼·기술·특성은 오류 코드로 거절 |
 | `request(id, side)` | `{"kind":"move"·"wait"·"forced"·"none","moves":[{"slot","id","name","type","pp","maxpp","disabled"}]}` |
 | `choose(id, side, choice)` | choice = `{"type":"move","slot":1~4}` 또는 `{"type":"auto"}` → `{"ok":true,"resolved":bool}`. Showdown 거절은 `{"ok":false,"error":"rejected"}`(결정적). 그 밖의 입력은 거절 |

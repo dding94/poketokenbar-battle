@@ -1,5 +1,5 @@
 import {Battle, State, Dex} from '@pkmn/sim';
-import {validateConfig, makeSet, fail, keys} from './input.js';
+import {validateConfig, makeSet, fail, keys, slug} from './input.js';
 import {sha256} from './hash.js';
 import {view, visibleLog, normalized, revealEvents} from './views.js';
 import {pickMove, POLICY_VERSION} from './policy.js';
@@ -68,7 +68,20 @@ function describeSet(input) {
     return {speciesNum:species.num,species:species.name,level:set.level,types:species.types,stats};
   } finally {calculator.destroy();}
 }
-const api={version:()=>VERSION,describeSet,createBattle,request,choose,autoChoice,
+// Public move data and a type-only chart for decision hints. Pure lookups: no battle state, no RNG.
+// Abilities (Levitate, Volt Absorb, ...) stay out of the chart because they are hidden until revealed.
+function describeMoves(ids) {
+  if(!Array.isArray(ids)||ids.length<1||ids.length>8||ids.some(m=>!slug(m)||!Dex.moves.get(m).exists))fail('invalid_moves');
+  return {moves:ids.map(m=>{const v=Dex.moves.get(m);return {id:v.id,name:v.name,type:v.type,category:v.category,
+    basePower:v.basePower,accuracy:v.accuracy===true?null:v.accuracy,priority:v.priority,pp:v.pp};})};
+}
+// Stellar exists only for Terastal, which these rules ban.
+const TYPES=Dex.types.all().filter(t=>t.exists&&!t.isNonstandard&&t.name!=='Stellar').map(t=>t.name);
+function typeChart() {
+  return {types:TYPES,damage:Object.fromEntries(TYPES.map(a=>[a,Object.fromEntries(TYPES.map(d=>
+    [d,Dex.getImmunity(a,d)?2**Dex.getEffectiveness(a,d):0]))]))};
+}
+const api={version:()=>VERSION,describeSet,describeMoves,typeChart,createBattle,request,choose,autoChoice,
   state:(id,v)=>view(get(id).battle,viewer(v)),
   drainEvents:(id,v)=>{viewer(v);const r=get(id);const all=revealEvents(visibleLog(r.battle.log,v));
     const fresh=all.slice(r.eventCursors[v]);r.eventCursors[v]=all.length;return fresh;},
