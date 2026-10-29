@@ -29,7 +29,7 @@ struct BattleSnapshot: Codable, Equatable, Sendable {
     let publicInfo: BattlePublicInfo
     enum Failure: Error, Equatable { case missingProfile, missingNature, missingGender, missingAbility, missingMoves, invalidIdentity, invalidSchema }
     static let rules = "gen9-notera-noitems-v1"
-    static let policy = "auto-v1"
+    static let policy = "auto-v2"
     // This closed schema contains only finite integers, strings, arrays and dictionaries.
     var hash: String {
         let bytes = try! BattleJSON.encoder().encode(self)

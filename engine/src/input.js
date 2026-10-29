@@ -1,4 +1,5 @@
 import {Dex} from '@pkmn/sim';
+import {POLICIES} from './policy.js';
 export const fail = code => {throw new Error(code);};
 export const keys = (value, allowed) => value && typeof value === 'object' && !Array.isArray(value) &&
   Object.keys(value).every(k => allowed.includes(k));
@@ -50,7 +51,11 @@ export function validateConfig(c) {
   if(!keys(c,['seed','policySeed','p1','p2']))fail('invalid_config');
   if(!Array.isArray(c.seed)||c.seed.length!==4||c.seed.some(n=>!Number.isInteger(n)||n<0||n>65535))fail('invalid_seed');
   if(!Number.isInteger(c.policySeed)||c.policySeed<0||c.policySeed>0xffffffff)fail('invalid_policy_seed');
-  for(const side of ['p1','p2'])if(!keys(c[side],['name','set'])||typeof c[side].name!=='string'||c[side].name.length>80)fail('invalid_player');
+  for(const side of ['p1','p2']) {
+    if(!keys(c[side],['name','set','policy'])||typeof c[side].name!=='string'||c[side].name.length>80)fail('invalid_player');
+    // An omitted policy is standard. The config is kept as given, so the input log names the policy that picked.
+    if('policy' in c[side]&&!POLICIES.includes(c[side].policy))fail('invalid_policy');
+  }
   return [makeSet(c.p1.set),makeSet(c.p2.set)];
 }
 export {forms};
