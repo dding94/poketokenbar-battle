@@ -24,6 +24,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private var updater: UpdateChecker!
     private var floatingPet: FloatingPetController!
     private let navigation = PopoverNavigation()
+    private var practice: PracticeSession!
     var onOpenPractice: (() -> Void)?
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
@@ -36,25 +37,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
     /// `--practice` 실행 인자가 있으면 기동 직후 팝오버를 연습 화면으로 연다.
     nonisolated static func launchRequestsPractice(arguments: [String]) -> Bool {
-        !arguments.contains("--practice")
+        arguments.contains("--practice")
     }
 
     /// 팝오버를 열 때의 화면 결정 — Home 으로 reset 한 뒤 진행 중인 연습이 있으면 연습 화면, 그다음 `route`.
     static func applyOpenRoute(to navigation: PopoverNavigation, practiceActive: Bool,
                                route: (PopoverNavigation) -> Void) {
         navigation.reset()
-        navigation.showingPractice = !practiceActive
+        navigation.showingPractice = practiceActive   // reset() 이 이 플래그를 지우는지에 기대지 않는다
         route(navigation)
     }
 
     /// 메뉴바 첫 줄 끝에 연습전 배지를 붙인다. 줄이 없으면 배지만 한 줄로 둔다.
     nonisolated static func menuLines(_ lines: [String], badge: String?) -> [String] {
-        lines
+        guard let badge else { return lines }
+        guard let first = lines.first, !first.isEmpty else { return [badge] + lines.dropFirst() }
+        return [first + " " + badge] + lines.dropFirst()
     }
 
     /// 기존 툴팁 아래에 연습전 상태 줄을 붙인다. 배지가 없으면 기존 툴팁 그대로.
     nonisolated static func menuToolTip(base: String?, badge: String?, resultReady: Bool, l: L) -> String? {
-        base
+        guard badge != nil else { return base }
+        let line = resultReady ? l.practiceStatusResult : l.practiceStatusRunning
+        guard let base, !base.isEmpty else { return line }
+        return base + "\n" + line
     }
 
     // 메뉴바 캐릭터 애니메이션 — 단일 타이머로 프레임 순환.
@@ -69,6 +75,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private var menuLoadGen = 0     // async 로드 경합 방지
     private var displayAwake = true     // 디스플레이 켜짐 여부 (꺼지면 메뉴 애니메이션 정지 — 배터리)
     private var powerObserver: NSObjectProtocol?   // 저전력 토글 → 유효 fps 하한 재평가
+    private var appliedPracticeBadge: String?   // 마지막으로 메뉴바에 반영한 연습전 배지 — 바뀔 때만 재반영
 
     /// 스프라이트 전용 서브레이어 — 프레임 교체의 드로잉 비용을 없앤다.
     ///
@@ -117,10 +124,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         LoginItem.migrateFromLegacyLoginItemIfNeeded()   // 로그인아이템 → KeepAlive 에이전트(크래시 자동 재실행)
         store = UsageStore()
         companion = CompanionStore()
-        onOpenPractice = { [weak self] in
-            guard let self else { return }
-            PracticeWindowController.shared.open(state: self.companion.state, activeName: self.companion.displayName)
-        }
+        // 연습전 세션은 앱 수명 소유 — 팝오버 호스팅 트리는 닫힐 때마다 버려진다.
+        practice = PracticeSession(engineURL: Bundle.main.url(forResource: "battle-engine", withExtension: "js"))
+        onOpenPractice = { [weak self] in self?.showPopover { $0.showingPractice = true } }   // 창 없이 팝오버로
         Task { await companion.preparePokemonProfiles() }
         updater = UpdateChecker()
         store.localizationLanguage = companion.language   // 알림 현지화용 미러 시드
@@ -152,9 +158,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         observeCompanionSprite()
         observeDisplaySleep()
         observePowerState()
+        observePractice()
         applyState()
-        if CommandLine.arguments.contains("--practice") {
-            onOpenPractice?()
+        if Self.launchRequestsPractice(arguments: CommandLine.arguments) {
+            // 다음 턴으로 미룬다 — 상태 아이템 버튼이 자리 잡은 뒤에야 팝오버를 붙일 수 있다.
+            Task { @MainActor [weak self] in self?.onOpenPractice?() }
         }
     }
 
@@ -198,6 +206,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         }
     }
 
+    /// 연습전 배지(⚔︎/⚑) 관찰 — 배지가 바뀔 때만 메뉴바를 다시 그린다. 턴 단위 변화는 배지에 안 잡히고,
+    /// 2줄 타이틀 재측정(`applyMenuText`)이 비싸서 타이머·턴별 갱신은 두지 않는다.
+    private func observePractice() {
+        withObservationTracking {
+            _ = practice.statusBadge
+        } onChange: { [weak self] in
+            Task { @MainActor in
+                guard let self else { return }
+                if self.practice.statusBadge != self.appliedPracticeBadge { self.applyState() }
+                self.observePractice()
+            }
+        }
+    }
+
     /// 저전력 모드 토글을 즉시 반영 — 유효 하한(`menuFrameFloor`)이 바뀌면 `menuSpriteKey` 가
     /// 달라져 `ensureMenuAnimation()` 이 재구성한다(선택이 powerSaver 면 하한 불변 → 재구성 없음,
     /// 이미 그 프레임률이라 옳다). 플로팅 펫은 자체 관측(`FloatingPetController`)으로 따로 처리.
@@ -216,8 +238,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private func applyState() {
         guard let button = statusItem.button else { return }
         // Recomputed on every refresh, so a tier that moves with the clock redraws even when the text doesn't.
-        Self.applyMenuText(store.menuLines, to: button, colors: store.menuLimitColorRuns())
-        button.toolTip = store.menuToolTip
+        let badge = practice.statusBadge
+        appliedPracticeBadge = badge
+        Self.applyMenuText(Self.menuLines(store.menuLines, badge: badge), to: button, colors: store.menuLimitColorRuns())
+        button.toolTip = Self.menuToolTip(base: store.menuToolTip, badge: badge,
+                                          resultReady: !practice.resultSeen, l: companion.l)
         needsSpriteLayout = true   // 텍스트 길이가 바뀌면 버튼 폭이 변해 이미지 자리도 움직인다
         // stale 시각 dim 제거 — 슬립/런치 직후 refresh 완료 전 몇 초간 회색으로 보여 '고장/비활성'
         // 으로 오인되던 것 방지(사용자 반복 지적). 데이터가 오래됐다는 신호가 필요하면 팝오버
@@ -602,7 +627,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private func buildPopoverContent() {
         popover.contentViewController = NSHostingController(
             rootView: PopoverView()
-                .environment(store).environment(companion).environment(updater).environment(navigation))
+                .environment(store).environment(companion).environment(updater).environment(navigation)
+                .environment(practice))
     }
 
     @objc private func statusItemClicked() {
@@ -650,8 +676,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     /// `route` runs after the reset to Home, so a menu item can land on a specific screen.
     private func showPopover(route: (PopoverNavigation) -> Void = { _ in }) {
         guard let button = statusItem.button, !popover.isShown else { return }
-        navigation.reset()   // 닫혔다 열리면 항상 Home 으로 (설정 화면 잔류 방지)
-        route(navigation)
+        // 닫혔다 열리면 항상 Home 으로 (설정 화면 잔류 방지) — 진행 중인 연습만 그 자리로 복귀
+        Self.applyOpenRoute(to: navigation, practiceActive: practice.isActive, route: route)
+        practice.setPaused(false, reason: .popoverClosed)
         buildPopoverContent()   // 열 때 호스팅 트리 생성(닫힐 때 해제)
         // LSUIElement 앱이 비활성이면 팝오버 내부 버튼 클릭이 무시됨 — show 전에 활성화 보장
         NSApp.activate(ignoringOtherApps: true)
@@ -672,6 +699,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     func popoverDidClose(_ notification: Notification) {
         stopOutsideClickMonitor()
         popover.contentViewController = nil
+        practice.setPaused(true, reason: .popoverClosed)
+        practice.releaseIfIdle()   // 진행 중인 배틀이 없을 때만 엔진·로스터 해제
         syncMenuAnimation()
     }
 
@@ -713,6 +742,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         displayAwake = awake
         syncMenuAnimation()
         floatingPet.setDisplayAwake(awake)   // 슬립 중엔 펫 호스팅 트리 해제(GIF 루프 정지)
+        practice.setPaused(!awake, reason: .displayAsleep)
     }
 
     /// menuShouldAnimate 상태에 맞춰 애니메이션을 재개/정지한다(멱등 — 중복 호출 안전).
