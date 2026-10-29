@@ -89,3 +89,17 @@ test('form mapping explicitly covers base starts, distinct forms, Shedinja and D
 test('aliases cannot smuggle a duplicate move into the set',()=>{
   assert.deepEqual(call('describeSet',set(25,'static',['vice-grip','vise-grip'])),{ok:false,error:'invalid_moves'});
 });
+test('describes moves from gen9 data for decision hints and rejects unknown ids',()=>{
+  const r=call('describeMoves',['thunderbolt','quick-attack','vice-grip','swift']);
+  assert.deepEqual(r.moves[0],{id:'thunderbolt',name:'Thunderbolt',type:'Electric',category:'Special',basePower:90,accuracy:100,priority:0,pp:15});
+  assert.equal(r.moves[1].priority,1);assert.equal(r.moves[2].id,'visegrip');assert.equal(r.moves[3].accuracy,null);
+  for(const bad of [['not-a-move'],[],['Thunderbolt!'],'thunderbolt',Array(9).fill('tackle')])
+    assert.deepEqual(call('describeMoves',bad),{ok:false,error:'invalid_moves'});
+});
+test('type chart is type-only over the 18 gen9 types (no Stellar, no abilities)',()=>{
+  const c=call('typeChart');
+  assert.equal(c.types.length,18);assert.ok(c.types.includes('Fairy'));assert.ok(!c.types.includes('Stellar'));
+  assert.equal(c.damage.Electric.Ground,0);assert.equal(c.damage.Electric.Water,2);assert.equal(c.damage.Normal.Ghost,0);
+  assert.equal(c.damage.Fire.Grass,2);assert.equal(c.damage.Fire.Water,0.5);assert.equal(c.damage.Dragon.Fairy,0);
+  assert.equal(c.damage.Steel.Fairy,2);assert.equal(c.damage.Ground.Flying,0);
+});
