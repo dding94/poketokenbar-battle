@@ -61,7 +61,8 @@ final class PracticeSession {
     /// Level-matched wild opponents for the current player (`findWildOpponents`); never saved.
     private(set) var wildCandidates: [PracticeCandidate] = []
     private(set) var wildState: PracticeWildState = .idle
-    private var wildTask: Task<Void, Never>?
+    /// The last search task, kept after it finishes or is cancelled so tests can await a stale one.
+    private(set) var wildTask: Task<Void, Never>?
     /// Bumped on every search start and every reset, before the first await; a result whose captured value is
     /// stale (a newer search, or another player) must not land.
     private var wildGeneration = 0
@@ -96,13 +97,12 @@ final class PracticeSession {
         }
     }
     private func finishWildSearch(_ result: Result<[PracticeCandidate], Error>) {
-        wildTask = nil
         let opponentWasWild = wildCandidates.contains { $0.id == opponentID }
         switch result {
         case .success(let made):
             wildCandidates = made; wildState = .ready
         case .failure:
-            wildCandidates = []; wildState = .unavailable(PracticeText.wildUnavailable)
+            wildCandidates = []; wildState = .unavailable
         }
         // A wild opponent of the replaced batch no longer exists.
         if opponentWasWild, !wildCandidates.contains(where: { $0.id == opponentID }) { opponentID = defaultOpponentID() }
@@ -110,7 +110,7 @@ final class PracticeSession {
     /// Wild opponents were matched to the player's level: another player (or none) drops them, cancels a search
     /// in flight, and moves a wild opponent selection back to an own individual.
     private func resetWild() {
-        wildTask?.cancel(); wildTask = nil; wildGeneration &+= 1
+        wildTask?.cancel(); wildGeneration &+= 1
         let opponentWasWild = wildCandidates.contains { $0.id == opponentID }
         wildCandidates = []; wildState = .idle
         if opponentWasWild { opponentID = defaultOpponentID() }
@@ -250,7 +250,7 @@ final class PracticeSession {
         roster = nil; engine = nil; typeChart = nil; moveInfo = [:]
         // The engine goes, so a search in flight stops; finished wild snapshots are plain data and stay.
         if wildState == .searching {
-            wildTask?.cancel(); wildTask = nil; wildGeneration &+= 1
+            wildTask?.cancel(); wildGeneration &+= 1
             wildState = wildCandidates.isEmpty ? .idle : .ready
         }
     }

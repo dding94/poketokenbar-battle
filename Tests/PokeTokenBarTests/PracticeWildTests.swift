@@ -42,6 +42,9 @@ private func details(_ id: Int) -> PokemonDetails {
 
 private struct StubFailure: Error {}
 
+/// A clock the stub advances on every request, so a test can spend the search budget without waiting.
+private final class FakeClock: @unchecked Sendable { nonisolated(unsafe) var now: TimeInterval = 0 }
+
 /// PokéAPI stand-in: lines by base id, an index, and switches for each way the real client fails offline.
 private final class WildStub: PokeProviding, PokemonDetailProviding, @unchecked Sendable {
     let lines: [Int: EvoLine]
@@ -51,10 +54,17 @@ private final class WildStub: PokeProviding, PokemonDetailProviding, @unchecked 
     nonisolated(unsafe) var failingDetails: Set<Int> = []
     nonisolated(unsafe) var failAllDetails = false
     nonisolated(unsafe) private(set) var lineCalls = 0
+    /// Every `line`/`pokemonDetails` request advances `clock` by `secondsPerRequest`.
+    nonisolated(unsafe) var clock: FakeClock?
+    nonisolated(unsafe) var secondsPerRequest: TimeInterval = 0
+    nonisolated(unsafe) var cancelInLine = false
+    nonisolated(unsafe) var cancelInDetails = false
     init(lines: [Int: EvoLine], captureRates: [Int: Int]) { self.lines = lines; self.captureRates = captureRates }
 
     func line(baseSpeciesID: Int) async throws -> EvoLine {
         lineCalls += 1
+        clock?.now += secondsPerRequest
+        if cancelInLine { throw CancellationError() }
         if failLines { throw StubFailure() }
         guard let value = lines[baseSpeciesID] else { throw StubFailure() }
         return value
@@ -65,6 +75,8 @@ private final class WildStub: PokeProviding, PokemonDetailProviding, @unchecked 
     }
     func baseSpecies(id: Int) async throws -> BaseSpecies? { try await baseSpeciesIndex().first { $0.id == id } }
     func pokemonDetails(speciesID: Int) async throws -> PokemonDetails {
+        clock?.now += secondsPerRequest
+        if cancelInDetails { throw CancellationError() }
         if failAllDetails || failingDetails.contains(speciesID) { throw StubFailure() }
         return details(speciesID)
     }
@@ -557,6 +569,56 @@ final class PracticeWildGeneratorTests: XCTestCase {
         XCTAssertEqual(stub.lineCalls, 12, "count x 4 attempts, no more")
     }
 
+    private func timed(_ stub: WildStub, budget: TimeInterval, clock: FakeClock) throws -> PracticeWildGenerator {
+        PracticeWildGenerator(source: PracticeWildSource(provider: stub, details: stub), engine: try engine(),
+                              clock: { clock.now }, budget: budget)
+    }
+
+    func testSpentBudgetStartsNoNewAttemptAndReturnsWhatWasMade() async throws {
+        // 11 s per request, 2 requests per attempt: one attempt takes 22 s and the 20 s budget is gone.
+        let clock = FakeClock(), stub = WildStub.standard()
+        stub.clock = clock; stub.secondsPerRequest = 11
+        let made = try await timed(stub, budget: 20, clock: clock).make(count: 3, around: 50, seed: 5)
+        XCTAssertEqual(made.count, 1)
+        XCTAssertEqual(stub.lineCalls, 1, "no second attempt after the budget is spent")
+        // Control: the same slow stub with a generous budget still fills the batch.
+        let slowClock = FakeClock(), generous = WildStub.standard()
+        generous.clock = slowClock; generous.secondsPerRequest = 11
+        let full = try await timed(generous, budget: 100_000, clock: slowClock).make(count: 3, around: 50, seed: 5)
+        XCTAssertEqual(full.count, 3)
+    }
+
+    func testSpentBudgetWithNothingMadeThrowsInsteadOfRetryingTwelveTimes() async throws {
+        let clock = FakeClock(), stub = WildStub.standard()
+        stub.clock = clock; stub.secondsPerRequest = 11; stub.failAllDetails = true
+        do {
+            let made = try await timed(stub, budget: 20, clock: clock).make(count: 3, around: 50, seed: 5)
+            XCTFail("expected a throw, got \(made.count) candidates")
+        } catch {
+            XCTAssertEqual(error as? PracticeWildError, .noCandidates)
+        }
+        XCTAssertEqual(stub.lineCalls, 1)
+        // Control: without time passing, all twelve attempts are used.
+        let still = FakeClock(), steady = WildStub.standard()
+        steady.clock = still; steady.failAllDetails = true
+        _ = try? await timed(steady, budget: 20, clock: still).make(count: 3, around: 50, seed: 5)
+        XCTAssertEqual(steady.lineCalls, 12)
+    }
+
+    func testCancellationInARequestIsRethrownNotSkipped() async throws {
+        for inLine in [true, false] {
+            let stub = WildStub.standard()
+            if inLine { stub.cancelInLine = true } else { stub.cancelInDetails = true }
+            do {
+                let made = try await generator(stub).make(count: 3, around: 50, seed: 2)
+                XCTFail("expected a throw, got \(made.count) candidates")
+            } catch {
+                XCTAssertTrue(error is CancellationError, "\(inLine ? "line" : "details"): \(error)")
+            }
+            XCTAssertEqual(stub.lineCalls, 1, "the search stops at the first cancellation")
+        }
+    }
+
     func testCountOfZeroMakesNothing() async throws {
         let made = try await generator(WildStub.standard()).make(count: 0, around: 50, seed: 1)
         XCTAssertTrue(made.isEmpty)
@@ -588,6 +650,33 @@ final class PracticeWildSessionTests: XCTestCase {
     private func search(_ session: PracticeSession) async -> Bool {
         session.findWildOpponents()
         return await waitUntil { session.wildState != .searching }
+    }
+    /// Waits until the gated provider holds a request, i.e. the search is suspended inside its first await.
+    private func waitSuspended(_ gate: GatedProvider) async -> Bool {
+        for _ in 0..<2500 {
+            if await gate.isSuspended() { return true }
+            try? await Task.sleep(nanoseconds: 2_000_000)
+        }
+        return false
+    }
+    /// A whole search through the gate: start, let it reach the index request, release it, await its task.
+    private func completeSearch(_ session: PracticeSession, _ gate: GatedProvider) async -> Bool {
+        session.findWildOpponents()
+        guard await waitSuspended(gate) else { return false }
+        let task = session.wildTask
+        await gate.resume()
+        await task?.value
+        return session.wildState == .ready
+    }
+    /// Pikachu with thunderbolt as the player, so an automatic battle against any wild stub finishes.
+    private func fastState() -> CompanionState {
+        var state = CompanionState()
+        state.dex = [("p", 25, "thunderbolt"), ("o", 242, "tackle"), ("c", 242, "tackle")].map { id, species, move in
+            var p = profile(id); p.moves = [PokemonKnownMove(name: move, learnedAtLevel: 1)]
+            return DexEntry(baseID: species, finalID: species, chainOrder: [species], rarity: .common, caughtAt: nil,
+                            nature: .hardy, profile: p)
+        }
+        return state
     }
 
     func testFindingWildOpponentsYieldsThreeLevelMatchedCandidates() async throws {
@@ -696,30 +785,132 @@ final class PracticeWildSessionTests: XCTestCase {
         session.prepare(state: state(), activeName: nil)
         session.findWildOpponents()
         XCTAssertEqual(session.wildState, .searching)
-        var suspended = false
-        for _ in 0..<2000 where !suspended {
-            suspended = await gate.isSuspended()
-            if !suspended { try? await Task.sleep(nanoseconds: 2_000_000) }
-        }
-        XCTAssertTrue(suspended, "the search reached the gated index request")
+        let reached = await waitSuspended(gate)
+        XCTAssertTrue(reached, "the search reached the gated index request")
+        let stale = session.wildTask
         session.playerID = "c"
         XCTAssertEqual(session.wildState, .idle)
         await gate.resume()
-        try? await Task.sleep(nanoseconds: 200_000_000)
+        await stale?.value   // the stale task has finished: nothing is left that could still land
         XCTAssertEqual(session.wildState, .idle, "the stale result must not land on the new player")
         XCTAssertTrue(session.wildCandidates.isEmpty)
     }
 
-    func testUnavailableWhenNothingLoadsAndTheMessageIsKorean() async throws {
+    /// A reroll in flight must not turn into a fight with the batch it is about to replace: starting stops the
+    /// search and keeps the old batch, so the selection and the engine's opponent stay the same.
+    func testStartDuringARerollKeepsTheOldBatchAndTheBattleOpponent() async throws {
+        let gate = GatedProvider(WildStub.standard())
+        let counter = Counter()
+        let session = makeSession(gate, seed: { counter.value += 1; return counter.value })
+        session.prepare(state: state(), activeName: nil)
+        let first = await completeSearch(session, gate)
+        XCTAssertTrue(first)
+        let oldIDs = session.wildCandidates.map(\.id)
+        XCTAssertEqual(oldIDs.count, 3)
+        let wildA = try XCTUnwrap(oldIDs.first)
+        session.opponentID = wildA
+        session.findWildOpponents()
+        XCTAssertEqual(session.wildState, .searching)
+        let reached = await waitSuspended(gate)
+        XCTAssertTrue(reached)
+        let stale = session.wildTask
+        session.mode = .manual
+        session.start()
+        XCTAssertEqual(session.wildState, .ready, "starting stops the search and shows the old batch")
+        XCTAssertEqual(session.wildCandidates.map(\.id), oldIDs)
+        await gate.resume()
+        await stale?.value
+        XCTAssertEqual(session.opponentID, wildA, "the late result must not move the selection")
+        XCTAssertEqual(session.wildState, .ready)
+        XCTAssertEqual(session.wildCandidates.map(\.id), oldIDs)
+        let battle = try XCTUnwrap(session.battle)
+        XCTAssertEqual(battle.phase, .running)
+        XCTAssertEqual(battle.opponent?.id, session.opponentID)
+        XCTAssertEqual(battle.opponent?.snapshot?.set.speciesNum, battle.view?.p2.speciesNum)
+    }
+
+    /// Same race after the battle ended: the late result used to reset `opponentID`, and the change dropped the
+    /// finished battle together with its unseen result.
+    func testFinishedBattleAndItsUnseenResultSurviveAStaleRerollLanding() async throws {
+        let gate = GatedProvider(WildStub.standard())
+        let counter = Counter()
+        let session = makeSession(gate, seed: { counter.value += 1; return counter.value })
+        session.prepare(state: fastState(), activeName: nil)
+        let first = await completeSearch(session, gate)
+        XCTAssertTrue(first)
+        let oldIDs = session.wildCandidates.map(\.id)
+        let wildA = try XCTUnwrap(oldIDs.first)
+        session.opponentID = wildA
+        session.findWildOpponents()
+        let reached = await waitSuspended(gate)
+        XCTAssertTrue(reached)
+        let stale = session.wildTask
+        session.mode = .automatic
+        session.start()
+        session.skipToResult()
+        XCTAssertEqual(session.battle?.phase, .finished, "precondition: the automatic battle ended")
+        XCTAssertEqual(session.statusBadge, "\u{2691}")
+        await gate.resume()
+        await stale?.value
+        XCTAssertEqual(session.battle?.phase, .finished, "the finished battle is kept")
+        XCTAssertEqual(session.statusBadge, "\u{2691}", "the unseen result is still unseen")
+        XCTAssertEqual(session.opponentID, wildA)
+        XCTAssertEqual(session.wildCandidates.map(\.id), oldIDs)
+    }
+
+    func testReleaseIfIdleDuringASearchStopsItAndKeepsTheOldBatch() async throws {
+        let gate = GatedProvider(WildStub.standard())
+        let counter = Counter()
+        let session = makeSession(gate, seed: { counter.value += 1; return counter.value })
+        session.prepare(state: state(), activeName: nil)
+        // Nothing found yet: a released search leaves the section idle.
+        session.findWildOpponents()
+        var reached = await waitSuspended(gate)
+        XCTAssertTrue(reached)
+        var stale = session.wildTask
+        session.releaseIfIdle()
+        XCTAssertEqual(session.wildState, .idle)
+        await gate.resume()
+        await stale?.value
+        XCTAssertEqual(session.wildState, .idle)
+        XCTAssertTrue(session.wildCandidates.isEmpty)
+        // With a batch on screen it stays.
+        session.prepare(state: state(), activeName: nil)
+        let found = await completeSearch(session, gate)
+        XCTAssertTrue(found)
+        let oldIDs = session.wildCandidates.map(\.id)
+        session.findWildOpponents()
+        reached = await waitSuspended(gate)
+        XCTAssertTrue(reached)
+        stale = session.wildTask
+        session.releaseIfIdle()
+        XCTAssertEqual(session.wildState, .ready)
+        await gate.resume()
+        await stale?.value
+        XCTAssertEqual(session.wildState, .ready)
+        XCTAssertEqual(session.wildCandidates.map(\.id), oldIDs)
+    }
+
+    func testTheSessionClockBoundsTheSearch() async throws {
+        let clock = FakeClock(), stub = WildStub.standard()
+        stub.clock = clock; stub.secondsPerRequest = 11
+        let session = PracticeSession(engineURL: engineURL, clock: { clock.now }, drivesAutomatically: false,
+                                      wildSource: PracticeWildSource(provider: stub, details: stub), wildSeed: { 11 })
+        session.prepare(state: state(), activeName: nil)
+        session.findWildOpponents()
+        await session.wildTask?.value
+        XCTAssertEqual(session.wildState, .ready)
+        XCTAssertEqual(session.wildCandidates.count, 1, "the 20 s budget ran out on the session's own clock")
+    }
+
+    func testNothingFoundIsAPayloadFreeStateAndALaterSearchRecovers() async throws {
         let stub = WildStub.standard(); stub.failIndex = true
         let session = makeSession(stub)
         session.prepare(state: state(), activeName: nil)
         let finished = await search(session)
         XCTAssertTrue(finished)
-        guard case .unavailable(let message) = session.wildState else { XCTFail("state \(session.wildState)"); return }
-        XCTAssertTrue(message.contains("야생"), message)
+        XCTAssertEqual(session.wildState, .unavailable)
         XCTAssertTrue(session.wildCandidates.isEmpty)
-        // A later search recovers once the data is back.
         stub.failIndex = false
         let again = await search(session)
         XCTAssertTrue(again)
@@ -742,22 +933,54 @@ final class PracticeWildSessionTests: XCTestCase {
         XCTAssertEqual(session.opponentID, wild.id, "a prepared session keeps the wild opponent of the same player")
         XCTAssertNotNil(session.opponent)
     }
+}
 
-    func testPracticeAgainstWildOpponentsNeverWritesTheSave() async throws {
-        let own = state()
-        let bytes = try BattleJSON.encoder().encode(own)
-        let file = FileManager.default.temporaryDirectory.appendingPathComponent("wild-save-\(UUID()).json")
-        try bytes.write(to: file); defer { try? FileManager.default.removeItem(at: file) }
-        let session = makeSession(WildStub.standard())
-        session.prepare(state: own, activeName: nil)
-        let finished = await search(session)
-        XCTAssertTrue(finished)
-        session.opponentID = try XCTUnwrap(session.wildCandidates.first).id
-        session.start()
-        XCTAssertEqual(session.battle?.phase, .running)
-        session.forfeit()
-        session.releaseIfIdle()
-        XCTAssertEqual(try BattleJSON.encoder().encode(own), bytes)
-        XCTAssertEqual(try Data(contentsOf: file), bytes)
+// MARK: Wording and the read-only guard
+
+final class PracticeWildWordingTests: XCTestCase {
+    func testUnavailableWordingIsLocalizedAndKeepsTheKoreanText() {
+        XCTAssertEqual(L(.ko).practiceWildUnavailable,
+                       "야생 상대를 찾지 못했습니다. 인터넷 연결을 확인한 뒤 다시 찾아 주세요. 내 개체끼리는 그대로 연습할 수 있습니다.")
+        XCTAssertEqual(L(.en).practiceWildUnavailable,
+                       "Couldn't find wild opponents. Check your internet connection and try again. You can still practice with your own Pokémon.")
+        for language in AppLanguage.allCases where language != .ko {
+            XCTAssertEqual(L(language).practiceWildUnavailable, L(.en).practiceWildUnavailable, "\(language)")
+        }
+    }
+}
+
+/// The practice side must stay read-only. `CompanionStore.rollsShiny` is a pure static and the one allowed use of
+/// the store; any other store use, file write, defaults or keychain API in these files is a way to reach the save.
+final class PracticeReadOnlyGuardTests: XCTestCase {
+    static let writeAPIs = ["FileManager", "UserDefaults", "AppStatePaths", "SaveTransfer", "SaveSnapshot", ".write(to",
+                            "createFile", "removeItem", "moveItem", "copyItem", "replaceItem", "FileHandle", "SecItem",
+                            "Keychain", ".save("]
+    static func hits(in source: String) -> [String] {
+        let code = source.split(separator: "\n", omittingEmptySubsequences: false)
+            .map { line in line.range(of: "//").map { String(line[..<$0.lowerBound]) } ?? String(line) }
+            .joined(separator: "\n")
+        var found = writeAPIs.filter { code.contains($0) }
+        if code.replacingOccurrences(of: "CompanionStore.rollsShiny(", with: "").contains("CompanionStore") {
+            found.append("CompanionStore")
+        }
+        return found
+    }
+
+    func testScannerFlagsWritesAndStoreUseButNotComments() {
+        XCTAssertEqual(Self.hits(in: "try data.write(to: url)"), [".write(to"])
+        XCTAssertEqual(Self.hits(in: "FileManager.default.createFile(atPath: p, contents: nil)"), ["FileManager", "createFile"])
+        XCTAssertEqual(Self.hits(in: "let store = CompanionStore(provider: p)"), ["CompanionStore"])
+        XCTAssertEqual(Self.hits(in: "store.save()"), [".save("])
+        XCTAssertEqual(Self.hits(in: "let s = CompanionStore.rollsShiny(roll: 1, charmOwned: false)"), [])
+        XCTAssertEqual(Self.hits(in: "/// never calls FileManager or CompanionStore\nlet x = 1 // UserDefaults"), [])
+    }
+
+    func testPracticeSourcesUseNoSaveOrFileWriteAPI() throws {
+        let core = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().appendingPathComponent("Sources/PokeTokenBar/Core")
+        for name in ["PracticeSession", "PracticeWild", "PracticeBattle", "HatchRule"] {
+            let source = try String(contentsOf: core.appendingPathComponent("\(name).swift"), encoding: .utf8)
+            XCTAssertEqual(Self.hits(in: source), [], "\(name).swift reaches for the save or the disk")
+        }
     }
 }

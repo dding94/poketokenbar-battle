@@ -17,8 +17,6 @@ enum PracticeText {
         default: return "전투 정보를 확인할 수 없습니다. 연습전을 다시 열어 주세요."
         }
     }
-    /// Shown when the wild search ends with nothing (no species index and no cached details, e.g. offline).
-    static let wildUnavailable = "야생 상대를 찾지 못했습니다. 인터넷 연결을 확인한 뒤 다시 찾아 주세요. 내 개체끼리는 그대로 연습할 수 있습니다."
     static func log(_ line: String, names: [String: String]) -> String? {
         let p = line.components(separatedBy: "|")
         guard p.count > 2 else { return nil }

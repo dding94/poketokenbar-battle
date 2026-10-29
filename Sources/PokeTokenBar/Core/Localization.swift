@@ -1896,6 +1896,7 @@ extension L {
     var practiceWildHint: String { lang == .ko ? "내 레벨에 맞춰 뽑아서 승부가 팽팽해요" : "Matched to your level for a close fight" }
     var practiceWildReroll: String { lang == .ko ? "다른 야생 상대" : "Reroll" }
     var practiceWildSearching: String { lang == .ko ? "레벨에 맞는 상대를 찾는 중…" : "Finding opponents at your level…" }
+    var practiceWildUnavailable: String { "" }
     var practiceWildTag: String { lang == .ko ? "야생" : "Wild" }
     var practiceOwnedHeader: String { lang == .ko ? "내 개체" : "Your collection" }
 }

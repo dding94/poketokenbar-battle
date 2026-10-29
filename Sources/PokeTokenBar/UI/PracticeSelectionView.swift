@@ -173,13 +173,13 @@ struct PracticeSelectionView: View {
                         }
                         Text(l.practiceWildSearching).foregroundStyle(.secondary)
                     }
-                case .unavailable(let reason):
+                case .unavailable:
                     wildNotice {
                         Image(systemName: "exclamationmark.triangle").foregroundStyle(.orange)
                         // Two lines at most keep my own opponents in view; the tooltip has the rest.
-                        Text(reason).foregroundStyle(.secondary)
+                        Text(l.practiceWildUnavailable).foregroundStyle(.secondary)
                             .lineLimit(2)
-                            .help(reason)
+                            .help(l.practiceWildUnavailable)
                         Spacer(minLength: 4)
                         Button(l.retry) { session.findWildOpponents() }
                             .buttonStyle(.borderless)

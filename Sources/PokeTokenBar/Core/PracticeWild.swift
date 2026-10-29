@@ -46,6 +46,10 @@ struct PracticeWildSource: Sendable {
 struct PracticeWildGenerator {
     let source: PracticeWildSource
     let engine: BattleEngine
+    /// Time source for the search budget (`budget` seconds from the start of `make`); tests inject a fake one.
+    var clock: () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }
+    var budget: TimeInterval = PracticeWildGenerator.defaultBudget
+    static let defaultBudget: TimeInterval = 20
 
     /// Up to `count` candidates within ±3 levels of `playerLevel`, the same for the same `seed`. Species whose
     /// line or details cannot be loaded are skipped (offline, PokéAPI's disk cache still serves details).
@@ -133,6 +137,6 @@ struct WildRNG: RandomNumberGenerator {
 /// The wild-opponent search shown on the selection screen.
 enum PracticeWildState: Equatable, Sendable {
     case idle, searching, ready
-    /// Localized reason (e.g. offline with nothing cached).
-    case unavailable(String)
+    /// Nothing could be made (e.g. offline with nothing cached); the view words it (`L.practiceWildUnavailable`).
+    case unavailable
 }
