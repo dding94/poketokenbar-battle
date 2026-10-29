@@ -42,15 +42,21 @@ final class PracticeBattleTests: XCTestCase {
         XCTAssertTrue(roster.candidates.last?.blockedReason?.contains("기술") == true)
         XCTAssertEqual(try BattleJSON.encode(state), before)
     }
-    func testManualTimeoutActsOnceAtThirtySeconds() throws {
+    /// Practice turns are 15 s (03B-5); the 30 s proposal for online battles is separate.
+    func testManualTimeoutActsOnceAtFifteenSeconds() throws {
+        XCTAssertEqual(PracticeBattle.manualTurnSeconds, 15)
         let engine = try engine(); var now = 0.0
         let model = PracticeBattle(engine: engine, clock: { now })
         model.start(player: try candidate("a", engine: engine), opponent: try candidate("b", engine: engine), mode: .manual, seed: [1,2,3,4])
-        XCTAssertEqual(model.phase, .running); XCTAssertEqual(model.view?.turn, 1)
-        now = 29.9; model.tick(); XCTAssertEqual(model.view?.turn, 1)
-        now = 30; model.tick(); XCTAssertEqual(model.view?.turn, 2)
+        XCTAssertEqual(model.phase, .running); XCTAssertEqual(model.view?.turn, 1); XCTAssertEqual(model.remainingSeconds, 15)
+        now = 14.9; model.tick(); XCTAssertEqual(model.view?.turn, 1); XCTAssertEqual(model.remainingSeconds, 1)
+        now = 15; model.tick(); XCTAssertEqual(model.view?.turn, 2); XCTAssertEqual(model.remainingSeconds, 15)
         model.tick(); XCTAssertEqual(model.view?.turn, 2)
         XCTAssertTrue(model.messages.contains { $0.contains("시간 초과") })
+        // The next turn gets the full limit again, from the moment it began.
+        now = 29.9; model.tick(); XCTAssertEqual(model.view?.turn, 2)
+        now = 30; model.tick(); XCTAssertEqual(model.view?.turn, 3)
+        model.prepareSelection(); XCTAssertEqual(model.remainingSeconds, 15)
     }
     func testSameSeedAndChoicesReplayAndNeverWriteSyntheticSave() throws {
         let engine = try engine(); let a = try candidate("a", species: 25, moves: ["thunderbolt"], engine: engine)
@@ -110,7 +116,7 @@ final class PracticeBattleTests: XCTestCase {
         let model = PracticeBattle(engine: engine, clock: { now })
         model.start(player: try candidate("a", species: 25, moves: ["thunderbolt", "splash"], engine: engine),
                     opponent: try candidate("b", species: 129, moves: ["splash"], engine: engine), mode: .manual, seed: [1,2,3,4])
-        now = 30; model.choose(slot: 2)
+        now = 15; model.choose(slot: 2)
         XCTAssertEqual(model.result?.winner, "p1")
         let hash = model.result?.logHash; model.choose(slot: 2); model.tick(); model.cancel()
         XCTAssertEqual(model.phase, .finished); XCTAssertEqual(model.result?.logHash, hash)
@@ -148,7 +154,7 @@ final class PracticeBattleTests: XCTestCase {
         let engine = try engine(); var now = 0.0
         let model = PracticeBattle(engine: engine, clock: { now })
         model.start(player: try candidate("a", engine: engine), opponent: try candidate("b", engine: engine), mode: .manual, seed: [1,2,3,4])
-        now = 20; model.pause()
+        now = 5; model.pause()
         XCTAssertTrue(model.isPaused); XCTAssertEqual(model.remainingSeconds, 10)
         now = 500; model.tick(); model.choose(slot: 1)
         XCTAssertEqual(model.view?.turn, 1); XCTAssertEqual(model.remainingSeconds, 10)
@@ -203,7 +209,7 @@ final class PracticeBattleTests: XCTestCase {
         model.start(player: try candidate("a", engine: engine), opponent: try candidate("b", engine: engine), mode: .manual, seed: [1,2,3,4])
         XCTAssertFalse(model.events.contains(.timedOut))
         let before = model.events.count
-        now = 30; model.tick()
+        now = 15; model.tick()
         XCTAssertEqual(model.events.filter { $0 == .timedOut }.count, 1)
         XCTAssertEqual(model.events.dropFirst(before).first, .timedOut)
         XCTAssertTrue(model.events.dropFirst(before + 1).contains { if case .move = $0 { true } else { false } })
@@ -217,7 +223,7 @@ final class PracticeBattleTests: XCTestCase {
         let b = try candidate("b", species: 129, moves: ["splash"], engine: engine)
         model.start(player: a, opponent: b, mode: .manual, seed: [1,2,3,4])
         let first = model.events
-        now = 30; model.tick()
+        now = 15; model.tick()
         XCTAssertGreaterThan(model.events.count, first.count)
         model.start(player: a, opponent: b, mode: .manual, seed: [1,2,3,4])
         XCTAssertEqual(model.events, first)

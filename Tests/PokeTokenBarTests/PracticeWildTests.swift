@@ -103,20 +103,39 @@ private final class WildStub: PokeProviding, PokemonDetailProviding, @unchecked 
     }
 }
 
-/// An index request held open until `resume()`, so a player change can land while a search is awaiting.
+/// Index requests held open until `resume()`, so a player change can land while a search is awaiting. Every request
+/// is held: a search can run next to today's opponent's, and a lost continuation would hang the awaiting test.
 private actor GatedProvider: PokeProviding, PokemonDetailProviding {
     private let inner: WildStub
-    private var continuation: CheckedContinuation<Void, Never>?
+    private var held: [CheckedContinuation<Void, Never>] = []
     init(_ inner: WildStub) { self.inner = inner }
     func line(baseSpeciesID: Int) async throws -> EvoLine { try await inner.line(baseSpeciesID: baseSpeciesID) }
     func baseSpeciesIndex() async throws -> [BaseSpecies] {
-        await withCheckedContinuation { continuation = $0 }
+        await withCheckedContinuation { held.append($0) }
         return try await inner.baseSpeciesIndex()
     }
     func baseSpecies(id: Int) async throws -> BaseSpecies? { try await inner.baseSpecies(id: id) }
     func pokemonDetails(speciesID: Int) async throws -> PokemonDetails { try await inner.pokemonDetails(speciesID: speciesID) }
-    func isSuspended() -> Bool { continuation != nil }
-    func resume() { continuation?.resume(); continuation = nil }
+    func suspendedCount() -> Int { held.count }
+    /// Lets every request held so far go on.
+    func resume() { let released = held; held = []; released.forEach { $0.resume() } }
+}
+
+/// One species that only knows Splash, so a battle against it ends the same way on every seed: Magikarp (129) falls
+/// to Pikachu's Thunderbolt in one turn, Chansey (113) takes at least six. Neither can hurt the player.
+private struct SplashStub: PokeProviding, PokemonDetailProviding {
+    let speciesID: Int
+    func line(baseSpeciesID: Int) async throws -> EvoLine { evoLine(tree(speciesID), .common) }
+    func baseSpeciesIndex() async throws -> [BaseSpecies] { [BaseSpecies(id: speciesID, captureRate: 255)] }
+    func baseSpecies(id: Int) async throws -> BaseSpecies? { try await baseSpeciesIndex().first { $0.id == id } }
+    func pokemonDetails(speciesID: Int) async throws -> PokemonDetails {
+        PokemonDetails(
+            speciesID: speciesID, name: "species-\(speciesID)", height: 10, weight: 100, baseExperience: 64, genderRate: 4,
+            types: ["normal"],
+            baseStats: ["hp": 45, "attack": 49, "defense": 49, "special-attack": 65, "special-defense": 65, "speed": 45],
+            abilities: [PokemonAbilityOption(name: "swift-swim", slot: 1, isHidden: false)],
+            moves: [PokemonMoveOption(name: "splash", learnMethods: [PokemonMoveLearnMethod(method: "level-up", level: 1)])])
+    }
 }
 
 /// Same splitmix64 stream the generator is specified to use, so a test can replay the draw order.
@@ -146,6 +165,35 @@ private func waitUntil(timeout: TimeInterval = 5, _ condition: @escaping () -> B
 
 private let engineURL = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
     .deletingLastPathComponent().appendingPathComponent("engine/dist/battle-engine.js")
+
+/// Waits until the gated provider holds `count` requests, i.e. that many searches are suspended inside their first
+/// await. A search also makes today's opponent when it has none for today (`searchesInFlight`).
+@MainActor
+private func waitSuspended(_ gate: GatedProvider, count: Int = 1) async -> Bool {
+    for _ in 0..<2500 {
+        if await gate.suspendedCount() >= count { return true }
+        try? await Task.sleep(nanoseconds: 2_000_000)
+    }
+    return false
+}
+
+/// The wild search and today's opponent's, when each is in flight.
+@MainActor
+private func searchesInFlight(_ session: PracticeSession) -> Int {
+    [session.wildState, session.dailyState].filter { $0 == .searching }.count
+}
+
+/// A whole search through the gate: start, let every request it started reach the index, release them, await the
+/// tasks (today's opponent's too, so nothing is left running against the stub).
+@MainActor
+private func completeSearch(_ session: PracticeSession, _ gate: GatedProvider) async -> Bool {
+    session.findWildOpponents()
+    guard await waitSuspended(gate, count: searchesInFlight(session)) else { return false }
+    let tasks = [session.wildTask, session.dailyTask]
+    await gate.resume()
+    for task in tasks { await task?.value }
+    return session.wildState == .ready
+}
 
 // MARK: Hatch rule and level/stage rules
 
@@ -651,23 +699,6 @@ final class PracticeWildSessionTests: XCTestCase {
         session.findWildOpponents()
         return await waitUntil { session.wildState != .searching }
     }
-    /// Waits until the gated provider holds a request, i.e. the search is suspended inside its first await.
-    private func waitSuspended(_ gate: GatedProvider) async -> Bool {
-        for _ in 0..<2500 {
-            if await gate.isSuspended() { return true }
-            try? await Task.sleep(nanoseconds: 2_000_000)
-        }
-        return false
-    }
-    /// A whole search through the gate: start, let it reach the index request, release it, await its task.
-    private func completeSearch(_ session: PracticeSession, _ gate: GatedProvider) async -> Bool {
-        session.findWildOpponents()
-        guard await waitSuspended(gate) else { return false }
-        let task = session.wildTask
-        await gate.resume()
-        await task?.value
-        return session.wildState == .ready
-    }
     /// Pikachu with thunderbolt as the player, so an automatic battle against any wild stub finishes.
     private func fastState() -> CompanionState {
         var state = CompanionState()
@@ -785,13 +816,14 @@ final class PracticeWildSessionTests: XCTestCase {
         session.prepare(state: state(), activeName: nil)
         session.findWildOpponents()
         XCTAssertEqual(session.wildState, .searching)
-        let reached = await waitSuspended(gate)
+        let reached = await waitSuspended(gate, count: searchesInFlight(session))
         XCTAssertTrue(reached, "the search reached the gated index request")
-        let stale = session.wildTask
+        let stale = session.wildTask, staleDaily = session.dailyTask
         session.playerID = "c"
         XCTAssertEqual(session.wildState, .idle)
         await gate.resume()
         await stale?.value   // the stale task has finished: nothing is left that could still land
+        await staleDaily?.value
         XCTAssertEqual(session.wildState, .idle, "the stale result must not land on the new player")
         XCTAssertTrue(session.wildCandidates.isEmpty)
     }
@@ -865,13 +897,15 @@ final class PracticeWildSessionTests: XCTestCase {
         session.prepare(state: state(), activeName: nil)
         // Nothing found yet: a released search leaves the section idle.
         session.findWildOpponents()
-        var reached = await waitSuspended(gate)
+        var reached = await waitSuspended(gate, count: searchesInFlight(session))
         XCTAssertTrue(reached)
         var stale = session.wildTask
+        let staleDaily = session.dailyTask
         session.releaseIfIdle()
         XCTAssertEqual(session.wildState, .idle)
         await gate.resume()
         await stale?.value
+        await staleDaily?.value
         XCTAssertEqual(session.wildState, .idle)
         XCTAssertTrue(session.wildCandidates.isEmpty)
         // With a batch on screen it stays.
@@ -893,11 +927,16 @@ final class PracticeWildSessionTests: XCTestCase {
 
     func testTheSessionClockBoundsTheSearch() async throws {
         let clock = FakeClock(), stub = WildStub.standard()
-        stub.clock = clock; stub.secondsPerRequest = 11
+        stub.clock = clock
         let session = PracticeSession(engineURL: engineURL, clock: { clock.now }, drivesAutomatically: false,
                                       wildSource: PracticeWildSource(provider: stub, details: stub), wildSeed: { 11 })
         session.prepare(state: state(), activeName: nil)
+        // The first search also makes today's opponent on the same stub clock; let it land before the clock runs.
         session.findWildOpponents()
+        await session.wildTask?.value; await session.dailyTask?.value
+        stub.secondsPerRequest = 11
+        session.findWildOpponents()
+        XCTAssertNotEqual(session.dailyState, .searching, "a reroll leaves today's opponent alone")
         await session.wildTask?.value
         XCTAssertEqual(session.wildState, .ready)
         XCTAssertEqual(session.wildCandidates.count, 1, "the 20 s budget ran out on the session's own clock")
@@ -935,6 +974,378 @@ final class PracticeWildSessionTests: XCTestCase {
     }
 }
 
+// MARK: Today's opponent
+
+/// Today's opponent is one more wild candidate, made from the day's seed next to the wild search with the same
+/// lifecycle and generation guard. A reroll leaves it alone; another player or another day makes it again. Its
+/// stars count against the day it was made for.
+@MainActor
+final class PracticeDailySessionTests: XCTestCase {
+    /// The wall clock the session reads for the day; tests move it. UTC keeps the day keys machine-independent.
+    private final class Today { var date = Date(timeIntervalSince1970: 1_793_400_000) }   // 2026-10-30 22:40 UTC
+    private static let day1 = "2026-10-30", day2 = "2026-10-31"
+    private static var utc: Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0) ?? .current
+        return calendar
+    }
+
+    private func profile(_ id: String, move: String) -> PokemonProfile {
+        var p = PokemonProfile.generate(seed: 42, instanceID: id)
+        p.level = 50; p.gender = .male; p.abilityName = "static"
+        p.moves = [PokemonKnownMove(name: move, learnedAtLevel: 1)]
+        return p
+    }
+    /// Pikachu with Thunderbolt as the player, and two Blissey ("o", "c") to pick as own opponents.
+    private func state(player: String = "p") -> CompanionState {
+        var state = CompanionState()
+        state.dex = [(player, 25, "thunderbolt"), ("o", 242, "tackle"), ("c", 242, "tackle")].map { id, species, move in
+            DexEntry(baseID: species, finalID: species, chainOrder: [species], rarity: .common, caughtAt: nil,
+                     nature: .hardy, profile: profile(id, move: move))
+        }
+        return state
+    }
+    private func makeSession(_ stub: some PokeProviding & PokemonDetailProviding, today: Today = Today(),
+                             store: PracticeRecordStore = PracticeRecordStore(fileURL: nil),
+                             seed: @escaping () -> UInt64 = { 11 }, player: String = "p") -> PracticeSession {
+        let session = PracticeSession(engineURL: engineURL, clock: { 0 }, drivesAutomatically: false,
+                                      wildSource: PracticeWildSource(provider: stub, details: stub), wildSeed: seed,
+                                      recordStore: store, now: { today.date }, calendar: Self.utc)
+        session.prepare(state: state(player: player), activeName: nil)
+        return session
+    }
+    /// Starts a search and awaits both tasks it may have started.
+    private func searchAll(_ session: PracticeSession) async {
+        session.findWildOpponents()
+        let tasks = [session.wildTask, session.dailyTask]
+        for task in tasks { await task?.value }
+    }
+    /// The goals a finished battle met, from its own view: what the session must have counted.
+    private func metGoals(_ battle: PracticeBattle?) throws -> Set<PracticeDailyGoal> {
+        let view = try XCTUnwrap(battle?.view)
+        let outcome = PracticeOutcome(winner: battle?.result?.winner)
+        return Set(PracticeDailyGoal.allCases.filter {
+            $0.isMet(outcome: outcome, turns: view.turn, playerHPShare: view.p1.hpShare)
+        })
+    }
+    private func fightToday(_ session: PracticeSession) throws {
+        session.opponentID = try XCTUnwrap(session.dailyCandidate).id
+        session.mode = .automatic
+        session.start()
+        session.skipToResult()
+    }
+
+    func testASearchAlsoMakesTodaysOpponentFromTheDaySeed() async throws {
+        let stub = WildStub.standard()
+        let session = makeSession(stub)
+        XCTAssertEqual(session.dailyState, .idle); XCTAssertNil(session.dailyCandidate)
+        session.findWildOpponents()
+        XCTAssertEqual(session.wildState, .searching); XCTAssertEqual(session.dailyState, .searching)
+        let tasks = [session.wildTask, session.dailyTask]
+        for task in tasks { await task?.value }
+        XCTAssertEqual(session.dailyState, .ready)
+        let daily = try XCTUnwrap(session.dailyCandidate)
+        XCTAssertEqual(daily.id, "daily-2026-10-30")
+        XCTAssertFalse(session.wildCandidates.contains { $0.id == daily.id })
+        // The wild generator itself: one candidate around the player's level, on the day's seed.
+        let generator = PracticeWildGenerator(source: PracticeWildSource(provider: stub, details: stub),
+                                              engine: try BattleEngine(url: engineURL))
+        let made = try await generator.make(count: 1, around: 50, seed: PracticeDaily.seed(dayKey: Self.day1))
+        let expected = try XCTUnwrap(made.first)
+        XCTAssertEqual(daily.snapshot, expected.snapshot)
+        XCTAssertEqual(daily.name, expected.name); XCTAssertEqual(daily.origin, expected.origin)
+        // It resolves as an opponent, and a battle starts against it.
+        session.opponentID = daily.id
+        XCTAssertEqual(session.opponent?.id, daily.id)
+        XCTAssertNotNil(session.matchup)
+        session.start()
+        let battle = try XCTUnwrap(session.battle)
+        XCTAssertEqual(battle.phase, .running)
+        XCTAssertEqual(battle.opponent?.id, daily.id)
+        XCTAssertEqual(battle.view?.p2.speciesNum, daily.snapshot?.set.speciesNum)
+    }
+
+    func testTheSameDayMakesTheSameOpponentAndAnotherDayAnother() async throws {
+        let first = makeSession(WildStub.standard())
+        await searchAll(first)
+        let again = makeSession(WildStub.standard())
+        await searchAll(again)
+        XCTAssertNotNil(first.dailyCandidate?.snapshot)
+        XCTAssertEqual(again.dailyCandidate?.id, first.dailyCandidate?.id)
+        XCTAssertEqual(again.dailyCandidate?.snapshot, first.dailyCandidate?.snapshot)
+        let tomorrow = Today(); tomorrow.date += 86_400
+        let next = makeSession(WildStub.standard(), today: tomorrow)
+        await searchAll(next)
+        XCTAssertEqual(next.dailyCandidate?.id, "daily-2026-10-31")
+        XCTAssertNotEqual(next.dailyCandidate?.snapshot, first.dailyCandidate?.snapshot)
+    }
+
+    func testARerollLeavesTodaysOpponentAndItsSelectionAlone() async throws {
+        let counter = Counter()
+        let session = makeSession(WildStub.standard(), seed: { counter.value += 1; return counter.value })
+        await searchAll(session)
+        let daily = try XCTUnwrap(session.dailyCandidate)
+        session.opponentID = daily.id
+        session.findWildOpponents()
+        XCTAssertEqual(session.wildState, .searching)
+        XCTAssertEqual(session.dailyState, .ready, "the same day's opponent is not made again")
+        await session.wildTask?.value
+        XCTAssertEqual(session.wildCandidates.map(\.id), ["wild-2-0", "wild-2-1", "wild-2-2"])
+        XCTAssertEqual(session.dailyCandidate?.id, daily.id)
+        XCTAssertEqual(session.dailyCandidate?.snapshot, daily.snapshot)
+        XCTAssertEqual(session.opponentID, daily.id, "the replaced batch never held today's opponent")
+    }
+
+    func testChangingThePlayerDropsTodaysOpponent() async throws {
+        let session = makeSession(WildStub.standard())
+        await searchAll(session)
+        session.opponentID = try XCTUnwrap(session.dailyCandidate).id
+        session.playerID = "c"
+        XCTAssertEqual(session.dailyState, .idle); XCTAssertNil(session.dailyCandidate)
+        XCTAssertEqual(session.opponentID, "p", "today's opponent was matched to the old player's level")
+        await searchAll(session)
+        XCTAssertEqual(session.dailyState, .ready)
+        XCTAssertEqual(session.dailyCandidate?.id, "daily-2026-10-30")
+    }
+
+    func testADailySearchInFlightIsDiscardedWhenThePlayerChanges() async throws {
+        let gate = GatedProvider(WildStub.standard())
+        let session = makeSession(gate)
+        session.findWildOpponents()
+        let reached = await waitSuspended(gate, count: 2)
+        XCTAssertTrue(reached, "the wild search and today's opponent's both wait at the index")
+        let stale = session.dailyTask, staleWild = session.wildTask
+        session.playerID = "c"
+        XCTAssertEqual(session.dailyState, .idle)
+        await gate.resume()
+        await stale?.value; await staleWild?.value
+        XCTAssertEqual(session.dailyState, .idle, "the stale result must not land on the new player")
+        XCTAssertNil(session.dailyCandidate)
+    }
+
+    func testStartStopsADailySearchAndItsLateResultChangesNothing() async throws {
+        let gate = GatedProvider(WildStub.standard())
+        let session = makeSession(gate)
+        session.findWildOpponents()
+        let reached = await waitSuspended(gate, count: 2)
+        XCTAssertTrue(reached)
+        let stale = session.dailyTask, staleWild = session.wildTask
+        session.mode = .manual
+        session.start()
+        XCTAssertEqual(session.dailyState, .idle, "starting stops the search; nothing was made yet")
+        let battle = try XCTUnwrap(session.battle)
+        await gate.resume()
+        await stale?.value; await staleWild?.value
+        XCTAssertEqual(session.dailyState, .idle); XCTAssertNil(session.dailyCandidate)
+        XCTAssertTrue(session.battle === battle); XCTAssertEqual(battle.opponent?.id, "o")
+    }
+
+    func testStartDuringANewDaysSearchKeepsYesterdaysOpponent() async throws {
+        let gate = GatedProvider(WildStub.standard()), today = Today()
+        let session = makeSession(gate, today: today)
+        let found = await completeSearch(session, gate)
+        XCTAssertTrue(found)
+        let yesterday = try XCTUnwrap(session.dailyCandidate)
+        session.opponentID = yesterday.id
+        today.date += 86_400
+        session.findWildOpponents()
+        XCTAssertEqual(session.dailyState, .searching, "a new day makes a new opponent")
+        let reached = await waitSuspended(gate, count: 2)
+        XCTAssertTrue(reached)
+        let stale = session.dailyTask, staleWild = session.wildTask
+        session.mode = .manual
+        session.start()
+        XCTAssertEqual(session.dailyState, .ready); XCTAssertEqual(session.dailyCandidate?.id, yesterday.id)
+        await gate.resume()
+        await stale?.value; await staleWild?.value
+        XCTAssertEqual(session.dailyCandidate?.id, yesterday.id, "the late result must not replace it")
+        XCTAssertEqual(session.opponentID, yesterday.id)
+        XCTAssertEqual(session.battle?.opponent?.id, yesterday.id)
+        XCTAssertEqual(session.battle?.phase, .running)
+    }
+
+    func testANewDayMakesANewOpponentWhenASearchStarts() async throws {
+        let today = Today()
+        let session = makeSession(WildStub.standard(), today: today)
+        await searchAll(session)
+        let yesterday = try XCTUnwrap(session.dailyCandidate)
+        session.opponentID = yesterday.id
+        today.date += 86_400
+        session.findWildOpponents()
+        XCTAssertEqual(session.dailyState, .searching)
+        let tasks = [session.wildTask, session.dailyTask]
+        for task in tasks { await task?.value }
+        XCTAssertEqual(session.dailyCandidate?.id, "daily-2026-10-31")
+        XCTAssertNotEqual(session.dailyCandidate?.snapshot, yesterday.snapshot)
+        XCTAssertEqual(session.opponentID, "o", "yesterday's opponent is gone, so the selection falls back to an own one")
+    }
+
+    /// The menu-bar app runs for days and the wild batch survives closing the popover, so no search is due when the
+    /// practice screen reopens on a new day. Preparing the screen makes the new day's opponent instead.
+    func testReopeningOnANewDayMakesTheNewDaysOpponent() async throws {
+        let today = Today()
+        let session = makeSession(WildStub.standard(), today: today)
+        await searchAll(session)
+        session.releaseIfIdle()
+        session.prepare(state: state(), activeName: nil)
+        XCTAssertEqual(session.dailyState, .ready, "the same day starts nothing")
+        session.releaseIfIdle()
+        today.date += 86_400
+        session.prepare(state: state(), activeName: nil)
+        XCTAssertEqual(session.dailyState, .searching)
+        XCTAssertEqual(session.wildState, .ready, "the wild batch is not tied to a day")
+        await session.dailyTask?.value
+        XCTAssertEqual(session.dailyCandidate?.id, "daily-2026-10-31")
+    }
+
+    /// A finished battle on screen keeps yesterday's opponent for its rematch; the selection screen gets the new one.
+    func testAResultOnScreenKeepsYesterdaysOpponentUntilTheSelection() async throws {
+        let today = Today()
+        let session = makeSession(SplashStub(speciesID: 129), today: today)
+        await searchAll(session)
+        let yesterday = try XCTUnwrap(session.dailyCandidate)
+        try fightToday(session)
+        XCTAssertEqual(session.battle?.phase, .finished)
+        today.date += 86_400
+        session.prepare(state: state(), activeName: nil)
+        XCTAssertEqual(session.dailyState, .ready)
+        XCTAssertEqual(session.dailyCandidate?.id, yesterday.id)
+        XCTAssertEqual(session.opponentID, yesterday.id)
+        XCTAssertEqual(session.battle?.phase, .finished)
+        session.backToSelection()
+        await searchAll(session)
+        XCTAssertEqual(session.dailyCandidate?.id, "daily-2026-10-31")
+    }
+
+    func testReleaseIfIdleStopsADailySearchAndKeepsAMadeOpponent() async throws {
+        let gate = GatedProvider(WildStub.standard())
+        let session = makeSession(gate)
+        session.findWildOpponents()
+        let reached = await waitSuspended(gate, count: 2)
+        XCTAssertTrue(reached)
+        let stale = session.dailyTask, staleWild = session.wildTask
+        session.releaseIfIdle()
+        XCTAssertEqual(session.dailyState, .idle)
+        await gate.resume()
+        await stale?.value; await staleWild?.value
+        XCTAssertEqual(session.dailyState, .idle); XCTAssertNil(session.dailyCandidate)
+        // One that was made stays across a release and still resolves; the same player keeps it selected.
+        session.prepare(state: state(), activeName: nil)
+        let found = await completeSearch(session, gate)
+        XCTAssertTrue(found)
+        let daily = try XCTUnwrap(session.dailyCandidate)
+        session.opponentID = daily.id
+        session.releaseIfIdle()
+        XCTAssertNil(session.roster)
+        XCTAssertEqual(session.dailyState, .ready); XCTAssertEqual(session.opponent?.id, daily.id)
+        session.prepare(state: state(), activeName: nil)
+        XCTAssertEqual(session.opponentID, daily.id)
+        XCTAssertEqual(session.opponent?.snapshot, daily.snapshot)
+    }
+
+    func testAnUnavailableOpponentIsRetriedByTheNextSearch() async throws {
+        let stub = WildStub.standard(); stub.failIndex = true
+        let session = makeSession(stub)
+        await searchAll(session)
+        XCTAssertEqual(session.dailyState, .unavailable); XCTAssertNil(session.dailyCandidate)
+        stub.failIndex = false
+        await searchAll(session)
+        XCTAssertEqual(session.dailyState, .ready)
+        XCTAssertEqual(session.dailyCandidate?.id, "daily-2026-10-30")
+    }
+
+    // MARK: Stars
+
+    func testBeatingTodaysOpponentEarnsItsStarsOnce() async throws {
+        let session = makeSession(SplashStub(speciesID: 129))
+        await searchAll(session)
+        try fightToday(session)
+        XCTAssertEqual(session.battle?.result?.winner, "p1")
+        let view = try XCTUnwrap(session.battle?.view)
+        XCTAssertEqual(view.turn, 1); XCTAssertEqual(view.p1.hp, view.p1.maxhp, "Splash never hurts")
+        let all = Set(PracticeDailyGoal.allCases)
+        XCTAssertEqual(session.lastRecord, PracticeRecordUpdate(outcome: .win, streak: 1, bestStreak: 1, endedStreak: nil,
+                                                                daily: true, newStars: all, stars: all))
+        XCTAssertEqual(session.records.dailyDay, Self.day1); XCTAssertEqual(session.records.dailyStars, all)
+        // The rematch is the same opponent: nothing left to earn today.
+        session.start(); session.skipToResult()
+        XCTAssertEqual(session.lastRecord, PracticeRecordUpdate(outcome: .win, streak: 2, bestStreak: 2, endedStreak: nil,
+                                                                daily: true, newStars: [], stars: all))
+    }
+
+    func testASlowWinEarnsOnlyTheStarsItMet() async throws {
+        let session = makeSession(SplashStub(speciesID: 113))
+        await searchAll(session)
+        try fightToday(session)
+        XCTAssertEqual(session.battle?.result?.winner, "p1")
+        let view = try XCTUnwrap(session.battle?.view)
+        XCTAssertGreaterThanOrEqual(view.turn, 6, "Chansey outlasts several Thunderbolts")
+        XCTAssertEqual(view.p1.hp, view.p1.maxhp)
+        let met = try metGoals(session.battle)
+        XCTAssertTrue(met.isSuperset(of: [.win, .healthyWin]))
+        XCTAssertEqual(session.lastRecord?.newStars, met); XCTAssertEqual(session.lastRecord?.stars, met)
+        XCTAssertEqual(session.records.dailyStars, met)
+    }
+
+    func testAnotherDayClearsTheStarsBeforeAddingAndTheFileKeepsThem() async throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("practice-daily-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let store = PracticeRecordStore(fileURL: folder.appendingPathComponent("practice-records.json"))
+        let first = makeSession(SplashStub(speciesID: 129), store: store)
+        await searchAll(first)
+        try fightToday(first)
+        XCTAssertEqual(store.load().dailyStars, Set(PracticeDailyGoal.allCases))
+        // The next day, after a relaunch.
+        let tomorrow = Today(); tomorrow.date += 86_400
+        let second = makeSession(SplashStub(speciesID: 113), today: tomorrow, store: store)
+        XCTAssertEqual(second.records.dailyDay, Self.day1)
+        await searchAll(second)
+        try fightToday(second)
+        let met = try metGoals(second.battle)
+        XCTAssertEqual(second.lastRecord?.newStars, met, "yesterday's stars were cleared before today's were added")
+        XCTAssertEqual(second.lastRecord?.stars, met)
+        let saved = store.load()
+        XCTAssertEqual(saved.dailyDay, Self.day2); XCTAssertEqual(saved.dailyStars, met); XCTAssertEqual(saved.wins, 2)
+    }
+
+    func testOnlyTodaysOpponentEarnsStars() async throws {
+        let session = makeSession(SplashStub(speciesID: 129))
+        await searchAll(session)
+        // A wild Magikarp from the batch: the same kind of win, but not today's opponent.
+        session.opponentID = try XCTUnwrap(session.wildCandidates.first).id
+        session.mode = .automatic
+        session.start(); session.skipToResult()
+        XCTAssertEqual(session.battle?.result?.winner, "p1")
+        XCTAssertEqual(session.lastRecord?.daily, false)
+        XCTAssertEqual(session.lastRecord?.newStars, []); XCTAssertEqual(session.lastRecord?.stars, [])
+        XCTAssertNil(session.records.dailyDay); XCTAssertEqual(session.records.dailyStars, [])
+        // Giving up against today's opponent is a loss that earns nothing.
+        session.opponentID = try XCTUnwrap(session.dailyCandidate).id
+        session.mode = .manual
+        session.start(); session.forfeit()
+        XCTAssertEqual(session.lastRecord, PracticeRecordUpdate(outcome: .loss, streak: 0, bestStreak: 1, endedStreak: 1,
+                                                                daily: true, newStars: [], stars: []))
+        XCTAssertEqual(session.records.dailyDay, Self.day1); XCTAssertEqual(session.records.dailyStars, [])
+    }
+
+    /// The failure view's way back is `forfeit()`, and a battle that failed is not a loss. Practice candidates never
+    /// share an individual, so the test makes one: an own entry with the instance id the generator gave today's
+    /// opponent's profile ("wild-<seed>-0"); the engine refuses the same individual on both sides.
+    func testForfeitingAFailedBattleCountsNothing() async throws {
+        let instance = "wild-\(PracticeDaily.seed(dayKey: Self.day1))-0"
+        let session = makeSession(SplashStub(speciesID: 129), player: instance)
+        await searchAll(session)
+        XCTAssertEqual(session.dailyCandidate?.snapshot?.instanceID, instance)
+        session.opponentID = try XCTUnwrap(session.dailyCandidate).id
+        session.start()
+        XCTAssertEqual(session.battle?.phase, .failed, "precondition: the battle failed to start")
+        session.forfeit()
+        XCTAssertNil(session.battle)
+        XCTAssertEqual(session.records, PracticeRecords()); XCTAssertNil(session.lastRecord)
+    }
+}
+
 // MARK: Wording and the read-only guard
 
 final class PracticeWildWordingTests: XCTestCase {
@@ -949,17 +1360,27 @@ final class PracticeWildWordingTests: XCTestCase {
     }
 }
 
-/// The practice side must stay read-only. `CompanionStore.rollsShiny` is a pure static and the one allowed use of
-/// the store; any other store use, file write, defaults or keychain API in these files is a way to reach the save.
+/// The practice side must stay read-only towards the save. `CompanionStore.rollsShiny` is a pure static and the one
+/// allowed use of the store; any other store use, file write, defaults or keychain API in these files is a way to reach
+/// the save. One file writes: `Core/PracticeRecordStore.swift` keeps the practice records in a file of their own, so it
+/// may use the file APIs that takes (the atomic write, and moving a damaged file aside). It still may not delete, copy
+/// or replace a file, nor touch the store, the state paths, save transfers, defaults or the keychain: it can only write
+/// the URL it is given. `PracticeRecordFileTests` checks at run time that this URL is not the save.
 final class PracticeReadOnlyGuardTests: XCTestCase {
     static let writeAPIs = ["FileManager", "UserDefaults", "AppStatePaths", "SaveTransfer", "SaveSnapshot", ".write(to",
                             "createFile", "removeItem", "moveItem", "copyItem", "replaceItem", "FileHandle", "SecItem",
                             "Keychain", ".save("]
-    static func hits(in source: String) -> [String] {
+    /// The one practice file that may write, and the only file APIs it may use.
+    static let recordStorePath = "Core/PracticeRecordStore.swift"
+    static let recordStoreAllowed: Set<String> = ["FileManager", ".write(to", "moveItem"]
+
+    /// The forbidden APIs `source` uses; `path` ("Core/PracticeSession.swift") gives the record store its allowance.
+    static func hits(in source: String, path: String = "") -> [String] {
         let code = source.split(separator: "\n", omittingEmptySubsequences: false)
             .map { line in line.range(of: "//").map { String(line[..<$0.lowerBound]) } ?? String(line) }
             .joined(separator: "\n")
-        var found = writeAPIs.filter { code.contains($0) }
+        let allowed = path == recordStorePath ? recordStoreAllowed : []
+        var found = writeAPIs.filter { code.contains($0) && !allowed.contains($0) }
         if code.replacingOccurrences(of: "CompanionStore.rollsShiny(", with: "").contains("CompanionStore") {
             found.append("CompanionStore")
         }
@@ -975,18 +1396,38 @@ final class PracticeReadOnlyGuardTests: XCTestCase {
         XCTAssertEqual(Self.hits(in: "/// never calls FileManager or CompanionStore\nlet x = 1 // UserDefaults"), [])
     }
 
+    func testOnlyTheRecordStoreMayWriteAndNeverTowardsTheSave() {
+        let store = Self.recordStorePath
+        XCTAssertEqual(Self.hits(in: "try data.write(to: url, options: .atomic)", path: store), [])
+        XCTAssertEqual(Self.hits(in: "try FileManager.default.moveItem(atPath: a, toPath: b)", path: store), [])
+        XCTAssertEqual(Self.hits(in: "try FileManager.default.removeItem(at: url)", path: store), ["removeItem"])
+        XCTAssertEqual(Self.hits(in: "try FileManager.default.copyItem(at: a, to: b)", path: store), ["copyItem"])
+        XCTAssertEqual(Self.hits(in: "_ = try FileManager.default.replaceItemAt(a, withItemAt: b)", path: store), ["replaceItem"])
+        XCTAssertEqual(Self.hits(in: "let url = AppStatePaths.directory()", path: store), ["AppStatePaths"])
+        XCTAssertEqual(Self.hits(in: "CompanionStore.shared.save()", path: store), [".save(", "CompanionStore"])
+        XCTAssertEqual(Self.hits(in: "try SaveTransfer.export(state)", path: store), ["SaveTransfer"])
+        XCTAssertEqual(Self.hits(in: "SaveSnapshotManager.loadLatestValidSnapshot(for: url)", path: store), ["SaveSnapshot"])
+        XCTAssertEqual(Self.hits(in: "KeychainAccess.read(service: s)", path: store), ["Keychain"])
+        XCTAssertEqual(Self.hits(in: "UserDefaults.standard.set(1, forKey: k)", path: store), ["UserDefaults"])
+        // Any other practice file, or a file of the same name in another folder, gets nothing.
+        XCTAssertEqual(Self.hits(in: "try data.write(to: url, options: .atomic)", path: "Core/PracticeSession.swift"), [".write(to"])
+        XCTAssertEqual(Self.hits(in: "try FileManager.default.moveItem(atPath: a, toPath: b)", path: "UI/PracticeRecordStore.swift"),
+                       ["FileManager", "moveItem"])
+    }
+
     func testPracticeSourcesUseNoSaveOrFileWriteAPI() throws {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
             .deletingLastPathComponent().appendingPathComponent("Sources/PokeTokenBar")
         // Every practice file by prefix, so a new one is scanned without editing a list.
-        for (folder, required) in [("Core", ["PracticeSession.swift", "HatchRule.swift"]), ("UI", ["PracticeSelectionView.swift", "PracticeScreen.swift"])] {
+        for (folder, required) in [("Core", ["PracticeSession.swift", "PracticeRecordStore.swift", "HatchRule.swift"]),
+                                   ("UI", ["PracticeSelectionView.swift", "PracticeScreen.swift"])] {
             let directory = root.appendingPathComponent(folder)
             let names = try FileManager.default.contentsOfDirectory(atPath: directory.path)
                 .filter { ($0.hasPrefix("Practice") && $0.hasSuffix(".swift")) || (folder == "Core" && $0 == "HatchRule.swift") }
             XCTAssertTrue(required.allSatisfy(names.contains), "scanned \(names)")
             for name in names {
                 let source = try String(contentsOf: directory.appendingPathComponent(name), encoding: .utf8)
-                XCTAssertEqual(Self.hits(in: source), [], "\(folder)/\(name) reaches for the save or the disk")
+                XCTAssertEqual(Self.hits(in: source, path: "\(folder)/\(name)"), [], "\(folder)/\(name) reaches for the save or the disk")
             }
         }
     }

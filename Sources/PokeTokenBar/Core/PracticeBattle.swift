@@ -99,6 +99,8 @@ struct BattleResult: Decodable {
 final class PracticeBattle {
     enum Mode: String, CaseIterable { case manual, automatic }
     enum Phase: Equatable { case ready, running, finished, failed, cancelled }
+    /// Seconds a manual practice turn waits for the player before the automatic choice plays it.
+    static let manualTurnSeconds = 30   // RED: 03B-5 sets 15
     private(set) var phase: Phase = .ready
     /// The pair `start` was given. The selection may change while the battle is on screen (a wild search
     /// replacing its batch), so the battle and result screens read these, never the selection.
@@ -111,7 +113,7 @@ final class PracticeBattle {
     /// Typed form of the same log for staging (`PracticePlayback`), plus reveals, timeouts and the end.
     private(set) var events: [PracticeEvent] = []
     private(set) var notice: String?
-    private(set) var remainingSeconds = 30
+    private(set) var remainingSeconds = PracticeBattle.manualTurnSeconds
     /// True while `pause()` holds the battle; `tick()` and `choose` do nothing then.
     private(set) var isPaused = false
     var mode: Mode = .manual
@@ -132,7 +134,7 @@ final class PracticeBattle {
         release()
         self.player = player; self.opponent = opponent
         view = nil; result = nil; messages = []; events = []; parser = PracticeEventParser()
-        notice = nil; remainingSeconds = 30
+        notice = nil; remainingSeconds = Self.manualTurnSeconds
         request = BattleRequest(kind: "none", moves: []); self.mode = mode
         do {
             guard let p1 = player.snapshot, let p2 = opponent.snapshot else {
@@ -171,7 +173,7 @@ final class PracticeBattle {
     func prepareSelection() {
         release(); phase = .ready; view = nil; result = nil; messages = []; events = []; parser = PracticeEventParser()
         notice = nil
-        request = BattleRequest(kind: "none", moves: []); remainingSeconds = 30
+        request = BattleRequest(kind: "none", moves: []); remainingSeconds = Self.manualTurnSeconds
     }
     func cancel() {
         release()
@@ -253,7 +255,7 @@ final class PracticeBattle {
             result = try BattleJSON.decode(engine.call(.result, arguments: [id]))
             phase = .finished; remainingSeconds = 0; release()
         } else if previousTurn != view?.turn {
-            deadline = clock() + 30; remainingSeconds = 30
+            deadline = clock() + TimeInterval(Self.manualTurnSeconds); remainingSeconds = Self.manualTurnSeconds
             nextAutomaticTurn = clock() + 0.6
         }
     }

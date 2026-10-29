@@ -78,7 +78,8 @@ final class PracticeSessionTests: XCTestCase {
         let clock = Clock(); let session = makeSession(clock, slowState())
         session.start()
         XCTAssertEqual(session.battle?.phase, .running); XCTAssertEqual(session.battle?.view?.turn, 1)
-        clock.now = 20; session.setPaused(true, reason: .popoverClosed)
+        clock.now = 5; session.setPaused(true, reason: .popoverClosed)
+        XCTAssertEqual(session.battle?.remainingSeconds, 10)
         XCTAssertEqual(session.battle?.isPaused, true)
         clock.now = 500; session.tick()
         XCTAssertEqual(session.battle?.view?.turn, 1); XCTAssertFalse(timedOut(session))
@@ -331,7 +332,7 @@ final class PracticeSessionTests: XCTestCase {
         XCTAssertFalse(session.playback === first); XCTAssertTrue(session.playback?.history.isEmpty == true)
     }
 
-    func testManualDeadlineWaitsForTheTurnToPlayAndThenGetsTheFullThirtySeconds() throws {
+    func testManualDeadlineWaitsForTheTurnToPlayAndThenGetsTheFullFifteenSeconds() throws {
         let clock = Clock(); let session = makeSession(clock, slowState())
         session.start()
         let playback = try XCTUnwrap(session.playback)
@@ -340,17 +341,17 @@ final class PracticeSessionTests: XCTestCase {
         XCTAssertTrue(playback.isPlaying); XCTAssertTrue(session.pauseReasons.contains(.playback))
         XCTAssertEqual(session.battle?.isPaused, true)
         session.choose(slot: 1); XCTAssertEqual(session.battle?.view?.turn, 2, "no new turn while the last one plays")
-        // Past the old deadline (5 + 30) the turn is still playing or has only just finished.
-        clock.now = 36; session.tick()
+        // Past the old deadline (5 + 15) the turn is still playing or has only just finished.
+        clock.now = 21; session.tick()
         XCTAssertEqual(session.battle?.view?.turn, 2); XCTAssertFalse(timedOut(session))
         playOut(session, clock)
         let finished = clock.now
         XCTAssertFalse(playback.isPlaying); XCTAssertFalse(session.pauseReasons.contains(.playback))
-        XCTAssertEqual(session.battle?.isPaused, false); XCTAssertEqual(session.battle?.remainingSeconds, 30)
+        XCTAssertEqual(session.battle?.isPaused, false); XCTAssertEqual(session.battle?.remainingSeconds, 15)
         XCTAssertEqual(session.battle?.view?.turn, 2); XCTAssertFalse(timedOut(session))
-        clock.now = finished + 29.9; session.tick()
+        clock.now = finished + 14.9; session.tick()
         XCTAssertEqual(session.battle?.view?.turn, 2); XCTAssertFalse(timedOut(session))
-        clock.now = finished + 30; session.tick()
+        clock.now = finished + 15; session.tick()
         XCTAssertEqual(session.battle?.view?.turn, 3); XCTAssertTrue(timedOut(session))
     }
 
@@ -404,8 +405,8 @@ final class PracticeSessionTests: XCTestCase {
         session.setPaused(false, reason: .popoverClosed)
         XCTAssertNil(playback.beat); XCTAssertEqual(playback.history.count, history, "nothing replays")
         XCTAssertEqual(session.battle?.isPaused, false)
-        clock.now = 529.9; session.tick(); XCTAssertEqual(session.battle?.view?.turn, 2)
-        clock.now = 530; session.tick(); XCTAssertEqual(session.battle?.view?.turn, 3)
+        clock.now = 514.9; session.tick(); XCTAssertEqual(session.battle?.view?.turn, 2)
+        clock.now = 515; session.tick(); XCTAssertEqual(session.battle?.view?.turn, 3)
     }
 
     func testFinishingBattlePlaysItsLastBeatsThenTheResultIsReady() throws {

@@ -74,6 +74,8 @@ final class PracticeSession {
     /// Today's opponent for the current player (`PracticeDaily`); never saved.
     private(set) var dailyCandidate: PracticeCandidate?
     private(set) var dailyState: PracticeWildState = .idle
+    /// The last search for today's opponent, kept like `wildTask` so tests can await a stale one.
+    private(set) var dailyTask: Task<Void, Never>?
     private let recordStore: PracticeRecordStore
     /// Wall clock and calendar for the local day (`PracticeDaily.dayKey`); `clock` is uptime for turn timing.
     private let now: () -> Date

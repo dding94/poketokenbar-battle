@@ -5,6 +5,8 @@ import Foundation
 /// The app passes `<state folder>/practice-records.json`; a nil URL keeps records in memory (tests, previews).
 struct PracticeRecordStore: Sendable {
     let fileURL: URL?
+    /// Names the copy of a file this version cannot read; tests pin it.
+    var now: @Sendable () -> Date = { Date() }
 
     func load() -> PracticeRecords { PracticeRecords() }   // contract stub
     func persist(_ records: PracticeRecords) {}            // contract stub

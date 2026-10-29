@@ -81,3 +81,24 @@ enum PracticeDaily {
     /// A stable seed for `dayKey`, the same on every launch and machine.
     static func seed(dayKey: String) -> UInt64 { 0 }   // contract stub
 }
+
+// MARK: RED stubs (03B-5): compile-only, replaced by the implementation.
+
+extension PracticeOutcome {
+    init(winner: String?) { self = .draw }   // RED stub
+}
+
+extension PracticeRecords {
+    static let currentVersion = 1
+    mutating func record(_ outcome: PracticeOutcome, dailyDay: String?, turns: Int, playerHPShare: Double) -> PracticeRecordUpdate {
+        PracticeRecordUpdate(outcome: outcome, streak: 0, bestStreak: 0, endedStreak: nil, daily: false, newStars: [], stars: [])   // RED stub
+    }
+}
+
+extension PracticeDaily {
+    static func dayKey(ofCandidateID id: String?) -> String? { nil }   // RED stub
+}
+
+extension BattleView.Pokemon {
+    var hpShare: Double { 0 }   // RED stub
+}
