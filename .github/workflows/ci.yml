@@ -30,9 +30,10 @@ jobs:
     # macos-15 ships Xcode 16 / Swift 6, which Package.swift requires
     # (swift-tools-version: 6.0, platform macOS 14).
     runs-on: macos-15
-    # About 1.5x the slowest green run (458 s). A job that runs out shows as "cancelled", like a newer
-    # run on the same ref would; recheck this budget when a suite is added.
-    timeout-minutes: 15
+    # About 1.5x the slowest green run (770 s, 2026-10-29). Runners vary up to ~1.6x on the same commit.
+    # A job that runs out shows as "cancelled", like a newer run on the same ref would; recheck this
+    # budget when a suite is added.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v5
 
@@ -97,8 +98,8 @@ jobs:
       matrix:
         os: ${{ inputs.macos == 'both' && fromJSON('["macos-14","macos-15"]') || fromJSON(format('["{0}"]', inputs.macos)) }}
     runs-on: ${{ matrix.os }}
-    # About 1.5x the slowest green run (223 s on macos-14).
-    timeout-minutes: 6
+    # About 1.5x the slowest run: the Swift boundary took 215 s and the corpus over 170 s on 2026-10-29.
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v4
