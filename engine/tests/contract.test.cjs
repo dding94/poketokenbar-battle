@@ -68,3 +68,24 @@ test('destroy releases battle and unknown sides/viewers are rejected',()=>{
   assert.deepEqual(call('destroy',id),{ok:true});assert.equal(call('result',id).error,'unknown_battle');
 });
 
+
+test('public set description uses gen9 stats, nature and EV zero without secrets',()=>{
+  const s=set();const info=call('describeSet',s);
+  assert.deepEqual(info,{speciesNum:25,species:'Pikachu',level:50,types:['Electric'],
+    stats:{hp:110,atk:75,def:60,spa:70,spd:70,spe:110}});
+  s.nature='adamant';assert.equal(call('describeSet',s).stats.atk,82);
+  assert.equal(call('describeSet',s).stats.spa,63);
+});
+test('form mapping explicitly covers base starts, distinct forms, Shedinja and Ditto',()=>{
+  for(const [num,form,ability,species] of [[386,'speed','pressure','Deoxys-Speed'],
+    [479,'wash','levitate','Rotom-Wash'],[487,'origin','pressure','Giratina'],
+    [493,'fire','multitype','Arceus'],[649,'douse','download','Genesect'],
+    [351,'sunny','forecast','Castform'],[555,'zen','zen-mode','Darmanitan'],
+    [648,'pirouette','serene-grace','Meloetta'],[132,null,'limber','Ditto']]) {
+    assert.equal(call('describeSet',{...set(num,ability,['tackle']),form}).species,species);
+  }
+  assert.equal(call('describeSet',set(292,'wonder-guard',['scratch'])).stats.hp,1);
+});
+test('aliases cannot smuggle a duplicate move into the set',()=>{
+  assert.deepEqual(call('describeSet',set(25,'static',['vice-grip','vise-grip'])),{ok:false,error:'invalid_moves'});
+});

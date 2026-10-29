@@ -545,6 +545,7 @@ npm run test:acceptance
 | 호출 | 내용 |
 |---|---|
 | `version()` | `{"engine":"@pkmn/sim@x.y.z","adapter":"1","rules":"gen9-notera-noitems-v1"}` |
+| `describeSet(set)` | 검증한 SET의 공개 정보 `{speciesNum,species,level,types,stats}`. 9세대 폼/EV 0 능력치를 계산하며 기술·특성은 반환하지 않음(PR 02 추가) |
 | `createBattle(config)` | config = `{"seed","policySeed","p1":{"name","set":SET},"p2":{...}}` → `{"ok":true,"id"}`. 알 수 없는 종·폼·기술·특성은 오류 코드로 거절 |
 | `request(id, side)` | `{"kind":"move"·"wait"·"forced"·"none","moves":[{"slot","id","name","type","pp","maxpp","disabled"}]}` |
 | `choose(id, side, choice)` | choice = `{"type":"move","slot":1~4}` 또는 `{"type":"auto"}` → `{"ok":true,"resolved":bool}`. Showdown 거절은 `{"ok":false,"error":"rejected"}`(결정적). 그 밖의 입력은 거절 |

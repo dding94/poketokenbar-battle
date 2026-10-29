@@ -98,7 +98,7 @@ jobs:
         if: matrix.os == 'macos-14'
         run: sudo xcode-select -s /Applications/Xcode_16.2.app/Contents/Developer
       - name: Swift JavaScriptCore boundary
-        run: swift test --filter BattleEngineTests
+        run: swift test --filter "BattleEngineTests|BattleSnapshotTests"
       - name: Install pinned dependencies
         if: ${{ inputs.scope == 'engine' }}
         working-directory: engine

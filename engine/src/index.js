@@ -56,7 +56,7 @@ function replay(log) {
     const r=result(id);return {winner:r.winner,logHash:r.logHash};
   } finally {destroy(id);}
 }
-const api={version:()=>VERSION,createBattle,request,choose,autoChoice,
+const api={version:()=>VERSION,describeSet:()=>fail('invalid_set'),createBattle,request,choose,autoChoice,
   state:(id,v)=>view(get(id).battle,viewer(v)),
   drainLog:(id,v)=>{viewer(v);const r=get(id);const lines=visibleLog(r.battle.log.slice(r.cursors[v]),v);r.cursors[v]=r.battle.log.length;return lines;},
   result,replay,destroy};
