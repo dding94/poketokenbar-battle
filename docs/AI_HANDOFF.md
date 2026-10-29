@@ -1,12 +1,12 @@
 # 다음 AI를 위한 작업 인계
 
-최종 갱신: 2026-10-29. **PR 00의 최초 CI는 통과했지만 실제 설치 검증에서 캐시·로그 격리 누락을 발견했다. 포크 앱을 즉시 종료했고 저장 경로 회귀 테스트부터 보완 중이다. 설치된 구번들은 재실행하지 않는다. 배틀 기능은 아직 구현하지 않았다.**
+최종 갱신: 2026-10-29. **PR 00의 식별·저장 경로 격리를 CI와 실제 설치에서 검증했다. 최초 설치에서 발견한 캐시·로그 누락은 회귀 테스트 RED 후 수정했고 수정본으로 교체했다. 다음은 PR 01이다. 배틀 기능은 아직 구현하지 않았다.**
 
-## 진행 중인 작업 (2026-10-29 기준, PR 00 저장 경로 격리 보완)
+## 진행 중인 작업 (2026-10-29 기준, PR 00 검증 완료 → PR 01 착수)
 
 - 브랜치: `feat/local-practice-battle` (`main` 5e9af78에서 분기). 인수 시 모든 변경은 미커밋이었다. 사용자 승인으로 문서(`372eba0`)·PR 00(`c04769a`)·프로브(`0ddc584`)를 나누어 커밋·푸시했고 CI 수정은 `f1dad46`, `cc0b9fe`다. 이후 사용자 승인으로 별도 포크 앱을 설치·실행했으나 아래 격리 누락을 발견해 종료했다. 배포·공개 전환은 하지 않았다.
 - 문서 개정: `docs/BATTLE_PLAN.md`(새 구조, PR 00~13 + PR 03A, 부록 A), `docs/AI_HANDOFF.md`, `AGENTS.md`, `README.md`(고지), `CLAUDE.md`(첫 단락 경고 한 줄).
-- PR 00 코드(작성 완료, macOS 15 CI 검증 완료·설치 검증 대기):
+- PR 00 코드(작성 완료, macOS 15 CI 및 로컬 arm64 설치 검증 완료):
   - `Sources/PokeTokenBar/Core/AppIdentity.swift`(신규): 포크 식별값의 단일 출처와 원본 값 목록.
   - `Core/AppStatePaths.swift`: 기본 저장 폴더를 `PokeTokenBarBattle`로 분리, `UpstreamSaveImport`(원본 `companion-state.json`을 포크 세이브가 없을 때만 복사).
   - `PokeTokenBarApp.swift`: 원본 폴더를 옮기던 TokenMac → PokeTokenBar 이관을 제거하고, `PTB_STATE_DIR`가 없을 때만 첫 실행 복사를 호출.
@@ -49,10 +49,19 @@
 
 이어서 할 일:
 
-1. 저장 경로 격리 회귀 테스트(commit `2fb688e`)의 RED를 원격 XCTest로 확인하고 모든 앱 소유 저장 경로를 `AppStatePaths`에 모은다. 수정 전 설치본은 실행하지 않는다.
-2. 관련 테스트·전체 게이트·결함 주입을 다시 통과시킨 뒤 번들을 재생성·검사·교체하고 격리를 재검증한다. 설치·실행 및 계속 진행은 사용자가 승인했다.
-3. PR 00을 마무리하고 PR 01 → 02 → 03 → 03A(로컬 연습전) 순서로 진행한다. 원격 검증은 충분한 무료 잔여량 안에서 표준 러너·수동 실행만 사용한다.
-4. 사용자에게 연습전 시험 방법을 안내하고 멈춘다. 현재 공개 전환은 필요하지 않아 private를 유지한다.
+1. PR 01을 01A(계약·검증·어댑터), 01B(코퍼스·기술/폼 대조·Swift 래퍼·CI)로 나눠 진행한다. 각 단계에서 계약 테스트부터 실행한다.
+2. PR 02 → PR 03 → PR 03A(로컬 연습전) 순서로 진행한다. 설치·실행 및 계속 진행은 사용자가 승인했다.
+3. 사용자에게 연습전 시험 방법을 안내하고 멈춘다. 공개 전환은 필요하지 않아 private를 유지한다.
+
+### PR 00 최종 재검증 (2026-10-29)
+
+- [CI 40802858618](https://github.com/dding94/poketokenbar-battle/actions/runs/40802858618), `dc0aa8c`, macOS 15: 대상 테스트 종료 0, **34건 통과·실패 0·skip 0**. 전체 `./scripts/test-gate.sh` 종료 0, **1,565건 중 1,549건 통과·16건 skip·실패 0**, 코어 라인 커버리지 **93.82%**. skip 범위는 위 기록과 같다.
+- `bash scripts/test-fork-identity-guard.sh` 종료 0: 원본 bundle ID 주입 시 1건 assertion 실패(내부 종료 1), 원복 후 1건 통과(내부 종료 0). Gitleaks는 388개 커밋 검사·발견 0.
+- `PTB_SKIP_INSTALL=1 PTB_NATIVE_ARCH_ONLY=1 ./scripts/build-app.sh` 종료 0. 수정 번들의 Info.plist·LaunchAgent·JIT entitlement·arm64·서명 검사 종료 0. 엔진은 아직 없으며 ad-hoc 로컬 서명이다.
+- 사용자 승인 범위에서 `ditto`로 포크 설치본만 교체하고 `open`으로 실행(각 종료 0). 한 명령 안에서 원본 저장 폴더를 해시·mtime 비교한 실행 직후 3초 관측: **220개 파일 변경 0·추가 0**, 원본 PID 유지, 포크 실행, 포크 `Logs/PokeTokenBar.log` 갱신 확인. 이후 포크 폴더에 `last-snapshot.json`과 `usage-cache.json` 생성도 확인했다. 원본 앱 자체의 주기적 저장까지 장시간 불변이라고 주장하지 않는다.
+- 최초 복사는 이전 설치의 `upstream save import: imported` 로그와 포크 세이브 생성으로 확인했다. 실제 세이브는 fixture로 쓰지 않았고 원본 파일을 복구/덮어쓰기하지 않았다.
+- 보조 `e2e.sh`·`parity-check.sh`도 포크 앱/상태 경로로 수정했다. `bash -n` 종료 0, 실제 UI/사용량 시나리오는 미실행이다.
+- UI 도구의 설치 앱 접근은 타임아웃으로 화면 검증 미완료. 프로세스 확인은 권한 있는 읽기 검사에서 원본·포크 모두 실행 중이다(제한 환경의 pgrep 결과는 상태 근거로 쓰지 않음). Intel·다른 macOS·Gatekeeper 배포 인증·실제 자격 증명/사용량 검사·서버 접속은 미검증이다.
 
 ### 설치 검증에서 발견한 격리 누락
 
@@ -62,7 +71,7 @@
 - 근본원인: `AppStatePaths`를 사용하는 companion 세이브만 분리하고, 직접 경로를 만드는 다른 저장소를 놓쳤다. 기존 테스트도 식별 상수·companion 복사만 검증해 실제 캐시·로그 쓰기 경로를 검사하지 못했다.
 - 부류 스윕: `LocalUsageCache`·`UsageStore.writeParitySnapshot`·`PokeAPIClient.baseIndexFile`·`SpriteStore`·`SpriteLoader`에 원본 Application Support 경로, `AppLog`·`CrashReporter`에 원본 로그/실행 마커 경로가 남아 있다. `PTB_STATE_DIR`도 이 경로들에는 적용되지 않았다. 진단 메일의 로그 위치 안내도 함께 수정해야 한다.
 - RED: [CI 40802465261](https://github.com/dding94/poketokenbar-battle/actions/runs/40802465261), `2fb688e`. 대상 34건 실행·14 assertion 실패·skip 0, 명령 종료 1. 로그 위치·두 스프라이트 경로 및 분산된 경로 생성이 실제로 검출됐다. 소스 가드가 `AppStatePaths.applicationSupportDirectory()` 호출도 오인한 한 건은 직접 FileManager 조회 패턴만 검사하도록 좁혔다.
-- 수정: 위 모든 저장소를 `AppStatePaths.directory()` 및 그 아래 `Logs/`로 모으고 SpriteLoader와 SpriteStore의 경로를 공유했다. 진단 메일도 실제 `AppLog.logFileURL`을 표시한다. 기존 로그 파일 이름은 포크 전용 폴더 안에서 유지한다. 수정 후 원격 재검증 전이며, 원본 폴더의 변경 없음은 아직 입증하지 못했다.
+- 수정: 위 모든 저장소를 `AppStatePaths.directory()` 및 그 아래 `Logs/`로 모으고 SpriteLoader와 SpriteStore의 경로를 공유했다. 진단 메일도 실제 `AppLog.logFileURL`을 표시한다. 기존 로그 파일 이름은 포크 전용 폴더 안에서 유지한다. 수정 후 원격 재검증과 설치본 교체 결과는 위 최종 재검증을 참고한다.
 
 ## 지금 있는 것
 
@@ -91,9 +100,8 @@
 
 - PR 01의 엔진 어댑터·번들·테스트, `server/`, Cloudflare 리소스·자격 증명·배포 URL.
 - 배틀 화면(로컬 연습전 포함)·락스텝 프로토콜·소유권 이전·스타터 지급·그룹 화면.
-- 이 포크 앱의 설치·실행 확인. CI의 skip 16건 및 macOS 15 이외 환경에서의 테스트 검증.
-- PR 00의 실제 설치본 공존·첫 실행 복사 검증(단위 테스트는 위 "진행 중인 작업" 참고).
-- 저장소 public 전환과 앱 안 고지(README 고지와 포크 고유 커밋의 비밀값 패턴 점검은 2026-10-29에 완료).
+- CI의 skip 16건 및 macOS 15 이외 환경에서의 XCTest 검증.
+- 저장소 public 전환 및 앱 안 고지의 실제 화면 확인(고지 코드·문자열 테스트는 완료).
 - 실제 GitHub 기능 PR. 계획서의 PR 00~13은 앞으로 수행할 작업 단위다.
 
 REA 설치본 버전 확인은 수행했지만, 바이너리와 소스의 재현 빌드 일치를 증명하지 않는다. REA Evidence ID는 이전 조사 세션의 참조이며 새 AI 세션에서 조회 가능하다고 가정하지 않는다.

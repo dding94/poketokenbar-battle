@@ -302,14 +302,18 @@
 
 - 의존: 없음. 앱을 빌드·실행하는 모든 PR의 선행 조건.
 - [x] **RED:** 번들 ID·앱 이름·저장 경로·LaunchAgent label·업데이트 저장소·cask 이름이 원본 값과 같으면 실패하는 테스트를 만든다. (2026-10-29: CI `40801084586`, 대상 31건 통과·skip 0, 원본 bundle ID 주입 시 1건 assertion 실패·원복 후 통과. 다른 값의 결함 주입은 미실행.)
-- [ ] **GREEN:** 위 값을 포크 값으로 바꾸고(단일 출처 `Core/AppIdentity.swift`) 저장 경로를 포크 전용 폴더(`PokeTokenBarBattle`)로 분리한다. `build-app.sh`가 원본 `/Applications/PokeTokenBar.app`·원본 프로세스를 건드리지 않게 하고(실행 파일 이름도 분리), `release.sh`의 `REPO`·`TAP_REPO`·cask, 포크 자체 서명 인증서, `JSContext` JIT entitlement를 정한다.
-- [ ] 원본 폴더를 옮기던 시작 코드(TokenMac → PokeTokenBar 이관)를 포크에서 제거하고, 원본 세이브를 한 번 복사해 가져오는 경로를 추가한다. 원본 앱이 함께 실행 중일 때의 경고는 별도로 정한다.
-- [ ] 문제 리포트 메일이 원본 개발자 개인 메일로 가지 않게 하고(포크 수신처가 정해지기 전에는 리포트 행 숨김), 설정 푸터의 원본 웹사이트·후원 링크를 출처 표기로 바꾼다.
-- [ ] 앱 설정 화면에 README와 같은 비공식 팬 프로젝트 고지와 제3자 라이선스(Pokémon Showdown·`@pkmn/sim` MIT) 고지를 둔다. `default.profraw`를 제거한다.
+- [x] **GREEN:** 위 값을 포크 값으로 바꾸고(단일 출처 `Core/AppIdentity.swift`) 저장 경로를 포크 전용 폴더(`PokeTokenBarBattle`)로 분리한다. `build-app.sh`가 원본 `/Applications/PokeTokenBar.app`·원본 프로세스를 건드리지 않게 하고(실행 파일 이름도 분리), `release.sh`의 `REPO`·`TAP_REPO`·cask, 포크 자체 서명 인증서, `JSContext` JIT entitlement를 정한다.
+- [x] 원본 폴더를 옮기던 시작 코드(TokenMac → PokeTokenBar 이관)를 포크에서 제거하고, 원본 세이브를 한 번 복사해 가져오는 경로를 추가한다. 원본 앱이 함께 실행 중일 때의 경고는 별도로 정한다.
+- [x] 문제 리포트 메일이 원본 개발자 개인 메일로 가지 않게 하고(포크 수신처가 정해지기 전에는 리포트 행 숨김), 설정 푸터의 원본 웹사이트·후원 링크를 출처 표기로 바꾼다.
+- [x] 앱 설정 화면에 README와 같은 비공식 팬 프로젝트 고지와 제3자 라이선스(Pokémon Showdown·`@pkmn/sim` MIT) 고지를 둔다. `default.profraw`를 제거한다.
 - [ ] 공개 전환 후 CI의 push·PR 자동 실행을 켠다(표준 러너만).
 - [ ] 회사 맥 한 대에서 설치(Gatekeeper·관리 정책), `workers.dev` 접속, WebSocket 통과를 확인한다.
 
+검증: CI `40802858618`(대상 34/34, 전체 1,549 통과·16 skip·실패 0, 결함 주입 실패/원복 성공), 로컬 arm64 수정 번들 검사·설치·실행 종료 0. 원본 220개 파일의 시작 직후 비교 변경 0, 원본 PID 유지. 설치 첫 복사 확인. 화면 고지의 시각적 확인과 배포 인증은 미검증이다.
+
 ### PR 01 — 전투 엔진 모듈과 결정성 게이트
+
+구현 전 분할: 01A(계약·입력 검증·어댑터), 01B(결정성 코퍼스·기술/폼 대조·Swift 래퍼·CI). 전체 의존 순서와 완료 조건은 유지한다.
 
 - 의존: PR 00.
 - [ ] **RED:** 고정 입력·seed로 기대 승자와 정규화 로그 해시가 나오는 계약 테스트를 만든다(9세대 규칙, 테라스탈 금지).
