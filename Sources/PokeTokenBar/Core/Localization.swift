@@ -1778,13 +1778,15 @@ extension L {
     }
     /// "공격 ↑", "Atk ↓↓": one arrow for one stage, two for two or more.
     func practiceBoost(stat: String, stages: Int) -> String {
-        let arrow = stages >= 2 ? "↑↑" : stages > 0 ? "↑" : stages <= -2 ? "↓↓" : "↓"
         let name: String
         switch stat {
         case "accuracy": name = lang == .ko ? "명중" : "Acc"
         case "evasion": name = lang == .ko ? "회피" : "Eva"
         default: name = practiceStatName(stat)
         }
+        // The engine reports 0 stages when a stat is already at ±6; it did not move either way.
+        if stages == 0 { return lang == .ko ? "\(name) 그대로" : "\(name) unchanged" }
+        let arrow = stages >= 2 ? "↑↑" : stages > 0 ? "↑" : stages <= -2 ? "↓↓" : "↓"
         return "\(name) \(arrow)"
     }
     func practiceCured(_ code: String) -> String {

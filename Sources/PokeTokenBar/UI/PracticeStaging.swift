@@ -40,6 +40,20 @@ struct PracticePhrase: Hashable {
 enum PracticeCalloutTone {
     case strong, critical, muted, status, up, down, field, reveal, hurt
 
+    init(_ callout: PracticeCallout) {
+        switch callout {
+        case .superEffective: self = .strong
+        case .critical, .fainted: self = .critical
+        case .resisted, .immune, .miss, .failed, .timedOut: self = .muted
+        case .status, .cureStatus, .cant: self = .status
+        // 0 stages: already at ±6, so the stat did not move.
+        case .boost(_, _, let stages): self = stages > 0 ? .up : stages < 0 ? .down : .muted
+        case .weather: self = .field
+        case .abilityRevealed: self = .reveal
+        case .recoil: self = .hurt
+        }
+    }
+
     var color: Color {
         switch self {
         case .strong: .orange
@@ -142,18 +156,7 @@ struct PracticeWording {
         }
     }
 
-    func tone(_ callout: PracticeCallout) -> PracticeCalloutTone {
-        switch callout {
-        case .superEffective: .strong
-        case .critical, .fainted: .critical
-        case .resisted, .immune, .miss, .failed, .timedOut: .muted
-        case .status, .cureStatus, .cant: .status
-        case .boost(_, _, let stages): stages > 0 ? .up : .down
-        case .weather: .field
-        case .abilityRevealed: .reveal
-        case .recoil: .hurt
-        }
-    }
+    func tone(_ callout: PracticeCallout) -> PracticeCalloutTone { PracticeCalloutTone(callout) }
 
     /// A finished beat as one sentence: "피카츄 · 10만볼트 → 잉어킹 −48% · 약점!".
     func sentence(_ beat: PracticeBeat, notes: Int = 2) -> PracticePhrase {
