@@ -144,6 +144,29 @@ final class PracticeBattleTests: XCTestCase {
         XCTAssertNil(PracticeText.log("", names: [:]))
     }
 
+    func testPauseFreezesManualDeadlineAndAutomaticStepUntilResume() throws {
+        let engine = try engine(); var now = 0.0
+        let model = PracticeBattle(engine: engine, clock: { now })
+        model.start(player: try candidate("a", engine: engine), opponent: try candidate("b", engine: engine), mode: .manual, seed: [1,2,3,4])
+        now = 20; model.pause()
+        XCTAssertTrue(model.isPaused); XCTAssertEqual(model.remainingSeconds, 10)
+        now = 500; model.tick(); model.choose(slot: 1)
+        XCTAssertEqual(model.view?.turn, 1); XCTAssertEqual(model.remainingSeconds, 10)
+        XCTAssertFalse(model.messages.contains { $0.contains("시간 초과") })
+        model.resume()
+        XCTAssertFalse(model.isPaused)
+        now = 509.9; model.tick(); XCTAssertEqual(model.view?.turn, 1)
+        now = 510; model.tick(); XCTAssertEqual(model.view?.turn, 2)
+        XCTAssertTrue(model.messages.contains { $0.contains("시간 초과") })
+        // The automatic step (due at 510.6) keeps its remaining 0.4 s across a pause.
+        model.mode = .automatic; now = 510.2; model.pause()
+        now = 900; model.tick(); XCTAssertEqual(model.view?.turn, 2)
+        model.resume(); now = 900.3; model.tick(); XCTAssertEqual(model.view?.turn, 2)
+        now = 901; model.tick(); XCTAssertEqual(model.view?.turn, 3)
+        model.resume(); model.cancel(); model.pause()
+        XCTAssertFalse(model.isPaused, "only a running battle can be paused")
+    }
+
     func testChangingSelectionClearsPreviousBattlePreviewAndResult() throws {
         let engine = try engine(); let model = PracticeBattle(engine: engine)
         model.start(player: try candidate("a", species: 25, moves: ["thunderbolt"], engine: engine),
