@@ -29,7 +29,7 @@
 
 | 항목 | 값 |
 |---|---|
-| 저장소 | [dding94/poketokenbar-battle](https://github.com/dding94/poketokenbar-battle) — private. 로컬 테스트 후 public 전환 예정 |
+| 저장소 | [dding94/poketokenbar-battle](https://github.com/dding94/poketokenbar-battle) — public (2026-10-29 전환) |
 | Upstream | [chattymin/PokeTokenBar](https://github.com/chattymin/PokeTokenBar) |
 | 기준 태그 | `v2.5.6` |
 | 기준 커밋 | `77f789d7ccf6e692c805f599abf7dcf0c834c56b` |
@@ -53,7 +53,7 @@
 
 앱 검증은 `swift build`, `swift test`, `./scripts/test-gate.sh`입니다. 로컬 Command Line Tools에는 XCTest가 없어 테스트는 Xcode가 있는 수동 GitHub Actions로 실행합니다. 실제 명령·개수·skip·미검증 범위는 [AI_HANDOFF](docs/AI_HANDOFF.md)에 기록합니다.
 
-GitHub Actions는 private 동안 **수동 실행**만 사용합니다. 앱 이름·번들 ID·실행 파일·저장 폴더·로그인 항목·업데이트는 포크 전용으로 분리했습니다. 기본 세이브 위치는 `~/Library/Application Support/PokeTokenBarBattle`이며 최초 실행 시 원본 세이브가 있으면 읽어서 한 번 복사합니다. 개발 실행은 `PTB_STATE_DIR`로 별도 상태 폴더를 지정할 수 있습니다.
+GitHub Actions는 지금은 **수동 실행**만 사용합니다(공개 전환 후 push·PR 자동 실행은 별도 작업). 앱 이름·번들 ID·실행 파일·저장 폴더·로그인 항목·업데이트는 포크 전용으로 분리했습니다. 기본 세이브 위치는 `~/Library/Application Support/PokeTokenBarBattle`이며 최초 실행 시 원본 세이브가 있으면 읽어서 한 번 복사합니다. 개발 실행은 `PTB_STATE_DIR`로 별도 상태 폴더를 지정할 수 있습니다.
 
 ## 로컬 연습전 시험
 
