@@ -51,8 +51,13 @@ final class PracticeScreenRenderingTests: XCTestCase {
 
     static var engineURL: URL { root.appendingPathComponent("engine/dist/battle-engine.js") }
 
-    private func makeSession(_ state: CompanionState = syntheticState()) -> PracticeSession {
-        let session = PracticeSession(engineURL: Self.engineURL, clock: { self.now }, drivesAutomatically: false)
+    /// The selection screen searches wild opponents on appear. Tests never reach PokéAPI: by default the search
+    /// fails as if offline, which keeps the owned-opponent tests on their own data with a compact wild section.
+    private func makeSession(_ state: CompanionState = syntheticState(),
+                             wildSource: PracticeWildSource = PracticeWildSource(provider: OfflineWildProvider(),
+                                                                                 details: OfflineWildProvider())) -> PracticeSession {
+        let session = PracticeSession(engineURL: Self.engineURL, clock: { self.now }, drivesAutomatically: false,
+                                      wildSource: wildSource, wildSeed: { 0x5EED })
         session.prepare(state: state, activeName: nil)
         return session
     }
@@ -125,10 +130,11 @@ final class PracticeScreenRenderingTests: XCTestCase {
 
     /// Spaces and letter case are ignored: Vision reads small "Lv.50" as "LV.50" on CI. The multiplication
     /// sign reads as a letter x as often as not, so "×2" and "x2" are the same needle. Thin glyphs collapse
-    /// too: CI read "Iron Tail" as "Iron Tall", so i, l, 1 and | compare equal.
+    /// too: CI read "Iron Tail" as "Iron Tall", so i, l, 1 and | compare equal. Dashes read as hyphens, so the
+    /// level range "Lv.47–53" matches however its en dash is recognized.
     private static func normalized(_ text: String) -> String {
         String(text.replacingOccurrences(of: " ", with: "").replacingOccurrences(of: "×", with: "x").lowercased()
-            .map { "l1|".contains($0) ? "i" : $0 })
+            .map { "l1|".contains($0) ? "i" : "–—−".contains($0) ? "-" : $0 })
     }
 
     /// Segment titles of the speed control, read from the AppKit control behind the SwiftUI picker. CI's
@@ -519,4 +525,152 @@ final class PracticeScreenRenderingTests: XCTestCase {
             if !withBeat, let bitmap = try? capture(host) { try save(bitmap, as: "practice-board-worst-case.png") }
         }
     }
+
+    // MARK: Wild opponents
+
+    /// Polls the session until `done` holds or 10 s pass; the search runs on its own task.
+    private func waitForWild(_ session: PracticeSession, until done: (PracticeWildState) -> Bool) async throws {
+        let deadline = ContinuousClock.now + .seconds(10)
+        while !done(session.wildState), ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+    }
+
+    private static func isWild(_ candidate: PracticeCandidate) -> Bool {
+        if case .wild = candidate.origin { return true }
+        return false
+    }
+
+    /// Ready: the wild section heads the opponent list with the player's level ±3 (Pikachu is Lv.50) and a
+    /// reroll button, lists three in-memory candidates from the hatch rule, and a selected wild row expands
+    /// into the stat comparison and the matchup card like an owned one.
+    func testSelectionShowsLevelMatchedWildOpponents() async throws {
+        let session = makeSession(Self.stagedState(),
+                                  wildSource: PracticeWildSource(provider: WildLineProvider(), details: WildLineProvider()))
+        XCTAssertEqual(session.player?.snapshot?.set.level, 50, "Pikachu is the Lv.50 entry")
+        session.findWildOpponents()
+        try await waitForWild(session) { $0 == .ready }
+        XCTAssertEqual(session.wildState, .ready, "the stubbed search must finish offline")
+        XCTAssertEqual(session.wildCandidates.count, 3, "three wild opponents are offered")
+        for candidate in session.wildCandidates {
+            XCTAssertTrue(Self.isWild(candidate), "\(candidate.name) must be marked wild")
+            let level = candidate.snapshot?.set.level ?? 0
+            XCTAssertTrue((47...53).contains(level), "\(candidate.name) Lv.\(level) is outside Lv.47–53")
+            XCTAssertTrue([1, 2, 3].contains(candidate.snapshot?.set.speciesNum ?? 0), "only the stubbed line hatches")
+        }
+        XCTAssertFalse(session.roster?.candidates.contains { Self.isWild($0) } ?? true,
+                       "wild opponents stay out of the roster")
+
+        let wild = try XCTUnwrap(session.wildCandidates.first, "no wild opponent to select")
+        session.opponentID = wild.id
+        XCTAssertEqual(session.opponent?.id, wild.id, "the session resolves a wild opponent")
+        XCTAssertNotNil(session.matchup, "a wild pairing has a matchup")
+        let mine = try XCTUnwrap(session.player?.snapshot?.publicInfo.stats["spe"])
+        let theirs = try XCTUnwrap(wild.snapshot?.publicInfo.stats["spe"])
+
+        let host = host(session)
+        // The header carries the range; the selected wild row's matchup card carries the speed line.
+        let needles = ["Wild opponents", "Lv.47–53", "Reroll", "\(mine) vs \(theirs)", "Start battle"]
+        let (text, bitmap) = try await waitForText(needles, in: host)
+        try save(bitmap, as: "practice-popover-wild.png")
+        assertRendered(needles, in: text)
+        assertPopoverSized(host)
+    }
+
+    /// Searching: a compact progress row under the wild header while the search is in flight.
+    func testWildSearchShowsProgressRow() async throws {
+        let session = makeSession(wildSource: PracticeWildSource(provider: StalledWildProvider(),
+                                                                 details: StalledWildProvider()))
+        session.findWildOpponents()
+        XCTAssertEqual(session.wildState, .searching, "the search is in flight")
+        let host = host(session)
+        let needles = ["Wild opponents", "Finding opponents"]
+        let (text, bitmap) = try await waitForText(needles, in: host)
+        try save(bitmap, as: "practice-popover-wild-searching.png")
+        assertRendered(needles, in: text)
+        XCTAssertTrue(session.wildCandidates.isEmpty)
+        assertPopoverSized(host)
+    }
+
+    /// Unavailable: when not a single opponent can be made (offline, nothing cached), the section says so and
+    /// offers a retry; the owned opponents below keep their header and stay selectable.
+    func testWildSearchFailureOffersRetry() async throws {
+        let session = makeSession()
+        session.findWildOpponents()
+        try await waitForWild(session) { if case .unavailable = $0 { true } else { false } }
+        var unavailable = false
+        if case .unavailable = session.wildState { unavailable = true }
+        XCTAssertTrue(unavailable, "an offline search ends unavailable, not \(session.wildState)")
+        XCTAssertTrue(session.wildCandidates.isEmpty)
+        let host = host(session)
+        let needles = ["Wild opponents", "Retry", "Your collection"]
+        let (text, bitmap) = try await waitForText(needles, in: host)
+        try save(bitmap, as: "practice-popover-wild-unavailable.png")
+        assertRendered(needles, in: text)
+        XCTAssertEqual(session.opponent?.snapshot?.set.speciesNum, 129, "the owned opponent stays selected")
+        assertPopoverSized(host)
+    }
+}
+
+// MARK: Wild stubs
+
+/// Bulbasaur's line with Black 2/White 2 level-up moves and abilities, so the hatch rule picks base #1 and the
+/// generator builds legal sets at any stage without the network.
+private struct WildLineProvider: PokeProviding, PokemonDetailProviding {
+    func line(baseSpeciesID: Int) async throws -> EvoLine {
+        EvoLine(baseID: 1,
+                tree: EvoNode(speciesID: 1, children: [EvoNode(speciesID: 2, children: [EvoNode(speciesID: 3, children: [])])]),
+                rarity: .rare,
+                names: [1: ["en": "Bulbasaur", "ko": "이상해씨"], 2: ["en": "Ivysaur", "ko": "이상해풀"],
+                        3: ["en": "Venusaur", "ko": "이상해꽃"]])
+    }
+    func baseSpeciesIndex() async throws -> [BaseSpecies] { [BaseSpecies(id: 1, captureRate: 45)] }
+    func baseSpecies(id: Int) async throws -> BaseSpecies? { id == 1 ? BaseSpecies(id: 1, captureRate: 45) : nil }
+    func pokemonDetails(speciesID: Int) async throws -> PokemonDetails {
+        let name: String, stats: [Int], moves: [(String, Int)]
+        switch speciesID {
+        case 2:
+            name = "ivysaur"; stats = [60, 62, 63, 80, 80, 60]
+            moves = [("tackle", 1), ("growl", 1), ("leech-seed", 1), ("vine-whip", 9), ("poison-powder", 13),
+                     ("sleep-powder", 13), ("take-down", 15), ("razor-leaf", 20), ("sweet-scent", 23), ("growth", 28),
+                     ("double-edge", 31), ("worry-seed", 36), ("synthesis", 39), ("solar-beam", 44)]
+        case 3:
+            name = "venusaur"; stats = [80, 82, 83, 100, 100, 80]
+            moves = [("tackle", 1), ("growl", 1), ("leech-seed", 1), ("vine-whip", 1), ("poison-powder", 13),
+                     ("sleep-powder", 13), ("take-down", 15), ("razor-leaf", 20), ("sweet-scent", 23), ("growth", 28),
+                     ("petal-dance", 32), ("double-edge", 39), ("worry-seed", 45), ("synthesis", 50), ("solar-beam", 53)]
+        default:
+            name = "bulbasaur"; stats = [45, 49, 49, 65, 65, 45]
+            moves = [("tackle", 1), ("growl", 3), ("leech-seed", 7), ("vine-whip", 9), ("poison-powder", 13),
+                     ("sleep-powder", 13), ("take-down", 15), ("razor-leaf", 19), ("sweet-scent", 21), ("growth", 25),
+                     ("double-edge", 27), ("worry-seed", 31), ("synthesis", 33), ("seed-bomb", 37)]
+        }
+        let keys = ["hp", "attack", "defense", "special-attack", "special-defense", "speed"]
+        return PokemonDetails(
+            speciesID: speciesID, name: name, height: 7, weight: 69, baseExperience: 64, genderRate: 1,
+            types: ["grass", "poison"], baseStats: Dictionary(uniqueKeysWithValues: zip(keys, stats)),
+            abilities: [PokemonAbilityOption(name: "overgrow", slot: 1, isHidden: false),
+                        PokemonAbilityOption(name: "chlorophyll", slot: 3, isHidden: true)],
+            moves: moves.map { PokemonMoveOption(name: $0.0, learnMethods: [PokemonMoveLearnMethod(method: "level-up", level: $0.1)]) })
+    }
+}
+
+/// Offline with nothing cached: every lookup fails, so not a single wild opponent can be made.
+private struct OfflineWildProvider: PokeProviding, PokemonDetailProviding {
+    func line(baseSpeciesID: Int) async throws -> EvoLine { throw URLError(.notConnectedToInternet) }
+    func baseSpeciesIndex() async throws -> [BaseSpecies] { throw URLError(.notConnectedToInternet) }
+    func baseSpecies(id: Int) async throws -> BaseSpecies? { throw URLError(.notConnectedToInternet) }
+    func pokemonDetails(speciesID: Int) async throws -> PokemonDetails { throw URLError(.notConnectedToInternet) }
+}
+
+/// A search that never answers, so the screen stays on its progress row; a newer search cancels it.
+private struct StalledWildProvider: PokeProviding, PokemonDetailProviding {
+    private func stall<T>() async throws -> T {
+        try await Task.sleep(for: .seconds(3600))
+        throw CancellationError()
+    }
+    func line(baseSpeciesID: Int) async throws -> EvoLine { try await stall() }
+    func baseSpeciesIndex() async throws -> [BaseSpecies] { try await stall() }
+    func baseSpecies(id: Int) async throws -> BaseSpecies? { try await stall() }
+    func pokemonDetails(speciesID: Int) async throws -> PokemonDetails { try await stall() }
 }
