@@ -226,6 +226,33 @@ final class PracticeScreenRenderingTests: XCTestCase {
         assertPopoverSized(host)
     }
 
+    /// No spoilers: the engine's view already lists the opponent's move once the step ran, but its chip must
+    /// wait for the opponent's beat. Quick Attack has priority, so Pikachu's beat always plays first, and it
+    /// does not knock Magikarp out, so Magikarp acts in the same step.
+    func testOpponentMoveChipWaitsForItsBeat() async throws {
+        let session = makeSession(Self.stagedState())
+        session.mode = .manual
+        session.start()
+        let slot = try XCTUnwrap(session.battle?.request.moves.first { $0.id == "quickattack" }?.slot,
+                                 "Pikachu must offer Quick Attack")
+        session.choose(slot: slot)
+        XCTAssertEqual(session.battle?.view?.p2.moves.isEmpty, false, "the engine view is ahead of the playback")
+        XCTAssertEqual(session.playback?.beat?.actor, .player, "the priority move plays first")
+        XCTAssertEqual(session.playback?.beat?.moveID, "quickattack")
+
+        let host = host(session)
+        let (text, _) = try await waitForText(["Quick Attack", "Ability"], in: host)
+        assertRendered(["Quick Attack"], in: text)
+        // artwork: false renders identifiers; none of Magikarp's moves may show while Pikachu's beat plays.
+        // Pikachu's own "Volt Tackle" card also contains "tackle", so that one is counted apart.
+        let seen = Self.normalized(text)
+        func count(_ needle: String) -> Int { seen.components(separatedBy: needle).count - 1 }
+        for move in ["splash", "flail", "bounce"] {
+            XCTAssertEqual(count(move), 0, "\(move) revealed before its beat. Seen: \(text)")
+        }
+        XCTAssertEqual(count("tackle"), count("volttackle"), "Tackle revealed before its beat. Seen: \(text)")
+    }
+
     /// Finished: the board gives way to the result only after the last beat, and the result card shows
     /// the finishing move and the damage totals.
     func testFinishedStagedBattleShowsFinisherAndDamage() async throws {
