@@ -57,7 +57,8 @@ struct PracticeBattleBoard: View {
         return playback?.history.last { ($0.hpDelta[side] ?? 0) < 0 }?.id
     }
 
-    private func sideCard(_ side: PracticeSide, _ pokemon: BattleView.Pokemon) -> some View {
+    /// Internal and concrete so tests can check which individual each side shows.
+    func sideCard(_ side: PracticeSide, _ pokemon: BattleView.Pokemon) -> PracticeSideCard {
         let own = side == .player
         let beat = playback?.beat
         return PracticeSideCard(side: pokemon, own: own, name: wording.name(side),

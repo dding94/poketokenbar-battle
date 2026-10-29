@@ -615,6 +615,72 @@ final class PracticeScreenRenderingTests: XCTestCase {
         XCTAssertEqual(session.opponent?.snapshot?.set.speciesNum, 129, "the owned opponent stays selected")
         assertPopoverSized(host)
     }
+
+    /// The board shows the pair the battle was started with, not the selection. A wild search finishing
+    /// mid-battle can replace the selection while the engine keeps fighting the first foe; a direct
+    /// `opponentID` write stands in for that async writer, since `dropIdleBattle` keeps a running battle.
+    /// Checked on the side cards' data: the wild names are Korean and the tag is tiny tinted text, both
+    /// outside what Vision reads reliably (defect-log, Vision OCR).
+    func testBattleBoardKeepsTheStartedPairWhenTheSelectionChanges() async throws {
+        let session = makeSession(Self.stagedState(),
+                                  wildSource: PracticeWildSource(provider: WildLineProvider(), details: WildLineProvider()))
+        session.findWildOpponents()
+        try await waitForWild(session) { $0 == .ready }
+        let wild = try XCTUnwrap(session.wildCandidates.first, "no wild opponent to fight")
+        session.opponentID = wild.id
+        session.mode = .manual
+        session.start()
+        let battle = try XCTUnwrap(session.battle)
+        XCTAssertEqual(battle.phase, .running)
+        let player = try XCTUnwrap(session.player)
+
+        let owned = try XCTUnwrap(session.roster?.eligible.first { $0.id != player.id })
+        session.opponentID = owned.id
+        XCTAssertEqual(session.opponent?.id, owned.id, "the selection moved on to an owned Pokémon")
+        XCTAssertTrue(session.battle === battle, "a running battle survives a selection change")
+
+        let view = try XCTUnwrap(battle.view)
+        let board = PracticeBattleBoard(session: session, battle: battle, l: L(.en), artwork: false)
+        let foe = board.sideCard(.opponent, view.p2)
+        XCTAssertEqual(foe.name, wild.name, "the foe's name follows the battle, not the selection")
+        XCTAssertEqual(foe.snapshot?.instanceID, wild.snapshot?.instanceID, "the foe's snapshot follows the battle")
+        XCTAssertTrue(foe.wild, "the foe keeps its wild tag")
+        let mine = board.sideCard(.player, view.p1)
+        XCTAssertEqual(mine.name, player.name)
+        XCTAssertEqual(mine.snapshot?.instanceID, player.snapshot?.instanceID)
+
+        let host = host(session)
+        let (_, bitmap) = try await waitForText(["Forfeit"], in: host)
+        try save(bitmap, as: "practice-popover-wild-battle.png")
+    }
+
+    /// The selection searches whenever a search is due, not on particular transitions. A search released
+    /// with the popover leaves `.idle` and the old player; if the screen appears before `prepare` (no player
+    /// yet) and `prepare` then re-assigns that same player, no player or state change fires. The real popover
+    /// happens to run `prepare` first (`PopoverPracticeRoutingTests` covers that path), so this forces the
+    /// order that left "Finding opponents…" on screen forever with no spinner and no retry.
+    func testSelectionSearchesOnceAPlayerArrivesAfterARelease() async throws {
+        let session = PracticeSession(engineURL: Self.engineURL, clock: { self.now }, drivesAutomatically: false,
+                                      wildSource: PracticeWildSource(provider: StalledWildProvider(),
+                                                                     details: StalledWildProvider()),
+                                      wildSeed: { 0x5EED })
+        let state = Self.syntheticState()
+        session.prepare(state: state, activeName: nil)
+        session.findWildOpponents()
+        XCTAssertEqual(session.wildState, .searching)
+        session.releaseIfIdle()
+        XCTAssertEqual(session.wildState, .idle, "releasing cancels the search in flight")
+        XCTAssertNil(session.player, "the roster went with the engine")
+
+        let host = host(session)
+        _ = try await waitForText(["Start battle"], in: host)
+        XCTAssertEqual(session.wildState, .idle, "no player yet, so nothing to search for")
+        let player = session.playerID
+        session.prepare(state: state, activeName: nil)
+        XCTAssertEqual(session.playerID, player, "the same player is re-assigned, so no player change fires")
+        try await waitForWild(session) { $0 == .searching }
+        XCTAssertEqual(session.wildState, .searching, "the screen must search once the player is back")
+    }
 }
 
 // MARK: Wild stubs

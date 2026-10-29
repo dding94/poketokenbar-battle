@@ -184,12 +184,23 @@ private struct PracticeRoutePokemon: PokeProviding {
 /// the environment, the way `AppDelegate` injects it. Read off the rendered pixels in English.
 @MainActor
 final class PopoverPracticeRoutingTests: XCTestCase {
-    func testShowingPracticeReplacesTheTabsWithThePracticeScreen() async throws {
-        let suite = "PracticeRoute-\(UUID())"
+    private var suite = ""
+    private var windows: [NSWindow] = []
+
+    override func tearDown() async throws {
+        windows.forEach { $0.close() }
+        windows = []
+        if !suite.isEmpty {
+            UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite)
+            try? FileManager.default.removeItem(at: FileManager.default.temporaryDirectory.appendingPathComponent("\(suite).json"))
+        }
+    }
+
+    /// The stores `AppDelegate` injects, over an English save holding the synthetic Pikachu and Magikarp.
+    private func makeStores() throws -> (CompanionStore, UsageStore, UserDefaults) {
+        suite = "PracticeRoute-\(UUID())"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
-        defer { defaults.removePersistentDomain(forName: suite) }
         let file = FileManager.default.temporaryDirectory.appendingPathComponent("\(suite).json")
-        defer { try? FileManager.default.removeItem(at: file) }
         var state = PracticeScreenRenderingTests.syntheticState()
         state.language = .en
         try JSONEncoder().encode(state).write(to: file)
@@ -200,13 +211,16 @@ final class PopoverPracticeRoutingTests: XCTestCase {
             codexLimitsProvider: PracticeRouteCodex(), antigravityLimitsProvider: PracticeRouteAntigravity(),
             cursorLimitsProvider: PracticeRouteCursor(), statusProvider: PracticeRouteStatus(),
             autoRefresh: false, defaults: defaults)
-        // The selection screen searches wild opponents on appear; an offline stub keeps the test off PokéAPI.
-        let practice = PracticeSession(engineURL: PracticeScreenRenderingTests.engineURL, clock: { 0 },
-                                       drivesAutomatically: false,
-                                       wildSource: PracticeWildSource(provider: NoWildData(), details: NoWildData()))
+        return (companion, store, defaults)
+    }
+
+    /// Opens the production popover on the practice route, as `AppDelegate` does: a fresh hosting tree
+    /// per opening, so every appear handler runs in its real order.
+    @discardableResult
+    private func openPopover(practice: PracticeSession, companion: CompanionStore, store: UsageStore,
+                             defaults: UserDefaults) -> NSView {
         let nav = PopoverNavigation()
         nav.showingPractice = true
-
         let height = 640.0
         let host = NSHostingView(rootView: PopoverView()
             .environment(store).environment(companion).environment(UpdateChecker(defaults: defaults))
@@ -221,7 +235,31 @@ final class PopoverPracticeRoutingTests: XCTestCase {
         window.appearance = NSAppearance(named: .aqua)
         window.contentView = host
         window.orderFront(nil)
-        defer { window.close() }
+        windows.append(window)
+        return host
+    }
+
+    /// Closes the popover like `AppDelegate.popoverDidClose`: the hosting tree goes, then the session pauses
+    /// and releases what an idle screen held.
+    private func closePopover(practice: PracticeSession) {
+        windows.forEach { $0.contentView = nil; $0.close() }
+        windows = []
+        practice.setPaused(true, reason: .popoverClosed)
+        practice.releaseIfIdle()
+    }
+
+    private func waitUntil(_ condition: () -> Bool) async throws {
+        let deadline = ContinuousClock.now + .seconds(5)
+        while !condition(), ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(50)) }
+    }
+
+    func testShowingPracticeReplacesTheTabsWithThePracticeScreen() async throws {
+        let (companion, store, defaults) = try makeStores()
+        // The selection screen searches wild opponents on appear; an offline stub keeps the test off PokéAPI.
+        let practice = PracticeSession(engineURL: PracticeScreenRenderingTests.engineURL, clock: { 0 },
+                                       drivesAutomatically: false,
+                                       wildSource: PracticeWildSource(provider: NoWildData(), details: NoWildData()))
+        let host = openPopover(practice: practice, companion: companion, store: store, defaults: defaults)
 
         var text = ""
         let deadline = ContinuousClock.now + .seconds(5)
@@ -242,6 +280,42 @@ final class PopoverPracticeRoutingTests: XCTestCase {
         XCTAssertNotNil(practice.roster, "appearing prepares the session from the companion save")
         XCTAssertFalse(practice.pauseReasons.contains(.screenHidden), "the visible screen resumes the battle")
     }
+
+    /// A wild search still in flight when the popover closes is cancelled by `releaseIfIdle`, which leaves
+    /// `.idle` and the same player. Reopening re-assigns that player in `prepare`, so nothing changes that a
+    /// player or state observer could see, yet the screen must search again instead of waiting forever.
+    func testReopeningAfterAReleasedSearchSearchesAgain() async throws {
+        let (companion, store, defaults) = try makeStores()
+        let practice = PracticeSession(engineURL: PracticeScreenRenderingTests.engineURL, clock: { 0 },
+                                       drivesAutomatically: false,
+                                       wildSource: PracticeWildSource(provider: StalledWildData(), details: StalledWildData()))
+        openPopover(practice: practice, companion: companion, store: store, defaults: defaults)
+        try await waitUntil { practice.wildState == .searching }
+        XCTAssertEqual(practice.wildState, .searching, "the first opening starts a search")
+        let player = practice.playerID
+
+        closePopover(practice: practice)
+        XCTAssertEqual(practice.wildState, .idle, "releasing cancels the search in flight")
+        XCTAssertTrue(practice.wildCandidates.isEmpty)
+        XCTAssertNil(practice.player, "the roster is released with the engine")
+
+        openPopover(practice: practice, companion: companion, store: store, defaults: defaults)
+        try await waitUntil { practice.wildState == .searching }
+        XCTAssertEqual(practice.playerID, player, "reopening keeps the same player, so no player change fires")
+        XCTAssertEqual(practice.wildState, .searching, "reopening must search again")
+    }
+}
+
+/// A wild search that never answers, so it is still in flight when the popover closes.
+private struct StalledWildData: PokeProviding, PokemonDetailProviding {
+    private func stall<T>() async throws -> T {
+        try await Task.sleep(for: .seconds(3600))
+        throw CancellationError()
+    }
+    func line(baseSpeciesID: Int) async throws -> EvoLine { try await stall() }
+    func baseSpeciesIndex() async throws -> [BaseSpecies] { try await stall() }
+    func baseSpecies(id: Int) async throws -> BaseSpecies? { try await stall() }
+    func pokemonDetails(speciesID: Int) async throws -> PokemonDetails { try await stall() }
 }
 
 final class RepresentativeLocalizationTests: XCTestCase {
