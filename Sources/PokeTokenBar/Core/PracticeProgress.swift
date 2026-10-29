@@ -137,11 +137,21 @@ extension BattleView.Pokemon {
 
 /// Today's opponent: the wild generator with a seed from the local date, so a day keeps one opponent.
 enum PracticeDaily {
-    /// Prefix of today's opponent's candidate id.
+    /// Prefix of today's opponent's candidate id; the rest of the id is its day.
     static let idPrefix = "daily-"
-    /// "2026-10-30" in `calendar`'s time zone.
-    static func dayKey(_ date: Date, calendar: Calendar) -> String { "" }   // contract stub
-    /// A stable seed for `dayKey`, the same on every launch and machine.
-    static func seed(dayKey: String) -> UInt64 { 0 }   // contract stub
-    static func dayKey(ofCandidateID id: String?) -> String? { nil }   // RED stub
+    /// "2026-10-30": the date in `calendar`'s time zone, written in ISO 8601 (always Gregorian) whatever calendar
+    /// system `calendar` uses, so two machines on the same local day name it the same way.
+    static func dayKey(_ date: Date, calendar: Calendar) -> String {
+        date.formatted(Date.ISO8601FormatStyle(timeZone: calendar.timeZone).year().month().day())
+    }
+    /// FNV-1a 64 of the key's UTF-8 bytes: the same on every launch and machine, unlike `hashValue`, which Swift
+    /// seeds per process.
+    static func seed(dayKey: String) -> UInt64 {
+        dayKey.utf8.reduce(0xcbf2_9ce4_8422_2325 as UInt64) { ($0 ^ UInt64($1)) &* 0x0000_0100_0000_01b3 }
+    }
+    /// The day today's opponent was made for, from its candidate id; nil for every other candidate.
+    static func dayKey(ofCandidateID id: String?) -> String? {
+        guard let id, id.hasPrefix(idPrefix) else { return nil }
+        return String(id.dropFirst(idPrefix.count))
+    }
 }
