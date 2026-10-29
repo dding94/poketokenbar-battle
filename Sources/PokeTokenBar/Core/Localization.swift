@@ -1807,4 +1807,67 @@ extension L {
         lang == .ko ? "약점 \(superEffective)회 · 급소 \(critical)회"
             : "Super effective ×\(superEffective) · Critical ×\(critical)"
     }
+    // Decision hints (`PracticeHints`): move cards, the selection matchup and the playback speed.
+    /// "위력 90 · 명중 100 · 특수"; a status move shows its category only. nil power: varies (Flail);
+    /// nil accuracy: never misses.
+    func practiceMoveStats(category: String, power: Int?, accuracy: Int?) -> String {
+        let kind = practiceCategory(category)
+        guard category != "Status" else { return kind }
+        let pow = power.map(String.init) ?? "\u{2014}"
+        let acc = accuracy.map(String.init) ?? "\u{2014}"
+        return lang == .ko ? "위력 \(pow) · 명중 \(acc) · \(kind)" : "Pow \(pow) · Acc \(acc) · \(kind)"
+    }
+    /// Engine move categories: "Physical", "Special", "Status".
+    func practiceCategory(_ category: String) -> String {
+        let ko = ["Physical": "물리", "Special": "특수", "Status": "변화"]
+        return lang == .ko ? ko[category] ?? category : category
+    }
+    var practiceStab: String { lang == .ko ? "자속" : "STAB" }
+    var practicePriority: String { lang == .ko ? "선제" : "Priority" }
+    /// Type multipliers as a badge: "×2", "×½", "×¼"; ×0 reads as a word in Korean ("Immune" would crowd
+    /// the English move name out of its card).
+    func practiceMultiplier(_ value: Double) -> String {
+        switch value {
+        case 0: return lang == .ko ? "무효" : "×0"
+        case 0.25: return "×¼"
+        case 0.5: return "×½"
+        default:
+            let whole = value.rounded()
+            return whole == value ? "×\(Int(whole))" : "×\(String(format: "%.2g", value))"
+        }
+    }
+    /// Joins move names in a matchup line: "10만볼트·볼트태클", "Thunderbolt, Volt Tackle".
+    var practiceNameJoiner: String { lang == .ko ? "·" : ", " }
+    func practiceWeakSpot(_ moves: String, _ multiplier: String) -> String {
+        lang == .ko ? "약점 공략: \(moves) \(multiplier)" : "Weak spot: \(moves) \(multiplier)"
+    }
+    func practiceBestHit(_ moves: String, _ multiplier: String) -> String {
+        lang == .ko ? "가장 잘 듣는 기술: \(moves) \(multiplier)" : "Best hit: \(moves) \(multiplier)"
+    }
+    var practiceNoWeakSpot: String { lang == .ko ? "약점을 찌를 기술이 없어요" : "No move hits a weak spot" }
+    /// The opponent's own types against mine; a hint, not its moves.
+    func practiceThreat(_ multiplier: String) -> String {
+        lang == .ko ? "상대 타입 → 나 \(multiplier)" : "Foe's types → you \(multiplier)"
+    }
+    /// Who moves first from public Speed, always mine first: "선공: 나 (스피드 98 vs 88)".
+    func practiceOrder(_ order: PracticeMatchup.Order, mine: Int, theirs: Int) -> String {
+        let speeds = lang == .ko ? "스피드 \(mine) vs \(theirs)" : "Spe \(mine) vs \(theirs)"
+        switch order {
+        case .playerFirst: return lang == .ko ? "선공: 나 (\(speeds))" : "You move first (\(speeds))"
+        case .opponentFirst: return lang == .ko ? "상대가 먼저 (\(speeds))" : "Foe moves first (\(speeds))"
+        case .speedTie: return lang == .ko ? "동속 (\(speeds))" : "Speed tie (\(speeds))"
+        }
+    }
+    func practiceLevelGap(mine: Int, theirs: Int) -> String {
+        lang == .ko ? "레벨 차이가 커요 (Lv.\(mine) vs Lv.\(theirs))" : "Big level gap (Lv.\(mine) vs Lv.\(theirs))"
+    }
+    var practicePlaybackSpeed: String { lang == .ko ? "재생 속도" : "Playback speed" }
+    func practiceSpeedName(_ speed: PracticePlaybackSpeed) -> String {
+        switch speed {
+        case .normal: return "1×"
+        case .fast: return "2×"
+        case .instant: return lang == .ko ? "즉시" : "Instant"
+        }
+    }
+    var practiceSkipToResult: String { lang == .ko ? "결과로 건너뛰기" : "Skip to result" }
 }

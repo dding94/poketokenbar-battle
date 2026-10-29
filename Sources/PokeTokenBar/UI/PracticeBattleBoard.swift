@@ -19,24 +19,20 @@ struct PracticeBattleBoard: View {
     private var wording: PracticeWording { PracticeWording(session: session, battle: battle, l: l) }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        // 8pt rhythm (not 10): the move hints and the speed row take the room the looser spacing had.
+        VStack(alignment: .leading, spacing: 8) {
             if battle.phase == .failed {
                 failure
                 Spacer(minLength: 0)
             } else {
                 if let view = battle.view {
-                    VStack(alignment: .leading, spacing: 10) {
+                    VStack(alignment: .leading, spacing: 8) {
                         sideCard(.opponent, view.p2)
                         sideCard(.player, view.p1)
                     }
                     .overlay { if splash { versus.transition(.scale(scale: 1.6).combined(with: .opacity)) } }
                 }
                 stage
-                if let notice = battle.notice {
-                    Label(notice, systemImage: "exclamationmark.circle")
-                        .font(.caption).foregroundStyle(.orange)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
                 prompt
                 moveGrid
                 Spacer(minLength: 0)
@@ -207,11 +203,18 @@ struct PracticeBattleBoard: View {
 
     // MARK: Moves
 
+    /// The engine's notice (a move that cannot be used) takes the prompt's place instead of a row of its own,
+    /// so it never pushes the controls out of the fixed-height board.
     @ViewBuilder
     private var prompt: some View {
         HStack(alignment: .firstTextBaseline) {
             if playing {
                 Text(l.practicePlayingTurn).font(.callout.weight(.semibold)).foregroundStyle(.secondary)
+            } else if let notice = battle.notice {
+                Label(notice, systemImage: "exclamationmark.circle")
+                    .font(.caption).foregroundStyle(.orange)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
             } else if battle.isPaused {
                 Text(l.practicePausedHint).font(.callout.weight(.semibold)).foregroundStyle(.secondary)
             } else if automatic {
@@ -227,7 +230,7 @@ struct PracticeBattleBoard: View {
                 }
                 .buttonStyle(.borderless)
                 .font(.caption)
-            } else if !battle.isPaused && !automatic {
+            } else if !battle.isPaused && !automatic && battle.notice == nil {
                 Text(l.practiceKeyHint).font(.caption2).foregroundStyle(.secondary)
             }
         }
@@ -242,10 +245,10 @@ struct PracticeBattleBoard: View {
                     .frame(maxWidth: .infinity, minHeight: 104)
                     .practiceCard()
             } else {
-                LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], spacing: 8) {
+                LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], spacing: 6) {
                     ForEach(Array(moves.enumerated()), id: \.element.slot) { index, move in
-                        PracticeMoveCard(move: move, key: index + 1, snapshot: session.player?.snapshot, l: l,
-                                         artwork: artwork,
+                        PracticeMoveCard(move: move, key: index + 1, snapshot: session.player?.snapshot,
+                                         hint: session.moveHint(move.id), l: l, artwork: artwork,
                                          locked: automatic || battle.isPaused || playing) {
                             session.choose(slot: move.slot)
                         }
@@ -257,23 +260,56 @@ struct PracticeBattleBoard: View {
 
     // MARK: Controls
 
-    /// Hidden but kept in the layout once the battle has ended and only its last beats are playing.
+    /// The speed row over the mode toggle and forfeit. Both rows keep their place in every state, so
+    /// switching modes or finishing never moves the board: "Skip to result" only shows in automatic
+    /// battles, and the toggle row hides once the battle has ended and only its last beats are playing.
+    /// The speed stays usable until the last beat has played.
     private var controls: some View {
-        HStack {
-            Toggle(l.practiceSwitchToAuto, isOn: Binding(
-                get: { session.mode == .automatic },
-                set: { session.mode = $0 ? .automatic : .manual }))
-                .toggleStyle(.switch)
-                .controlSize(.mini)
-                .font(.caption)
-            Spacer()
-            Button(l.practiceForfeit, role: .destructive) { session.forfeit() }
+        VStack(spacing: 4) {
+            HStack(spacing: 8) {
+                speedPicker
+                Spacer(minLength: 4)
+                Button {
+                    session.skipToResult()
+                } label: {
+                    Label(l.practiceSkipToResult, systemImage: "forward.end.fill")
+                        .labelStyle(.titleAndIcon)
+                }
                 .buttonStyle(.borderless)
-                .foregroundStyle(.red)
                 .font(.caption)
+                .opacity(automatic && battle.phase == .running ? 1 : 0)
+                .disabled(!automatic || battle.phase != .running)
+            }
+            HStack {
+                Toggle(l.practiceSwitchToAuto, isOn: Binding(
+                    get: { session.mode == .automatic },
+                    set: { session.mode = $0 ? .automatic : .manual }))
+                    .toggleStyle(.switch)
+                    .controlSize(.mini)
+                    .font(.caption)
+                Spacer()
+                Button(l.practiceForfeit, role: .destructive) { session.forfeit() }
+                    .buttonStyle(.borderless)
+                    .foregroundStyle(.red)
+                    .font(.caption)
+            }
+            .opacity(battle.phase == .running ? 1 : 0)
+            .disabled(battle.phase != .running)
         }
-        .opacity(battle.phase == .running ? 1 : 0)
-        .disabled(battle.phase != .running)
+    }
+
+    private var speedPicker: some View {
+        Picker(l.practicePlaybackSpeed, selection: $session.playbackSpeed) {
+            ForEach(PracticePlaybackSpeed.allCases, id: \.self) { speed in
+                Text(l.practiceSpeedName(speed)).tag(speed)
+            }
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .controlSize(.mini)
+        .font(.caption)
+        .fixedSize()
+        .help(l.practicePlaybackSpeed)
     }
 
     private var failure: some View {
@@ -427,12 +463,15 @@ struct PracticeSideCard: View {
     }
 }
 
-/// A move button tinted with its type color, bound to the number key of its position.
+/// A move button tinted with its type color, bound to the number key of its position. With a hint it adds
+/// what a choice needs: power, accuracy and category, the type matchup against the foe's public types, and
+/// STAB / priority markers. A card without a hint (Recharge, Struggle) keeps the same height.
 @MainActor
 struct PracticeMoveCard: View {
     let move: BattleMove
     let key: Int
     let snapshot: BattleSnapshot?
+    var hint: PracticeMoveHint?
     let l: L
     let artwork: Bool
     /// Automatic mode or a paused battle: nothing to choose.
@@ -442,32 +481,37 @@ struct PracticeMoveCard: View {
     private var special: Bool { move.id == "recharge" || move.id == "struggle" }
     private var disabled: Bool { locked || move.disabled || (!special && move.pp <= 0) }
     private var tint: Color { PokemonType(apiName: move.type)?.color ?? .gray }
+    private var priority: Bool { (hint?.info.priority ?? 0) > 0 }
+    /// ×1 says nothing, so it has no badge.
+    private var multiplier: Double? { hint?.multiplier.flatMap { $0 == 1 ? nil : $0 } }
 
     var body: some View {
         Button(action: action) {
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 4) {
-                    name.font(.callout.weight(.semibold)).lineLimit(1)
+                    name.font(.callout.weight(.semibold)).lineLimit(1).minimumScaleFactor(0.8).layoutPriority(1)
                     Spacer(minLength: 2)
+                    if let multiplier { PracticeEffectivenessBadge(multiplier: multiplier, l: l) }
                     Text("\(key)")
                         .font(.system(size: 9, weight: .bold).monospacedDigit())
                         .foregroundStyle(.secondary)
                         .frame(width: 14, height: 14)
                         .overlay(RoundedRectangle(cornerRadius: 3).strokeBorder(Color.secondary.opacity(0.4)))
                 }
-                HStack(spacing: 4) {
-                    if !move.type.isEmpty {
-                        PracticeTypeBadges(types: [move.type], l: l, artwork: artwork)
-                    }
-                    Spacer(minLength: 2)
-                    if !special {
-                        Text("PP \(move.pp)/\(move.maxpp)")
-                            .font(.caption2.monospacedDigit())
-                            .foregroundStyle(move.pp <= 0 ? Color.red : Color.secondary)
-                    }
+                // A long type name with both markers runs out of room first; the PP count then drops its
+                // label (the accessibility value still says it).
+                ViewThatFits(in: .horizontal) {
+                    badgeRow(ppLabel: true)
+                    badgeRow(ppLabel: false)
                 }
+                Text(stats)
+                    .font(.system(size: 10).monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+                    .opacity(hint == nil ? 0 : 1)
             }
-            .padding(8)
+            .padding(.horizontal, 7).padding(.vertical, 6)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(tint.opacity(0.14), in: RoundedRectangle(cornerRadius: 10))
             .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(tint.opacity(0.4)))
@@ -478,6 +522,40 @@ struct PracticeMoveCard: View {
         .opacity(disabled ? 0.45 : 1)
         .keyboardShortcut(KeyEquivalent(Character(String(key))), modifiers: [])
         .accessibilityLabel(l.practiceMoveLabel(key, move.name))
+        .accessibilityValue(spoken)
+    }
+
+    private func badgeRow(ppLabel: Bool) -> some View {
+        HStack(spacing: 4) {
+            if !move.type.isEmpty {
+                PracticeTypeBadges(types: [move.type], l: l, artwork: artwork).fixedSize()
+            }
+            if hint?.stab == true { PracticeMarker(text: l.practiceStab) }
+            if priority { PracticeMarker(text: l.practicePriority) }
+            Spacer(minLength: 2)
+            if !special {
+                Text(ppLabel ? "PP \(move.pp)/\(move.maxpp)" : "\(move.pp)/\(move.maxpp)")
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(move.pp <= 0 ? Color.red : Color.secondary)
+                    .fixedSize()
+            }
+        }
+    }
+
+    /// "Pow 90 · Acc 100 · Special"; a blank line without a hint. Variable-power moves (Flail) report 0.
+    private var stats: String {
+        guard let info = hint?.info else { return " " }
+        return l.practiceMoveStats(category: info.category, power: info.basePower > 0 ? info.basePower : nil,
+                                   accuracy: info.accuracy)
+    }
+
+    private var spoken: String {
+        guard let hint else { return "" }
+        var parts = [stats, "PP \(move.pp)/\(move.maxpp)"]
+        if let multiplier { parts.append(l.practiceMultiplier(multiplier)) }
+        if hint.stab { parts.append(l.practiceStab) }
+        if priority { parts.append(l.practicePriority) }
+        return parts.joined(separator: l.practiceSeparator)
     }
 
     @ViewBuilder

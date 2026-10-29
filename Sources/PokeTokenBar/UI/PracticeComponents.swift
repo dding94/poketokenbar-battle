@@ -100,6 +100,44 @@ struct PracticeChip<Label: View>: View {
     }
 }
 
+/// A type multiplier on a move card: ×4 / ×2 solid in the strong callout tone, ×½ / ×¼ / ×0 faint in the
+/// muted tone. Callers leave ×1 out.
+@MainActor
+struct PracticeEffectivenessBadge: View {
+    let multiplier: Double
+    let l: L
+
+    private var strong: Bool { multiplier > 1 }
+    private var tone: PracticeCalloutTone { strong ? .strong : .muted }
+
+    var body: some View {
+        Text(l.practiceMultiplier(multiplier))
+            .font(.system(size: 11, weight: .bold).monospacedDigit())
+            .lineLimit(1)
+            .foregroundStyle(strong ? Color.white : Color.secondary)
+            .padding(.horizontal, 6).padding(.vertical, 1)
+            // A shade deeper than the callout orange keeps white text legible on light cards.
+            .background(Capsule().fill(strong ? tone.color : tone.color.opacity(0.16)).brightness(strong ? -0.12 : 0))
+            .fixedSize()
+    }
+}
+
+/// A small neutral tag next to a move's type ("STAB", "Priority").
+@MainActor
+struct PracticeMarker: View {
+    let text: String
+
+    var body: some View {
+        Text(text)
+            .font(.system(size: 8, weight: .bold))
+            .lineLimit(1)
+            .foregroundStyle(Color.primary.opacity(0.7))
+            .padding(.horizontal, 3).padding(.vertical, 1)
+            .background(Color.primary.opacity(0.08), in: Capsule())
+            .fixedSize()
+    }
+}
+
 /// A move or ability name. Engine ids ("irontail") are mapped back to the snapshot's PokéAPI slug
 /// ("iron-tail") so the localized name can load; offline the slug reads as "Iron Tail".
 @MainActor

@@ -136,6 +136,11 @@ struct PracticeSelectionView: View {
             if selected, let mine = session.player?.snapshot?.publicInfo.stats,
                let theirs = candidate.snapshot?.publicInfo.stats {
                 PracticeStatComparison(mine: mine, theirs: theirs, l: l)
+                if let matchup = session.matchup {
+                    PracticeMatchupCard(matchup: matchup, playerSnapshot: session.player?.snapshot,
+                                        playerLevel: session.player?.snapshot?.set.level ?? 0,
+                                        opponentLevel: candidate.snapshot?.set.level ?? 0, l: l, artwork: artwork)
+                }
                 Text(l.practiceRevealHint).font(.caption2).foregroundStyle(.tertiary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -178,6 +183,95 @@ struct PracticeSelectionView: View {
             .labelsHidden()
             Text(session.mode == .manual ? l.practiceAutoPickHint : l.practiceAutoModeHint)
                 .font(.caption2).foregroundStyle(.secondary)
+        }
+    }
+}
+
+/// What the pairing means for the selected opponent, from public information only: my best hit on its
+/// types, its types against mine, who moves first by Speed, and a warning for a big level gap. It never
+/// names the opponent's moves or ability.
+@MainActor
+struct PracticeMatchupCard: View {
+    let matchup: PracticeMatchup
+    let playerSnapshot: BattleSnapshot?
+    let playerLevel: Int
+    let opponentLevel: Int
+    let l: L
+    let artwork: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            row("scope", tint: matchup.bestOffense > 1 ? PracticeCalloutTone.strong.color : .secondary) {
+                PracticePhraseText(phrase: offense, l: l, artwork: artwork)
+                    .foregroundStyle(matchup.bestMoveIDs.isEmpty ? Color.secondary : Color.primary)
+            }
+            row("shield.lefthalf.filled", tint: threatTint) {
+                Text(l.practiceThreat(l.practiceMultiplier(matchup.threat)))
+                    .foregroundStyle(matchup.threat == 1 ? Color.primary : threatTint)
+            }
+            row("hare.fill", tint: orderTint) {
+                Text(l.practiceOrder(matchup.order, mine: matchup.playerSpeed, theirs: matchup.opponentSpeed))
+                    .monospacedDigit()
+            }
+            if abs(matchup.levelGap) >= 10 {
+                row("exclamationmark.triangle.fill", tint: .orange) {
+                    Text(l.practiceLevelGap(mine: playerLevel, theirs: opponentLevel))
+                        .foregroundStyle(.orange)
+                        .monospacedDigit()
+                }
+            }
+        }
+        .font(.caption)
+        .padding(.horizontal, 8).padding(.vertical, 6)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
+        .accessibilityElement(children: .combine)
+    }
+
+    private func row<Content: View>(_ symbol: String, tint: Color,
+                                    @ViewBuilder content: () -> Content) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Image(systemName: symbol)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(tint)
+                .frame(width: 14)
+            content()
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }
+    }
+
+    /// "약점 공략: 10만볼트·볼트태클 ×2" with localized names; the best neutral or resisted hit otherwise.
+    private var offense: PracticePhrase {
+        guard !matchup.bestMoveIDs.isEmpty else { return PracticePhrase(l.practiceNoWeakSpot) }
+        let marker = "\u{1F}"
+        let multiplier = l.practiceMultiplier(matchup.bestOffense)
+        let template = matchup.bestOffense > 1 ? l.practiceWeakSpot(marker, multiplier)
+                                               : l.practiceBestHit(marker, multiplier)
+        let parts = template.components(separatedBy: marker)
+        var pieces: [PracticePhrase.Piece] = []
+        for (index, part) in parts.enumerated() {
+            if !part.isEmpty { pieces.append(.text(part)) }
+            guard index < parts.count - 1 else { continue }
+            for (offset, moveID) in matchup.bestMoveIDs.enumerated() {
+                if offset > 0 { pieces.append(.text(l.practiceNameJoiner)) }
+                let slug = PracticeMetadataName.slug(.move, moveID, in: playerSnapshot)
+                pieces.append(.name(.resource(PokemonNameResource(kind: .move, name: slug))))
+            }
+        }
+        return PracticePhrase(pieces)
+    }
+
+    /// Resisting the foe's types is good news, being weak to them is bad news.
+    private var threatTint: Color {
+        matchup.threat > 1 ? .red : matchup.threat < 1 ? .green : .secondary
+    }
+
+    private var orderTint: Color {
+        switch matchup.order {
+        case .playerFirst: .green
+        case .opponentFirst: .orange
+        case .speedTie: .secondary
         }
     }
 }
