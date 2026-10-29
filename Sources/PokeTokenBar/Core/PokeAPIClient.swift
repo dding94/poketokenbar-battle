@@ -30,6 +30,17 @@ actor PokeAPIClient: PokeProviding, PokemonDetailProviding {
     private var speciesCache: [Int: SpeciesDTO] = [:]
     private var lineCache: [Int: EvoLine] = [:]   // 프리패칭 → 부화 순간 네트워크 0
     private var detailsCache: [Int: PokemonDetails] = [:]
+    /// Test seams: where the details and base-index disk caches live. nil (the app) keeps the state folder.
+    private let baseIndexOverride: URL?
+    private let detailsDirectoryOverride: URL?
+    init(baseIndexFile: URL? = nil, detailsDirectory: URL? = nil) {
+        baseIndexOverride = baseIndexFile
+        detailsDirectoryOverride = detailsDirectory
+    }
+    private var baseIndexURL: URL { baseIndexOverride ?? Self.baseIndexFile }
+    private var detailsURL: URL { detailsDirectoryOverride ?? Self.detailsDirectory }
+    /// True once a failed GraphQL index fetch has started the once-per-session REST crawl (read-only, for tests).
+    var didTriggerRESTIndexBuild: Bool { restBuildTried }
 
     private static let detailsDirectory: URL = {
         let dir = AppStatePaths.directory().appendingPathComponent("pokemon-details-v1", isDirectory: true)
@@ -44,7 +55,7 @@ actor PokeAPIClient: PokeProviding, PokemonDetailProviding {
     /// Default-form battle metadata. Memory → 30-day disk cache → REST, with stale disk fallback offline.
     func pokemonDetails(speciesID: Int) async throws -> PokemonDetails {
         if let cached = detailsCache[speciesID] { return cached }
-        let file = Self.detailsDirectory.appendingPathComponent("\(speciesID).json")
+        let file = detailsURL.appendingPathComponent("\(speciesID).json")
         let disk = (try? Data(contentsOf: file))
             .flatMap { try? JSONDecoder().decode(DetailSnapshot.self, from: $0) }
         if let disk, Date().timeIntervalSince(disk.fetchedAt) < 30 * 86400 {
@@ -138,7 +149,7 @@ actor PokeAPIClient: PokeProviding, PokemonDetailProviding {
     /// → TTL 지난 디스크라도 있으면 사용(오프라인 폴백). 전부 실패 시 throw(알 유지, 다음 틱 재시도).
     func baseSpeciesIndex() async throws -> [BaseSpecies] {
         if let c = baseIndexCache { return c }
-        let disk = (try? Data(contentsOf: Self.baseIndexFile))
+        let disk = (try? Data(contentsOf: baseIndexURL))
             .flatMap { try? JSONDecoder().decode(BaseIndexSnapshot.self, from: $0) }
         if let disk, Date().timeIntervalSince(disk.fetchedAt) < 30 * 86400, !disk.entries.isEmpty {
             baseIndexCache = disk.entries
@@ -148,7 +159,7 @@ actor PokeAPIClient: PokeProviding, PokemonDetailProviding {
             let entries = try await fetchBaseIndex()
             baseIndexCache = entries
             if let data = try? JSONEncoder().encode(BaseIndexSnapshot(fetchedAt: Date(), entries: entries)) {
-                try? data.write(to: Self.baseIndexFile, options: .atomic)
+                try? data.write(to: baseIndexURL, options: .atomic)
             }
             return entries
         } catch {
@@ -199,7 +210,7 @@ actor PokeAPIClient: PokeProviding, PokemonDetailProviding {
         bases.sort { $0.id < $1.id }
         baseIndexCache = bases
         if let data = try? JSONEncoder().encode(BaseIndexSnapshot(fetchedAt: Date(), entries: bases)) {
-            try? data.write(to: Self.baseIndexFile, options: .atomic)
+            try? data.write(to: baseIndexURL, options: .atomic)
         }
         AppLog.write("base index: REST build done — \(bases.count) bases persisted (offline-capable now)")
     }

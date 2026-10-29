@@ -976,15 +976,18 @@ final class PracticeReadOnlyGuardTests: XCTestCase {
     }
 
     func testPracticeSourcesUseNoSaveOrFileWriteAPI() throws {
-        let core = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
-            .deletingLastPathComponent().appendingPathComponent("Sources/PokeTokenBar/Core")
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().appendingPathComponent("Sources/PokeTokenBar")
         // Every practice file by prefix, so a new one is scanned without editing a list.
-        let names = try FileManager.default.contentsOfDirectory(atPath: core.path)
-            .filter { ($0.hasPrefix("Practice") && $0.hasSuffix(".swift")) || $0 == "HatchRule.swift" }
-        XCTAssertTrue(names.contains("PracticeSession.swift") && names.contains("HatchRule.swift"), "scanned \(names)")
-        for name in names {
-            let source = try String(contentsOf: core.appendingPathComponent(name), encoding: .utf8)
-            XCTAssertEqual(Self.hits(in: source), [], "\(name) reaches for the save or the disk")
+        for (folder, required) in [("Core", ["PracticeSession.swift", "HatchRule.swift"]), ("UI", ["PracticeSelectionView.swift", "PracticeScreen.swift"])] {
+            let directory = root.appendingPathComponent(folder)
+            let names = try FileManager.default.contentsOfDirectory(atPath: directory.path)
+                .filter { ($0.hasPrefix("Practice") && $0.hasSuffix(".swift")) || (folder == "Core" && $0 == "HatchRule.swift") }
+            XCTAssertTrue(required.allSatisfy(names.contains), "scanned \(names)")
+            for name in names {
+                let source = try String(contentsOf: directory.appendingPathComponent(name), encoding: .utf8)
+                XCTAssertEqual(Self.hits(in: source), [], "\(folder)/\(name) reaches for the save or the disk")
+            }
         }
     }
 }
