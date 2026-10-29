@@ -1099,6 +1099,21 @@ read_when:
   밖·히트 영역 안 지점에 합성 마우스 이벤트를 보내 액션 발화를 확인한다. 스윕: 같은 형태의 나머지
   (`questionmark.circle` 키체인 도움말, 검색 지우기 `xmark.circle.fill`)는 채워진 원형 글리프라 라벨
   프레임이 이미 아이콘 전체라 제외.
+- **진행 중인 작업의 화면은 시작할 때 받은 대상을 읽는다. 바뀔 수 있는 선택값을 읽지 않는다.** 포크 PR 03B-4
+  리뷰에서 연습전 보드·문구·결과 화면이 `session.player/opponent`(선택값)를 읽었다. 그래서 야생 "다른 상대"
+  검색이 전투 중에 착지하면, 엔진은 야생 A와 싸우는데 화면은 다른 개체(내 개체가 하나면 빈칸)를 보였다.
+  자동 진행으로 이미 끝난 전투는 선택 변경이 `dropIdleBattle` 을 불러 결과 화면째 사라졌다. **왜 못 걸렀나:**
+  테스트가 검색이 끝난 뒤에 시작하는 순서만 썼고, 선택과 전투가 같은 값을 가리킨다고 가정했다. → 전투가
+  시작 쌍을 보관하고(`PracticeBattle.player/opponent`) 화면은 그것만 읽는다. `start()` 는 진행 중인 검색을
+  멈춰 직전 묶음을 유지한다(`stopWildSearch`). 회귀 가드: `testBattleBoardKeepsTheStartedPairWhenTheSelectionChanges`,
+  `testStartDuringARerollKeepsTheOldBatchAndTheBattleOpponent`, `testFinishedBattleAndItsUnseenResultSurviveAStaleRerollLanding`.
+  비동기 작성자가 있는 상태를 화면이 읽으면, 그 작성자가 화면 수명 중에 착지하는 순서를 테스트한다.
+- **실패할 수 없는 테스트는 지킨다는 착각만 준다.** 같은 리뷰에서 둘을 찾았다. "세이브를 쓰지 않는다"
+  테스트는 값 타입 사본을 비교해서, 파일 경로를 모르는 세션으로는 어떤 경우에도 통과했다. "늦은 결과는
+  착지하지 않는다" 테스트는 200ms 를 기다린 뒤 부재를 단언해서, 결과가 아직 안 왔어도 통과했다. → 앞의 것은
+  연습 Core·UI 파일 전체를 이름 패턴으로 훑는 저장·디스크 API 소스 스캔(`PracticeReadOnlyGuardTests`, 스캐너
+  자체 검증 포함)으로 바꿨다. 뒤의 것은 작업 핸들(`session.wildTask`)을 await 한 뒤 단언한다. 새 가드는
+  결함을 주입해 실패하는 것을 한 번 본다.
 
 ## 에너지 (상시 표시 애니메이션)
 
