@@ -1896,7 +1896,10 @@ extension L {
     var practiceWildHint: String { lang == .ko ? "내 레벨에 맞춰 뽑아서 승부가 팽팽해요" : "Matched to your level for a close fight" }
     var practiceWildReroll: String { lang == .ko ? "다른 야생 상대" : "Reroll" }
     var practiceWildSearching: String { lang == .ko ? "레벨에 맞는 상대를 찾는 중…" : "Finding opponents at your level…" }
-    var practiceWildUnavailable: String { "" }
+    var practiceWildUnavailable: String {
+        lang == .ko ? "야생 상대를 찾지 못했습니다. 인터넷 연결을 확인한 뒤 다시 찾아 주세요. 내 개체끼리는 그대로 연습할 수 있습니다."
+            : "Couldn't find wild opponents. Check your internet connection and try again. You can still practice with your own Pokémon."
+    }
     var practiceWildTag: String { lang == .ko ? "야생" : "Wild" }
     var practiceOwnedHeader: String { lang == .ko ? "내 개체" : "Your collection" }
 }

@@ -86,7 +86,7 @@ final class PracticeSession {
         wildGeneration &+= 1
         let generation = wildGeneration
         wildState = .searching
-        let generator = PracticeWildGenerator(source: wildSource, engine: engine)
+        let generator = PracticeWildGenerator(source: wildSource, engine: engine, clock: clock)
         let seed = wildSeed()
         wildTask = Task { [weak self] in
             let result: Result<[PracticeCandidate], Error>
@@ -106,6 +106,14 @@ final class PracticeSession {
         }
         // A wild opponent of the replaced batch no longer exists.
         if opponentWasWild, !wildCandidates.contains(where: { $0.id == opponentID }) { opponentID = defaultOpponentID() }
+    }
+    /// Stops a search in flight and shows the batch that was on screen (`.idle` if there was none). Every
+    /// generation bump pairs with a cancel, so a stale task can neither land nor move the selection. The engine
+    /// going away (`releaseIfIdle`) and a battle starting (`start`) both need the old batch to stay exactly as is.
+    private func stopWildSearch() {
+        guard wildState == .searching else { return }
+        wildTask?.cancel(); wildGeneration &+= 1
+        wildState = wildCandidates.isEmpty ? .idle : .ready
     }
     /// Wild opponents were matched to the player's level: another player (or none) drops them, cancels a search
     /// in flight, and moves a wild opponent selection back to an own individual.
@@ -201,6 +209,8 @@ final class PracticeSession {
     /// Starts a battle with the current selection and mode; a rematch is the same call.
     func start() {
         guard let engine, let player, let opponent, player.id != opponent.id else { return }
+        // A reroll still in flight would replace the batch under this battle's opponent when it lands.
+        stopWildSearch()
         stopDriver(); battle?.cancel(); dropPlayback()
         let next = PracticeBattle(engine: engine, clock: clock)
         battle = next
@@ -249,10 +259,7 @@ final class PracticeSession {
         stopDriver(); battle?.cancel(); battle = nil; dropPlayback(); resultSeen = true
         roster = nil; engine = nil; typeChart = nil; moveInfo = [:]
         // The engine goes, so a search in flight stops; finished wild snapshots are plain data and stay.
-        if wildState == .searching {
-            wildTask?.cancel(); wildGeneration &+= 1
-            wildState = wildCandidates.isEmpty ? .idle : .ready
-        }
+        stopWildSearch()
     }
 
     /// Loads the type chart once per engine and the public data of every roster move. A failure keeps

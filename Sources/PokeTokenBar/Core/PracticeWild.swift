@@ -46,8 +46,10 @@ struct PracticeWildSource: Sendable {
 struct PracticeWildGenerator {
     let source: PracticeWildSource
     let engine: BattleEngine
-    /// Time source for the search budget (`budget` seconds from the start of `make`); tests inject a fake one.
+    /// Time source for the search budget; tests inject a fake one (`PracticeSession` passes its own clock).
     var clock: () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }
+    /// Seconds from the start of `make` after which no new attempt begins. Each request has its own timeout and
+    /// failures are skipped, so without a bound a slow network could spin for minutes.
     var budget: TimeInterval = PracticeWildGenerator.defaultBudget
     static let defaultBudget: TimeInterval = 20
 
@@ -58,9 +60,12 @@ struct PracticeWildGenerator {
     /// One splitmix64 stream per call. Draws per attempt, in order: base (`HatchRule`, nothing collected), level,
     /// one branch choice per evolving node along the planned path (the app's `makeEvolutionPlan`), the line's
     /// form (only lines with forms), shiny, nature, profile seed. An attempt that is skipped has still drawn.
-    /// At most `count * 4` attempts; a species already made is skipped.
+    /// At most `count * 4` attempts; a species already made is skipped. Once `budget` seconds have passed no new
+    /// attempt starts: what was made is returned, or `.noCandidates` is thrown if nothing was. A cancellation inside
+    /// a request is rethrown, never skipped.
     func make(count: Int, around playerLevel: Int, seed: UInt64) async throws -> [PracticeCandidate] {
         guard count > 0 else { return [] }
+        let started = clock()
         let index = try await source.provider.baseSpeciesIndex()
         var rng = WildRNG(seed: seed)
         var made: [PracticeCandidate] = []
@@ -68,8 +73,9 @@ struct PracticeWildGenerator {
         for _ in 0..<(count * 4) {
             guard made.count < count else { break }
             try Task.checkCancellation()
+            guard clock() - started < budget else { break }
             let id = "wild-\(seed)-\(made.count)"
-            if let candidate = await attempt(index: index, playerLevel: playerLevel, id: id, rng: &rng, taken: species),
+            if let candidate = try await attempt(index: index, playerLevel: playerLevel, id: id, rng: &rng, taken: species),
                let speciesNum = candidate.snapshot?.set.speciesNum {
                 species.insert(speciesNum)
                 made.append(candidate)
@@ -81,11 +87,11 @@ struct PracticeWildGenerator {
     }
 
     private func attempt(index: [BaseSpecies], playerLevel: Int, id: String, rng: inout WildRNG,
-                         taken: Set<Int>) async -> PracticeCandidate? {
+                         taken: Set<Int>) async throws -> PracticeCandidate? {
         guard let baseID = HatchRule.pickBase(from: index, isCollected: { _ in false }, roll: rng.next()) else { return nil }
         let level = PracticeWildRules.level(around: playerLevel, roll: rng.next())
         // Offline the evolution line is gone (memory-only cache): the base species still works, so fall back to it.
-        let line = try? await source.provider.line(baseSpeciesID: baseID)
+        let line = try await loaded { try await source.provider.line(baseSpeciesID: baseID) }
         var path = [baseID]
         if let line {
             var node = line.tree
@@ -102,8 +108,8 @@ struct PracticeWildGenerator {
         let shiny = CompanionStore.rollsShiny(roll: rng.next(), charmOwned: false)
         let nature = PokemonNature.allCases[Int(rng.next() % UInt64(PokemonNature.allCases.count))]
         let profileSeed = rng.next()
-        guard !taken.contains(speciesID),
-              let details = try? await source.details.pokemonDetails(speciesID: speciesID) else { return nil }
+        guard !taken.contains(speciesID) else { return nil }
+        guard let details = try await loaded({ try await source.details.pokemonDetails(speciesID: speciesID) }) else { return nil }
         var profile = PokemonProfile.generate(seed: profileSeed, instanceID: id)
         profile.level = level
         profile.enrich(with: details)
@@ -113,6 +119,19 @@ struct PracticeWildGenerator {
         let name = line?.names[speciesID]?["ko"] ?? snapshot.publicInfo.species
         return PracticeCandidate(id: id, name: name, snapshot: snapshot, blockedReason: nil,
                                  origin: .wild(rarity: rarity, shiny: shiny))
+    }
+}
+
+extension PracticeWildGenerator {
+    /// A request's result, or nil when it failed (offline, timeout): the attempt then falls back or is skipped.
+    /// A cancellation is not a failure — it stops the whole search.
+    fileprivate func loaded<T>(_ request: () async throws -> T) async throws -> T? {
+        do { return try await request() }
+        catch is CancellationError { throw CancellationError() }
+        catch {
+            try Task.checkCancellation()   // URLSession reports a cancelled task as URLError.cancelled
+            return nil
+        }
     }
 }
 
