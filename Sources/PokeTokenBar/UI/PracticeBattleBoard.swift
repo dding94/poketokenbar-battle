@@ -265,7 +265,7 @@ struct PracticeBattleBoard: View {
     /// battles, and the toggle row hides once the battle has ended and only its last beats are playing.
     /// The speed stays usable until the last beat has played.
     private var controls: some View {
-        VStack(spacing: 4) {
+        VStack(spacing: 2) {
             HStack(spacing: 8) {
                 speedPicker
                 Spacer(minLength: 4)
@@ -364,7 +364,7 @@ struct PracticeSideCard: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 7) {
+        VStack(alignment: .leading, spacing: 5) {
             HStack(spacing: 10) {
                 PracticeSpriteTile(set: snapshot?.set, size: 44, artwork: artwork)
                     .practiceFainted(fainted)
@@ -394,7 +394,7 @@ struct PracticeSideCard: View {
             }
             if own { ownAbility } else { revealed }
         }
-        .practiceCard()
+        .practiceCard(padding: 8)
     }
 
     /// The beat's HP change next to the name row, right above the HP bar; keyed by the beat so each
@@ -428,7 +428,7 @@ struct PracticeSideCard: View {
     private var revealed: some View {
         ViewThatFits(in: .horizontal) {
             HStack(spacing: 5) { movesRow; abilityRow; Spacer(minLength: 0) }
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 5) { movesRow; Spacer(minLength: 0) }
                 HStack(spacing: 5) { abilityRow; Spacer(minLength: 0) }
             }
@@ -498,11 +498,14 @@ struct PracticeMoveCard: View {
                         .frame(width: 14, height: 14)
                         .overlay(RoundedRectangle(cornerRadius: 3).strokeBorder(Color.secondary.opacity(0.4)))
                 }
-                // A long type name with both markers runs out of room first; the PP count then drops its
-                // label (the accessibility value still says it).
+                // A long type name with both markers runs out of room first (FIGHTING + STAB + Priority in
+                // English): the PP count drops its label, then Priority shrinks to the hare glyph the matchup's
+                // speed line uses, and only then goes. The accessibility value always says all of it.
                 ViewThatFits(in: .horizontal) {
-                    badgeRow(ppLabel: true)
-                    badgeRow(ppLabel: false)
+                    badgeRow(ppLabel: true, priority: .text)
+                    badgeRow(ppLabel: false, priority: .text)
+                    badgeRow(ppLabel: false, priority: .glyph)
+                    badgeRow(ppLabel: false, priority: .hidden)
                 }
                 Text(stats)
                     .font(.system(size: 10).monospacedDigit())
@@ -511,7 +514,7 @@ struct PracticeMoveCard: View {
                     .minimumScaleFactor(0.85)
                     .opacity(hint == nil ? 0 : 1)
             }
-            .padding(.horizontal, 7).padding(.vertical, 6)
+            .padding(.horizontal, 7).padding(.vertical, 5)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(tint.opacity(0.14), in: RoundedRectangle(cornerRadius: 10))
             .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(tint.opacity(0.4)))
@@ -525,13 +528,23 @@ struct PracticeMoveCard: View {
         .accessibilityValue(spoken)
     }
 
-    private func badgeRow(ppLabel: Bool) -> some View {
-        HStack(spacing: 4) {
+    private enum PriorityStyle { case text, glyph, hidden }
+
+    /// The glyph row also tightens its gaps by a point: FIGHTING + STAB + hare + "30/30" needs 146 of 148pt.
+    private func badgeRow(ppLabel: Bool, priority style: PriorityStyle) -> some View {
+        HStack(spacing: style == .glyph ? 3 : 4) {
             if !move.type.isEmpty {
                 PracticeTypeBadges(types: [move.type], l: l, artwork: artwork).fixedSize()
             }
+            if hint?.info.variableType == true { PracticeMarker(text: l.practiceVariableType) }
             if hint?.stab == true { PracticeMarker(text: l.practiceStab) }
-            if priority { PracticeMarker(text: l.practicePriority) }
+            if priority {
+                switch style {
+                case .text: PracticeMarker(text: l.practicePriority)
+                case .glyph: PracticeMarker(symbol: "hare.fill")
+                case .hidden: EmptyView()
+                }
+            }
             Spacer(minLength: 2)
             if !special {
                 Text(ppLabel ? "PP \(move.pp)/\(move.maxpp)" : "\(move.pp)/\(move.maxpp)")
@@ -542,16 +555,18 @@ struct PracticeMoveCard: View {
         }
     }
 
-    /// "Pow 90 · Acc 100 · Special"; a blank line without a hint. Variable-power moves (Flail) report 0.
+    /// "Pow 90 · Acc 100 · Special", "Fixed damage · Acc 100 · Physical"; a blank line without a hint.
+    /// Variable-power moves (Flail) report 0.
     private var stats: String {
         guard let info = hint?.info else { return " " }
         return l.practiceMoveStats(category: info.category, power: info.basePower > 0 ? info.basePower : nil,
-                                   accuracy: info.accuracy)
+                                   accuracy: info.accuracy, fixedDamage: info.fixedDamage)
     }
 
     private var spoken: String {
         guard let hint else { return "" }
         var parts = [stats, "PP \(move.pp)/\(move.maxpp)"]
+        if hint.info.variableType { parts.append(l.practiceVariableType) }
         if let multiplier { parts.append(l.practiceMultiplier(multiplier)) }
         if hint.stab { parts.append(l.practiceStab) }
         if priority { parts.append(l.practicePriority) }

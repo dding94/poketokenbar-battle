@@ -201,9 +201,9 @@ struct PracticeMatchupCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            row("scope", tint: matchup.bestOffense > 1 ? PracticeCalloutTone.strong.color : .secondary) {
+            row(reach == .none || reach == .immune ? "exclamationmark.octagon.fill" : "scope", tint: reach.iconTint) {
                 PracticePhraseText(phrase: offense, l: l, artwork: artwork)
-                    .foregroundStyle(matchup.bestMoveIDs.isEmpty ? Color.secondary : Color.primary)
+                    .foregroundStyle(reach.textTint)
             }
             row("shield.lefthalf.filled", tint: threatTint) {
                 Text(l.practiceThreat(l.practiceMultiplier(matchup.threat)))
@@ -241,13 +241,60 @@ struct PracticeMatchupCard: View {
         }
     }
 
-    /// "약점 공략: 10만볼트·볼트태클 ×2" with localized names; the best neutral or resisted hit otherwise.
+    /// How far my best damaging move reaches the foe's types (`PracticeMatchup.bestOffense`).
+    enum Reach: Equatable {
+        /// ×2 or more: names the moves.
+        case strong
+        /// ×1 at best (Core lists no moves then).
+        case neutral
+        /// Every damaging move is resisted: names the least-resisted ones.
+        case resisted
+        /// Every damaging move is blocked by type: the battle may stall into a draw.
+        case immune
+        /// No damaging move at all: the battle may stall into a draw.
+        case none
+
+        init(_ matchup: PracticeMatchup) {
+            let best = matchup.bestOffense, named = !matchup.bestMoveIDs.isEmpty
+            if best <= 0 { self = named ? .immune : .none }
+            else if best > 1, named { self = .strong }
+            else if best < 1, named { self = .resisted }
+            else { self = .neutral }
+        }
+
+        var iconTint: Color {
+            switch self {
+            case .strong: PracticeCalloutTone.strong.color
+            case .neutral: .secondary
+            case .resisted: .orange
+            case .immune, .none: .red
+            }
+        }
+
+        var textTint: Color {
+            switch self {
+            case .strong: .primary
+            case .neutral, .resisted: .secondary
+            case .immune, .none: .red
+            }
+        }
+    }
+
+    private var reach: Reach { Reach(matchup) }
+
+    /// Strong: "약점 공략: 10만볼트·볼트태클 ×2"; resisted: "모든 공격이 반감돼요 · 그나마 아이언테일 ×½"
+    /// (localized names); neutral, immune and no attacks are fixed lines.
     private var offense: PracticePhrase {
-        guard !matchup.bestMoveIDs.isEmpty else { return PracticePhrase(l.practiceNoWeakSpot) }
         let marker = "\u{1F}"
         let multiplier = l.practiceMultiplier(matchup.bestOffense)
-        let template = matchup.bestOffense > 1 ? l.practiceWeakSpot(marker, multiplier)
-                                               : l.practiceBestHit(marker, multiplier)
+        let template: String
+        switch reach {
+        case .strong: template = l.practiceWeakSpot(marker, multiplier)
+        case .resisted: template = l.practiceAllResisted(marker, multiplier)
+        case .neutral: return PracticePhrase(l.practiceNoWeakSpot)
+        case .immune: return PracticePhrase(l.practiceAllImmune)
+        case .none: return PracticePhrase(l.practiceNoAttacks)
+        }
         let parts = template.components(separatedBy: marker)
         var pieces: [PracticePhrase.Piece] = []
         for (index, part) in parts.enumerated() {

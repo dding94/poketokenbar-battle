@@ -1808,15 +1808,24 @@ extension L {
             : "Super effective ×\(superEffective) · Critical ×\(critical)"
     }
     // Decision hints (`PracticeHints`): move cards, the selection matchup and the playback speed.
-    /// "위력 90 · 명중 100 · 특수"; a status move shows its category only. nil power: varies (Flail);
-    /// nil accuracy: never misses.
-    func practiceMoveStats(category: String, power: Int?, accuracy: Int?) -> String {
+    /// "위력 90 · 명중 100 · 특수"; a status move shows its category only. `fixedDamage` (Seismic Toss,
+    /// Super Fang, OHKO moves) replaces the power. nil power: varies (Flail); nil accuracy: never misses.
+    func practiceMoveStats(category: String, power: Int?, accuracy: Int?, fixedDamage: Bool = false) -> String {
         let kind = practiceCategory(category)
         guard category != "Status" else { return kind }
-        let pow = power.map(String.init) ?? "\u{2014}"
         let acc = accuracy.map(String.init) ?? "\u{2014}"
-        return lang == .ko ? "위력 \(pow) · 명중 \(acc) · \(kind)" : "Pow \(pow) · Acc \(acc) · \(kind)"
+        let first: String
+        if fixedDamage {
+            first = practiceFixedDamage
+        } else {
+            let pow = power.map(String.init) ?? "\u{2014}"
+            first = lang == .ko ? "위력 \(pow)" : "Pow \(pow)"
+        }
+        return lang == .ko ? "\(first) · 명중 \(acc) · \(kind)" : "\(first) · Acc \(acc) · \(kind)"
     }
+    var practiceFixedDamage: String { lang == .ko ? "고정 피해" : "Fixed damage" }
+    /// A move whose type changes in battle (Hidden Power, Weather Ball), so it has no matchup badge.
+    var practiceVariableType: String { lang == .ko ? "타입 변동" : "Varies" }
     /// Engine move categories: "Physical", "Special", "Status".
     func practiceCategory(_ category: String) -> String {
         let ko = ["Physical": "물리", "Special": "특수", "Status": "변화"]
@@ -1841,10 +1850,20 @@ extension L {
     func practiceWeakSpot(_ moves: String, _ multiplier: String) -> String {
         lang == .ko ? "약점 공략: \(moves) \(multiplier)" : "Weak spot: \(moves) \(multiplier)"
     }
-    func practiceBestHit(_ moves: String, _ multiplier: String) -> String {
-        lang == .ko ? "가장 잘 듣는 기술: \(moves) \(multiplier)" : "Best hit: \(moves) \(multiplier)"
+    /// Every damaging move is resisted; names the least-resisted ones.
+    func practiceAllResisted(_ moves: String, _ multiplier: String) -> String {
+        lang == .ko ? "모든 공격이 반감돼요 · 그나마 \(moves) \(multiplier)"
+            : "Every attack is resisted · best: \(moves) \(multiplier)"
     }
     var practiceNoWeakSpot: String { lang == .ko ? "약점을 찌를 기술이 없어요" : "No move hits a weak spot" }
+    /// Every damaging move is blocked by the foe's types.
+    var practiceAllImmune: String {
+        lang == .ko ? "공격이 모두 통하지 않아요 · 무승부가 될 수 있어요" : "None of your attacks land · may end in a draw"
+    }
+    /// The player has no damaging move at all.
+    var practiceNoAttacks: String {
+        lang == .ko ? "공격 기술이 없어요 · 무승부가 될 수 있어요" : "No attacking moves · may end in a draw"
+    }
     /// The opponent's own types against mine; a hint, not its moves.
     func practiceThreat(_ multiplier: String) -> String {
         lang == .ko ? "상대 타입 → 나 \(multiplier)" : "Foe's types → you \(multiplier)"

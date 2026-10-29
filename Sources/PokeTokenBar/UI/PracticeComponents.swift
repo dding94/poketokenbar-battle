@@ -122,19 +122,28 @@ struct PracticeEffectivenessBadge: View {
     }
 }
 
-/// A small neutral tag next to a move's type ("STAB", "Priority").
+/// A small neutral tag next to a move's type ("STAB", "Priority"), or a glyph when room runs out.
 @MainActor
 struct PracticeMarker: View {
-    let text: String
+    private var text: String?
+    private var symbol: String?
+
+    init(text: String) { self.text = text }
+    init(symbol: String) { self.symbol = symbol }
 
     var body: some View {
-        Text(text)
+        label
             .font(.system(size: 8, weight: .bold))
             .lineLimit(1)
             .foregroundStyle(Color.primary.opacity(0.7))
             .padding(.horizontal, 3).padding(.vertical, 1)
             .background(Color.primary.opacity(0.08), in: Capsule())
             .fixedSize()
+    }
+
+    @ViewBuilder
+    private var label: some View {
+        if let symbol { Image(systemName: symbol) } else { Text(text ?? "") }
     }
 }
 
