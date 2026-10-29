@@ -1652,41 +1652,19 @@ struct L {
 // Local practice defaults to Korean; other languages use the English fallback until translated.
 extension L {
     var practicePlayer: String { lang == .ko ? "내 출전 개체" : "Your Pokémon" }
-    var practiceOpponent: String { lang == .ko ? "연습 상대 · 자동 정책" : "Opponent · auto policy" }
     var practiceNeedsPair: String { lang == .ko ? "출전할 수 있는 개체가 두 마리 필요해요. 개체 정보가 준비되면 여기에 바로 나타나요." : "Two eligible Pokémon are needed. They appear here as soon as their profiles are ready." }
     var practiceMissingInfo: String { lang == .ko ? "정보 없음" : "Missing information" }
-    var practiceReadOnly: String { lang == .ko ? "세이브 읽기 전용 · 경험치·소유권 변화 없음" : "Read-only save · no growth or ownership changes" }
     var practiceRules: String { lang == .ko ? "9세대 · 테라스탈·도구 없음 · EV 0 · 200턴 무승부" : "Gen 9 · no Tera/items · EV 0 · draw at 200 turns" }
-    var practiceHeading: String { lang == .ko ? "PRACTICE / 연습전" : "PRACTICE / Local battle" }
-    var practiceHero: String { lang == .ko ? "함께 자란 개체, 첫 번째 대결" : "A first battle with your companions" }
-    var practiceDescription: String { lang == .ko ? "내 다른 개체를 상대로 가볍게 연습하세요. 상대는 같은 자동 정책으로 움직입니다." : "Practice against another Pokémon you own, controlled by the same automatic policy." }
-    var practiceLocal: String { lang == .ko ? "로컬" : "Local" }
     var practiceChoose: String { lang == .ko ? "개체를 골라 주세요" : "Choose a Pokémon" }
-    var practiceSecrets: String { lang == .ko ? "기술·특성은 전투 중 공개됩니다." : "Moves and abilities are revealed during battle." }
     var practiceAbility: String { lang == .ko ? "특성" : "Ability" }
-    var practiceUnrevealed: String { lang == .ko ? "아직 공개되지 않음" : "Not revealed yet" }
     var practiceMoves: String { lang == .ko ? "기술" : "Moves" }
-    var practiceFirstUse: String { lang == .ko ? "첫 사용 후 공개" : "Revealed on first use" }
-    var practiceWaiting: String { lang == .ko ? "출전 대기" : "Waiting for a Pokémon" }
-    var practiceWaitingInfo: String { lang == .ko ? "개체 정보가 준비되면 선택할 수 있습니다." : "Choose a Pokémon after its profile is ready." }
     var practiceMode: String { lang == .ko ? "진행 방식" : "Battle mode" }
     var practiceManual: String { lang == .ko ? "직접 조작" : "Manual" }
     var practiceAuto: String { lang == .ko ? "자동 진행" : "Automatic" }
-    var practiceAutoRunning: String { lang == .ko ? "자동으로 진행 중" : "Playing automatically" }
-    var practiceStop: String { lang == .ko ? "연습 중단" : "Stop practice" }
     var practiceDraw: String { lang == .ko ? "무승부" : "Draw" }
-    var practiceWon: String { lang == .ko ? "내 개체 승리!" : "Your Pokémon wins!" }
-    var practiceLost: String { lang == .ko ? "상대 승리" : "Opponent wins" }
-    var practiceCancelled: String { lang == .ko ? "연습을 중단했습니다." : "Practice stopped." }
-    var practiceStart: String { lang == .ko ? "연습 시작" : "Start practice" }
-    var practiceAgain: String { lang == .ko ? "다시 연습" : "Practice again" }
     var practiceRecharge: String { lang == .ko ? "재충전" : "Recharge" }
     var practiceStruggle: String { lang == .ko ? "발버둥" : "Struggle" }
-    var practiceTimerHint: String { lang == .ko ? "직접 조작은 매 턴 30초. 시간이 지나면 자동으로 선택합니다." : "Manual turns last 30 seconds, then the policy chooses automatically." }
     var practiceLog: String { lang == .ko ? "전투 기록" : "Battle log" }
-    var practiceStartHint: String { lang == .ko ? "출전 개체와 진행 방식을 고른 뒤 시작하세요." : "Choose your Pokémon and a mode, then start." }
-    var practiceWindowTitle: String { lang == .ko ? "PokeTokenBar Battle · 연습전" : "PokeTokenBar Battle · Practice" }
-    var practiceCannotOpen: String { lang == .ko ? "연습전을 열 수 없습니다." : "Unable to open practice." }
     var practiceTitle: String { lang == .ko ? "연습전" : "Practice" }
     var practiceOpenHint: String { lang == .ko ? "내 개체로 로컬 연습전 열기" : "Open a local practice battle with your Pokémon" }
     var practiceStatusRunning: String { lang == .ko ? "연습전 진행 중" : "Practice battle in progress" }
@@ -1754,9 +1732,4 @@ extension L {
     func practiceTurn(_ turn: Int) -> String { lang == .ko ? "\(turn)턴" : "Turn \(turn)" }
     func practiceSeconds(_ seconds: Int) -> String { lang == .ko ? "\(seconds)초" : "\(seconds)s" }
     func practiceMoveLabel(_ slot: Int, _ name: String) -> String { "\(practiceMoves) \(slot): \(name)" }
-    func practiceStats(_ stats: [String: Int]) -> String {
-        let labels = lang == .ko ? ["공격", "방어", "특공", "특방", "스피드 (Spe)"] : ["Atk", "Def", "SpA", "SpD", "Spe"]
-        let values = zip(labels, ["atk", "def", "spa", "spd", "spe"]).map { "\($0) \(stats[$1, default: 0])" }
-        return values.prefix(3).joined(separator: " · ") + "\n" + values.suffix(2).joined(separator: " · ")
-    }
 }

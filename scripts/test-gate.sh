@@ -20,6 +20,7 @@ THRESHOLD="${THRESHOLD:-75}"
 
 LOGIC_CORE=(
   "Sources/PokeTokenBar/Core/PracticeBattle.swift"
+  "Sources/PokeTokenBar/Core/PracticeSession.swift"
   "Sources/PokeTokenBar/Core/PracticeText.swift"
   "Sources/PokeTokenBar/Core/BattleSnapshot.swift"
   "Sources/PokeTokenBar/Core/CompanionModel.swift"

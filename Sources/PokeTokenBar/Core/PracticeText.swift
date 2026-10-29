@@ -4,7 +4,7 @@ import Foundation
 enum PracticeText {
     static func failure(_ error: Error) -> String {
         switch error {
-        case BattleSnapshot.Failure.missingProfile: return "개체 정보가 아직 준비되지 않았습니다. 창을 닫고 잠시 후 다시 열어 주세요."
+        case BattleSnapshot.Failure.missingProfile: return "개체 정보가 아직 준비되지 않았습니다. 잠시 후 연습전을 다시 열어 주세요."
         case BattleSnapshot.Failure.missingNature: return "성격 정보가 없습니다."
         case BattleSnapshot.Failure.missingGender: return "성별 정보가 없습니다."
         case BattleSnapshot.Failure.missingAbility: return "특성 정보가 아직 없습니다."
@@ -14,7 +14,7 @@ enum PracticeText {
             return "전투를 진행할 수 없습니다 (\(code)). 개체 정보는 바꾸지 않았습니다."
         case BattleEngine.Failure.missingBundle: return "전투 엔진이 없습니다. 완성된 앱 번들로 실행해 주세요."
         case BattleEngine.Failure.checksumMismatch: return "전투 엔진 검증에 실패했습니다. 앱을 다시 빌드해 주세요."
-        default: return "전투 정보를 확인할 수 없습니다. 창을 닫고 다시 시도해 주세요."
+        default: return "전투 정보를 확인할 수 없습니다. 연습전을 다시 열어 주세요."
         }
     }
     static func log(_ line: String, names: [String: String]) -> String? {
