@@ -1,5 +1,5 @@
 import {Battle, State, Dex} from '@pkmn/sim';
-import {validateConfig, fail, keys} from './input.js';
+import {validateConfig, makeSet, fail, keys} from './input.js';
 import {sha256} from './hash.js';
 import {view, visibleLog, normalized} from './views.js';
 const VERSION={engine:'@pkmn/sim@0.10.12',adapter:'1',rules:'gen9-notera-noitems-v1'};
@@ -56,7 +56,16 @@ function replay(log) {
     const r=result(id);return {winner:r.winner,logHash:r.logHash};
   } finally {destroy(id);}
 }
-const api={version:()=>VERSION,describeSet:()=>fail('invalid_set'),createBattle,request,choose,autoChoice,
+function describeSet(input) {
+  const set=makeSet(input);const species=Dex.species.get(set.species);
+  const calculator=new Battle({formatid:'gen9customgame@@@Terastal Clause',seed:[0,0,0,1]});
+  try {
+    const stats=calculator.spreadModify(species.baseStats,set);
+    if(species.maxHP)stats.hp=species.maxHP;
+    return {speciesNum:species.num,species:species.name,level:set.level,types:species.types,stats};
+  } finally {calculator.destroy();}
+}
+const api={version:()=>VERSION,describeSet,createBattle,request,choose,autoChoice,
   state:(id,v)=>view(get(id).battle,viewer(v)),
   drainLog:(id,v)=>{viewer(v);const r=get(id);const lines=visibleLog(r.battle.log.slice(r.cursors[v]),v);r.cursors[v]=r.battle.log.length;return lines;},
   result,replay,destroy};

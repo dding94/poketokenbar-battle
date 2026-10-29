@@ -88,4 +88,24 @@ final class BattleSnapshotTests: XCTestCase {
         XCTAssertEqual(try encoder.encode(state), before)
         XCTAssertEqual(try JSONDecoder().decode(BattleSnapshot.self, from: encoder.encode(snapshot)), snapshot)
     }
+    func testDecodedUnknownSchemaAndForgedPublicStatsAreRejected() throws {
+        let engine = try engine()
+        let snapshot = try BattleSnapshot.make(speciesID: 25, nature: .hardy, profile: profile(), using: engine)
+        let data = try JSONEncoder().encode(snapshot)
+        let original = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        for key in ["schemaVersion", "publicInfo"] {
+            var forged = original
+            if key == "schemaVersion" { forged[key] = 2 }
+            else {
+                var info = try XCTUnwrap(forged[key] as? [String: Any])
+                info["stats"] = ["hp": 99999]
+                forged[key] = info
+            }
+            let decoded = try JSONDecoder().decode(BattleSnapshot.self, from: JSONSerialization.data(withJSONObject: forged))
+            XCTAssertThrowsError(try decoded.validate(using: engine)) {
+                XCTAssertEqual($0 as? BattleSnapshot.Failure, .invalidSchema)
+            }
+        }
+    }
+
 }

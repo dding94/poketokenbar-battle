@@ -53,6 +53,14 @@
 2. PR 02 → PR 03 → PR 03A(로컬 연습전) 순서로 진행한다. 설치·실행 및 계속 진행은 사용자가 승인했다.
 3. 사용자에게 연습전 시험 방법을 안내하고 멈춘다. 공개 전환은 필요하지 않아 private를 유지한다.
 
+### PR 02 진행
+
+- 공개 능력치 API `describeSet`을 부록 A에 추가했다. 같은 `makeSet` 검증을 사용하고 EV 0·9세대 폼·껍질몬 HP 1을 계산하며 기술/특성을 반환하지 않는다.
+- Node RED: `npm test --prefix engine` 종료 1, 20건 중 기존 17 통과·신규 3 실패·skip 0. GREEN 종료 0, 20 통과·실패/skip 0. 별칭으로 같은 기술을 중복 입력하는 경우도 거절한다.
+- Swift RED: [CI 40808265569](https://github.com/dding94/poketokenbar-battle/actions/runs/40808265569), `ba79906`. `swift test --filter "BattleEngineTests|BattleSnapshotTests"` 종료 1, 10건 실행(기존 4 통과·스냅샷 6 실패), 11개 실패 assertion/오류·skip 0. 테스트 컴파일이 아닌 실제 stub 동작 실패다.
+- 스냅샷 schema 1, instanceID·엔진 해시·규칙/정책 버전·전투 입력·공개 능력치만 저장한다. 성장량/단계 진행도는 포함하지 않는다. 개인 데이터 없이 합성 `CompanionState`의 실제 Codable 형태를 인코딩/복원해 검사한다.
+- `BattleSnapshot`은 저장소 참조나 파일 쓰기 기능이 없는 값 타입이다. 누락된 성격/성별/특성/기술은 오류로 남기고 기본값으로 채우지 않는다. 원격 GREEN·전체 앱 게이트는 다음 검증이다.
+
 ### PR 01 완료 증거
 
 - `npm test` 종료 0: 계약 17건 통과·실패 0·skip 0. 고정 승자/정규화 해시, 입력 거절, 정보 숨김, replay를 검사한다.

@@ -1,4 +1,4 @@
-import {Dex, toID} from '@pkmn/sim';
+import {Dex} from '@pkmn/sim';
 export const fail = code => {throw new Error(code);};
 export const keys = (value, allowed) => value && typeof value === 'object' && !Array.isArray(value) &&
   Object.keys(value).every(k => allowed.includes(k));
@@ -36,7 +36,7 @@ export function makeSet(s) {
   if(!['male','female','genderless'].includes(s.gender))fail('invalid_gender');
   if(!slug(s.nature)||!Dex.natures.get(s.nature).exists)fail('invalid_nature');
   if(!slug(s.ability)||!Dex.abilities.get(s.ability).exists)fail('invalid_ability');
-  if(!Array.isArray(s.moves)||s.moves.length<1||s.moves.length>4||new Set(s.moves.map(toID)).size!==s.moves.length||
+  if(!Array.isArray(s.moves)||s.moves.length<1||s.moves.length>4||new Set(s.moves.map(m=>Dex.moves.get(m).id)).size!==s.moves.length||
     s.moves.some(m=>!slug(m)||!Dex.moves.get(m).exists))fail('invalid_moves');
   if(!keys(s.ivs,Object.keys(stats))||Object.keys(s.ivs).length!==6||
     Object.values(s.ivs).some(n=>!Number.isInteger(n)||n<0||n>31))fail('invalid_ivs');

@@ -6,7 +6,7 @@ import JavaScriptCore
 @MainActor
 final class BattleEngine {
     enum Failure: Error, Equatable { case missingBundle, checksumMismatch, invalidBundle, engine(String) }
-    enum Method: String { case version, createBattle, request, choose, autoChoice, state, drainLog, result, replay, destroy }
+    enum Method: String { case version, describeSet, createBattle, request, choose, autoChoice, state, drainLog, result, replay, destroy }
     private let context: JSContext
     private let api: JSValue
 
