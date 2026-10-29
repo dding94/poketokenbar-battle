@@ -978,9 +978,13 @@ final class PracticeReadOnlyGuardTests: XCTestCase {
     func testPracticeSourcesUseNoSaveOrFileWriteAPI() throws {
         let core = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
             .deletingLastPathComponent().appendingPathComponent("Sources/PokeTokenBar/Core")
-        for name in ["PracticeSession", "PracticeWild", "PracticeBattle", "HatchRule"] {
-            let source = try String(contentsOf: core.appendingPathComponent("\(name).swift"), encoding: .utf8)
-            XCTAssertEqual(Self.hits(in: source), [], "\(name).swift reaches for the save or the disk")
+        // Every practice file by prefix, so a new one is scanned without editing a list.
+        let names = try FileManager.default.contentsOfDirectory(atPath: core.path)
+            .filter { ($0.hasPrefix("Practice") && $0.hasSuffix(".swift")) || $0 == "HatchRule.swift" }
+        XCTAssertTrue(names.contains("PracticeSession.swift") && names.contains("HatchRule.swift"), "scanned \(names)")
+        for name in names {
+            let source = try String(contentsOf: core.appendingPathComponent(name), encoding: .utf8)
+            XCTAssertEqual(Self.hits(in: source), [], "\(name) reaches for the save or the disk")
         }
     }
 }
