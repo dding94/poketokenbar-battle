@@ -35,11 +35,24 @@ extension PracticeCandidate {
 }
 
 /// How a practice battle ended for the player. A forfeit counts as a loss.
-enum PracticeOutcome: String, Codable, Sendable { case win, loss, draw }
+enum PracticeOutcome: String, Codable, Sendable {
+    case win, loss, draw
+
+    /// From the engine's winner; the player is always `p1`. No winner (the 200-turn cap, a tie) is a draw.
+    init(winner: String?) {
+        switch winner {
+        case "p1": self = .win
+        case "p2": self = .loss
+        default: self = .draw
+        }
+    }
+}
 
 /// Practice results, kept apart from the save in their own file (`PracticeRecordStore`). Nothing else reads them.
 struct PracticeRecords: Codable, Equatable, Sendable {
-    var version = 1
+    /// The format this version writes. A file from a newer version is kept aside unread (`PracticeRecordStore.load`).
+    static let currentVersion = 1
+    var version = PracticeRecords.currentVersion
     var wins = 0
     var losses = 0
     var draws = 0
@@ -49,6 +62,32 @@ struct PracticeRecords: Codable, Equatable, Sendable {
     /// The local day (`PracticeDaily.dayKey`) the stars below belong to; another day starts with none.
     var dailyDay: String?
     var dailyStars: Set<PracticeDailyGoal> = []
+}
+
+extension PracticeRecords {
+    /// Counts one battle that ended and returns what the result screen shows; `PracticeSession` calls it once per
+    /// battle. `dailyDay` is the day of today's opponent when the battle was against it, nil otherwise. Stars belong to
+    /// one day: a battle against another day's opponent clears them before adding its own.
+    mutating func record(_ outcome: PracticeOutcome, dailyDay: String?, turns: Int,
+                         playerHPShare: Double) -> PracticeRecordUpdate {
+        let previousStreak = streak
+        switch outcome {
+        case .win: wins += 1; streak += 1; bestStreak = max(bestStreak, streak)
+        case .loss: losses += 1; streak = 0
+        case .draw: draws += 1; streak = 0
+        }
+        var earned: Set<PracticeDailyGoal> = []
+        if let dailyDay {
+            if self.dailyDay != dailyDay { self.dailyDay = dailyDay; dailyStars = [] }
+            earned = Set(PracticeDailyGoal.allCases.filter {
+                $0.isMet(outcome: outcome, turns: turns, playerHPShare: playerHPShare)
+            }).subtracting(dailyStars)
+            dailyStars.formUnion(earned)
+        }
+        return PracticeRecordUpdate(outcome: outcome, streak: streak, bestStreak: bestStreak,
+                                    endedStreak: outcome == .win || previousStreak == 0 ? nil : previousStreak,
+                                    daily: dailyDay != nil, newStars: earned, stars: dailyDay == nil ? [] : dailyStars)
+    }
 }
 
 /// What the result screen shows about the battle that just ended (`PracticeSession.lastRecord`).
@@ -73,11 +112,27 @@ enum PracticeDailyGoal: Int, Codable, CaseIterable, Comparable, Sendable {
     /// Win with at least `healthyShare` of the player's HP left.
     case healthyWin = 3
 
-    static let quickTurns = 3      // placeholder until calibrated
-    static let healthyShare = 0.5  // placeholder until calibrated
+    /// Calibrated on 1,000 level-matched battles per temperament, mixed by how many natures each has: 49.6% of the
+    /// player's wins end within 2 turns and 33.6% keep at least 85% of the HP (03B-5 targets about a half and a third).
+    static let quickTurns = 2
+    static let healthyShare = 0.85
 
-    func isMet(outcome: PracticeOutcome, turns: Int, playerHPShare: Double) -> Bool { false }   // contract stub
+    /// Every goal needs a win; both limits are inclusive.
+    func isMet(outcome: PracticeOutcome, turns: Int, playerHPShare: Double) -> Bool {
+        guard outcome == .win else { return false }
+        switch self {
+        case .win: return true
+        case .quickWin: return turns <= Self.quickTurns
+        case .healthyWin: return playerHPShare >= Self.healthyShare
+        }
+    }
     static func < (a: Self, b: Self) -> Bool { a.rawValue < b.rawValue }
+}
+
+extension BattleView.Pokemon {
+    /// HP left as a share of the maximum. Exact only for the viewer's own side: the engine runs with
+    /// `reportExactHP = false`, so the other side reports a percentage (`maxhp` 100). The player is `p1`.
+    var hpShare: Double { Double(hp) / Double(max(1, maxhp)) }
 }
 
 /// Today's opponent: the wild generator with a seed from the local date, so a day keeps one opponent.
@@ -88,25 +143,5 @@ enum PracticeDaily {
     static func dayKey(_ date: Date, calendar: Calendar) -> String { "" }   // contract stub
     /// A stable seed for `dayKey`, the same on every launch and machine.
     static func seed(dayKey: String) -> UInt64 { 0 }   // contract stub
-}
-
-// MARK: RED stubs (03B-5): compile-only, replaced by the implementation.
-
-extension PracticeOutcome {
-    init(winner: String?) { self = .draw }   // RED stub
-}
-
-extension PracticeRecords {
-    static let currentVersion = 1
-    mutating func record(_ outcome: PracticeOutcome, dailyDay: String?, turns: Int, playerHPShare: Double) -> PracticeRecordUpdate {
-        PracticeRecordUpdate(outcome: outcome, streak: 0, bestStreak: 0, endedStreak: nil, daily: false, newStars: [], stars: [])   // RED stub
-    }
-}
-
-extension PracticeDaily {
     static func dayKey(ofCandidateID id: String?) -> String? { nil }   // RED stub
-}
-
-extension BattleView.Pokemon {
-    var hpShare: Double { 0 }   // RED stub
 }

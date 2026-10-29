@@ -1,7 +1,7 @@
 import Foundation
 import Observation
 
-/// Why a practice battle is held. Manual turns wait while any reason is present (the 30 s deadline
+/// Why a practice battle is held. Manual turns wait while any reason is present (the manual turn deadline
 /// freezes and resumes with the remaining time); automatic play keeps going in the background and
 /// only waits for display sleep and for the turn on screen.
 enum PracticePauseReason: Hashable, CaseIterable, Sendable {
@@ -12,7 +12,7 @@ enum PracticePauseReason: Hashable, CaseIterable, Sendable {
     /// The display slept (`AppDelegate.setDisplayAwake(false)`).
     case displayAsleep
     /// The last engine step is still being staged on screen (`PracticePlayback`). Holds both modes,
-    /// so the manual 30 s starts after the turn has played and automatic turns do not overlap.
+    /// so the manual turn limit starts after the turn has played and automatic turns do not overlap.
     case playback
 }
 
@@ -21,7 +21,7 @@ enum PracticePauseReason: Hashable, CaseIterable, Sendable {
 /// The popover discards its hosting tree on every close, so view `@State` and `.task` loops cannot hold
 /// a battle. The selection, the battle and its driver live here; `AppDelegate` owns one instance and
 /// injects it into the popover environment. Read-only like `PracticeBattle`: it never writes the save,
-/// growth or ownership.
+/// growth or ownership. Its one write is the practice records, through `PracticeRecordStore`.
 @MainActor @Observable
 final class PracticeSession {
     /// Built by `prepare` from a value copy of the save; nil until then or after `releaseIfIdle`.
@@ -225,12 +225,13 @@ final class PracticeSession {
         } ?? ids.first { $0 != player }
         playerID = player; opponentID = opponent
     }
-    /// Starts a battle with the current selection and mode; a rematch is the same call.
+    /// Starts a battle with the current selection and mode; a rematch is the same call. A running battle it
+    /// replaces is cancelled, which is not counted (`forfeit` is the way to give up).
     func start() {
         guard let engine, let player, let opponent, player.id != opponent.id else { return }
         // A reroll still in flight would replace the batch under this battle's opponent when it lands.
         stopWildSearch()
-        stopDriver(); battle?.cancel(); dropPlayback()
+        stopDriver(); battle?.cancel(); dropPlayback(); lastRecord = nil
         let next = PracticeBattle(engine: engine, clock: clock)
         battle = next
         next.start(player: player, opponent: opponent, mode: mode)
@@ -247,8 +248,11 @@ final class PracticeSession {
         step { $0.choose(slot: slot) }
         refreshHold()
     }
-    /// Gives up the running battle and returns to the selection screen.
+    /// Gives up the running battle and returns to the selection screen. Giving up a running battle is a loss; the
+    /// failure screen leaves through here too, and a failed or finished battle has nothing left to give up.
     func forfeit() {
+        // Turns and HP only count towards a win's stars.
+        if let battle, battle.phase == .running { record(.loss, against: battle.opponent, turns: 0, playerHPShare: 0) }
         stopDriver(); battle?.cancel(); battle = nil; dropPlayback(); resultSeen = true
     }
     /// Leaves a finished battle for the selection screen (to pick another opponent).
@@ -322,12 +326,27 @@ final class PracticeSession {
         if let battle, battle.phase == .running { if isHeld { battle.pause() } else { battle.resume() } }
         syncDriver()
     }
-    /// Runs one engine step of a running battle, stages what it produced and detects its end.
+    /// Runs one engine step of a running battle, stages what it produced and detects its end. Every way a battle
+    /// finishes (a choice, a timeout, `skipToResult`) passes here exactly once, so this is where it is counted.
     private func step(_ body: (PracticeBattle) -> Void) {
         guard let battle, battle.phase == .running else { return }
         body(battle)
         stageEvents()
-        if battle.phase == .finished { resultSeen = false }
+        guard battle.phase == .finished else { return }
+        resultSeen = false
+        // A finished battle has its result and its final view (`PracticeBattle.refresh`).
+        if let result = battle.result, let view = battle.view {
+            record(PracticeOutcome(winner: result.winner), against: battle.opponent, turns: view.turn,
+                   playerHPShare: view.p1.hpShare)
+        }
+    }
+    /// Counts an ended battle against the opponent it started with, keeps what changed for the result screen and
+    /// writes the records. Today's opponent is known by its id, which carries its day.
+    private func record(_ outcome: PracticeOutcome, against opponent: PracticeCandidate?, turns: Int,
+                        playerHPShare: Double) {
+        lastRecord = records.record(outcome, dailyDay: PracticeDaily.dayKey(ofCandidateID: opponent?.id),
+                                    turns: turns, playerHPShare: playerHPShare)
+        recordStore.persist(records)
     }
     /// Hands the playback the events the engine added since the last call. A hidden screen plays nothing.
     private func stageEvents() {
