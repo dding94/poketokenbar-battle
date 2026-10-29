@@ -53,6 +53,13 @@
 2. PR 02 → PR 03 → PR 03A(로컬 연습전) 순서로 진행한다. 설치·실행 및 계속 진행은 사용자가 승인했다.
 3. 사용자에게 연습전 시험 방법을 안내하고 멈춘다. 공개 전환은 필요하지 않아 private를 유지한다.
 
+### PR 01A 진행 (2026-10-29)
+
+- 계약 테스트 먼저 작성: `npm test --prefix engine` 종료 1, 17건 중 17건 assertion 실패·skip 0 (`not_implemented` 응답). 입력·호출·오류 경계를 구현한 뒤 같은 명령 종료 0, 17건 통과·실패 0·skip 0.
+- 고정 입력은 독립적인 `Battle` 직접 호출로 승자 p1·1턴·정규화 SHA-256 `cffaf9acfe3a04e3a23205cd46c4adbbbdfb540efc86ac5eef03e47e5d216e41`를 산출해 계약에 고정한다.
+- 9세대·Terastal Clause, 도구 없음, EV 0, 엄격한 SET/선택 토큰 검증, 200턴 종료 경계, JSON 오류 응답, 시점별 공개 뷰와 inputLog 토큰 재생을 구현했다. `BattleStream`은 사용하지 않는다. 자동 선택은 아직 첫 합법 기술이며 PR 03에서 정책 v1로 교체한다.
+- 최소화는 `keepNames: true` 고정. Node 계약만 검증했으며 결정성 코퍼스·상태 왕복·전체 폼/기술 대조·Swift 래퍼·다른 macOS CI는 다음 01B에서 검증한다. PR 01 완료로 보지 않는다.
+
 ### PR 00 최종 재검증 (2026-10-29)
 
 - [CI 40802858618](https://github.com/dding94/poketokenbar-battle/actions/runs/40802858618), `dc0aa8c`, macOS 15: 대상 테스트 종료 0, **34건 통과·실패 0·skip 0**. 전체 `./scripts/test-gate.sh` 종료 0, **1,565건 중 1,549건 통과·16건 skip·실패 0**, 코어 라인 커버리지 **93.82%**. skip 범위는 위 기록과 같다.
