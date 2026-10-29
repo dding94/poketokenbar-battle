@@ -36,7 +36,7 @@ final class PracticeSession {
     /// False from the moment a battle finishes until the result screen reports it was shown.
     private(set) var resultSeen = true
     /// Chosen individuals (`PracticeCandidate.id`). Changing either drops a ready or finished battle.
-    var playerID: String? { didSet { if playerID != oldValue { dropIdleBattle() } } }
+    var playerID: String? { didSet { if playerID != oldValue { dropIdleBattle(); resetWild() } } }
     var opponentID: String? { didSet { if opponentID != oldValue { dropIdleBattle() } } }
     /// Applies to the next `start()`; while a battle runs it switches that battle immediately.
     var mode: PracticeBattle.Mode = .manual {
@@ -61,6 +61,10 @@ final class PracticeSession {
     /// Level-matched wild opponents for the current player (`findWildOpponents`); never saved.
     private(set) var wildCandidates: [PracticeCandidate] = []
     private(set) var wildState: PracticeWildState = .idle
+    private var wildTask: Task<Void, Never>?
+    /// Bumped on every search start and every reset, before the first await; a result whose captured value is
+    /// stale (a newer search, or another player) must not land.
+    private var wildGeneration = 0
 
     /// `drivesAutomatically: false` leaves `tick()` to the caller (tests with an injected clock). Tests also
     /// inject `wildSource` stubs and a fixed `wildSeed`, so wild opponents never reach the network there.
@@ -75,7 +79,43 @@ final class PracticeSession {
     /// with a new seed; a search in flight is cancelled. `opponentID` may then name a wild candidate, and
     /// `opponent` resolves it. Changing the player drops them (`wildState = .idle`) because their levels
     /// were matched to the old one. Needs a prepared engine; results land on the main actor.
-    func findWildOpponents() {}
+    func findWildOpponents() {
+        guard let engine, let level = player?.snapshot?.set.level else { return }
+        wildTask?.cancel()
+        wildGeneration &+= 1
+        let generation = wildGeneration
+        wildState = .searching
+        let generator = PracticeWildGenerator(source: wildSource, engine: engine)
+        let seed = wildSeed()
+        wildTask = Task { [weak self] in
+            let result: Result<[PracticeCandidate], Error>
+            do { result = .success(try await generator.make(count: 3, around: level, seed: seed)) }
+            catch { result = .failure(error) }
+            guard let self, !Task.isCancelled, self.wildGeneration == generation else { return }
+            self.finishWildSearch(result)
+        }
+    }
+    private func finishWildSearch(_ result: Result<[PracticeCandidate], Error>) {
+        wildTask = nil
+        let opponentWasWild = wildCandidates.contains { $0.id == opponentID }
+        switch result {
+        case .success(let made):
+            wildCandidates = made; wildState = .ready
+        case .failure:
+            wildCandidates = []; wildState = .unavailable(PracticeText.wildUnavailable)
+        }
+        // A wild opponent of the replaced batch no longer exists.
+        if opponentWasWild, !wildCandidates.contains(where: { $0.id == opponentID }) { opponentID = defaultOpponentID() }
+    }
+    /// Wild opponents were matched to the player's level: another player (or none) drops them, cancels a search
+    /// in flight, and moves a wild opponent selection back to an own individual.
+    private func resetWild() {
+        wildTask?.cancel(); wildTask = nil; wildGeneration &+= 1
+        let opponentWasWild = wildCandidates.contains { $0.id == opponentID }
+        wildCandidates = []; wildState = .idle
+        if opponentWasWild { opponentID = defaultOpponentID() }
+    }
+    private func defaultOpponentID() -> String? { roster?.eligible.first { $0.id != playerID }?.id }
 
     var player: PracticeCandidate? { candidate(playerID) }
     var opponent: PracticeCandidate? { candidate(opponentID) }
@@ -151,7 +191,11 @@ final class PracticeSession {
         loadHints(engine: engine, roster: roster)
         let ids = roster.eligible.map(\.id)
         let player = playerID.flatMap { ids.contains($0) ? $0 : nil } ?? ids.first
-        let opponent = opponentID.flatMap { ids.contains($0) && $0 != player ? $0 : nil } ?? ids.first { $0 != player }
+        // A wild opponent stays selected only while the player it was matched to does.
+        let wildKept = player == playerID
+        let opponent = opponentID.flatMap { id in
+            (ids.contains(id) && id != player) || (wildKept && wildCandidates.contains { $0.id == id }) ? id : nil
+        } ?? ids.first { $0 != player }
         playerID = player; opponentID = opponent
     }
     /// Starts a battle with the current selection and mode; a rematch is the same call.
@@ -204,6 +248,11 @@ final class PracticeSession {
         guard !isActive else { return }
         stopDriver(); battle?.cancel(); battle = nil; dropPlayback(); resultSeen = true
         roster = nil; engine = nil; typeChart = nil; moveInfo = [:]
+        // The engine goes, so a search in flight stops; finished wild snapshots are plain data and stay.
+        if wildState == .searching {
+            wildTask?.cancel(); wildTask = nil; wildGeneration &+= 1
+            wildState = wildCandidates.isEmpty ? .idle : .ready
+        }
     }
 
     /// Loads the type chart once per engine and the public data of every roster move. A failure keeps
@@ -231,7 +280,7 @@ final class PracticeSession {
     }
     private func candidate(_ id: String?) -> PracticeCandidate? {
         guard let id else { return nil }
-        return roster?.eligible.first { $0.id == id }
+        return roster?.eligible.first { $0.id == id } ?? wildCandidates.first { $0.id == id }
     }
     /// A ready, finished, failed or cancelled battle belongs to the old selection; a running one is never dropped.
     private func dropIdleBattle() {

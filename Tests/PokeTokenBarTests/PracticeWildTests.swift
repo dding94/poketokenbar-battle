@@ -326,14 +326,16 @@ final class PracticeWildStoreOracleTests: XCTestCase {
         return low
     }
 
-    /// A real hatched Pokémon fed exactly the lowest growth that reaches a level shows the level and stage
-    /// `stageIndex` predicts; a graduate counts as its last stage at Lv.100.
+    /// A real hatched Pokémon fed the lowest growth that reaches a level (plus one token) shows the level and stage
+    /// `stageIndex` predicts; a graduate counts as its last stage at Lv.100. The extra token is needed because the
+    /// store rebuilds growth through a Double fraction (`reconcileActiveProfileGrowth`) that can come out one token
+    /// short, so feeding the exact minimum can show the level before.
     func testHatchedPokemonFedTheLowestGrowthOfALevelIsAtThePredictedStage() async throws {
         for forms in 1...3 {
             for level in 5...100 {
                 let s = try store(forms: forms)
                 await s.hatch(baseID: 1)
-                s.applyUsage(lowestGrowth(reaching: level))
+                s.applyUsage(lowestGrowth(reaching: level) + 1)
                 let stage: Int, shown: Int
                 if let active = s.state.active {
                     stage = active.stageIndex; shown = try XCTUnwrap(active.profile?.level)

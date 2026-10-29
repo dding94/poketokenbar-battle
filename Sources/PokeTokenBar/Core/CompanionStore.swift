@@ -1790,16 +1790,8 @@ final class CompanionStore {
                 AppLog.write("hatch: no candidate for guaranteed \(tier?.rawValue ?? "none") — egg kept, retry next tick")
                 return nil
             }
-            let weights = index.map { e in
-                CollectionWeight.adjusted(e.captureRate, isCollected: state.hasCollectedFinal(forBaseID: e.id))
-            }
-            let total = weights.reduce(0, +)
-            var r = Int(rng.next() % UInt64(total))
-            for (i, w) in weights.enumerated() {
-                r -= w
-                if r < 0 { return index[i].id }
-            }
-            return index.last?.id   // 도달 불가(방어)
+            // 가중 선택은 연습전 야생 상대와 공유하는 `HatchRule` 이 단일 소스다. 롤은 여기서 정확히 1회.
+            return HatchRule.pickBase(from: index, isCollected: { state.hasCollectedFinal(forBaseID: $0) }, roll: rng.next())
         }
         // GraphQL base 인덱스 엔드포인트 장애 → REST 폴백. 부화가 한 엔드포인트에 묶이지 않게.
         AppLog.write("hatch: base index unavailable — REST fallback")
