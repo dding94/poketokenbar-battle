@@ -106,6 +106,8 @@ final class PracticeBattle {
     private var battleID: String?
     private var deadline = 0.0
     private var nextAutomaticTurn = 0.0
+    private var remainingManual = 0.0
+    private var remainingAuto = 0.0
     private var names: [String: String] = [:]
     private let engine: BattleEngine
     private let clock: () -> TimeInterval
@@ -136,12 +138,12 @@ final class PracticeBattle {
         } catch { fail(error) }
     }
     func choose(slot: Int) {
-        guard phase == .running else { return }
+        guard phase == .running, !isPaused else { return }
         if clock() >= deadline { tick(); return }
         advance(slot: slot)
     }
     func tick() {
-        guard phase == .running else { return }
+        guard phase == .running, !isPaused else { return }
         remainingSeconds = max(0, Int(ceil(deadline - clock())))
         if mode == .automatic {
             if clock() >= nextAutomaticTurn { advance(slot: nil) }
@@ -159,9 +161,20 @@ final class PracticeBattle {
         if phase != .finished { phase = .cancelled }
     }
     /// Freezes the manual deadline and the automatic step, keeping the remaining time.
-    func pause() {}
+    func pause() {
+        guard phase == .running, !isPaused else { return }
+        let now = clock()
+        remainingManual = max(0, deadline - now); remainingAuto = max(0, nextAutomaticTurn - now)
+        remainingSeconds = Int(ceil(remainingManual)); isPaused = true
+    }
     /// Restores the deadline as `clock() + remaining`, so reopening never times out instantly.
-    func resume() {}
+    func resume() {
+        guard isPaused else { return }
+        isPaused = false
+        guard phase == .running else { return }
+        let now = clock()
+        deadline = now + remainingManual; nextAutomaticTurn = now + remainingAuto
+    }
     private func advance(slot: Int?) {
         guard phase == .running else { return }
         notice = nil
@@ -215,6 +228,7 @@ final class PracticeBattle {
         }
     }
     private func release() {
+        isPaused = false
         if let battleID { _ = try? engine.call(.destroy, arguments: [BattleJSON.encode(battleID)]) }
         battleID = nil
     }

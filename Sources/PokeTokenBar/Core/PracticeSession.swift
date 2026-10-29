@@ -31,14 +31,23 @@ final class PracticeSession {
     /// False from the moment a battle finishes until the result screen reports it was shown.
     private(set) var resultSeen = true
     /// Chosen individuals (`PracticeCandidate.id`). Changing either drops a ready or finished battle.
-    var playerID: String?
-    var opponentID: String?
+    var playerID: String? { didSet { if playerID != oldValue { dropIdleBattle() } } }
+    var opponentID: String? { didSet { if opponentID != oldValue { dropIdleBattle() } } }
     /// Applies to the next `start()`; while a battle runs it switches that battle immediately.
-    var mode: PracticeBattle.Mode = .manual
+    var mode: PracticeBattle.Mode = .manual {
+        didSet {
+            guard mode != oldValue, let battle, battle.phase == .running else { return }
+            battle.mode = mode; applyPause()
+        }
+    }
 
     private let engineURL: URL?
     private let clock: () -> TimeInterval
     private let drivesAutomatically: Bool
+    private var engine: BattleEngine?
+    private var driver: Task<Void, Never>?
+    /// Bumped on every driver start and stop; a task whose captured value is stale must not tick.
+    private var driverGeneration = 0
 
     /// `drivesAutomatically: false` leaves `tick()` to the caller (tests with an injected clock).
     init(engineURL: URL?, clock: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
@@ -46,37 +55,123 @@ final class PracticeSession {
         self.engineURL = engineURL; self.clock = clock; self.drivesAutomatically = drivesAutomatically
     }
 
-    var player: PracticeCandidate? { nil }
-    var opponent: PracticeCandidate? { nil }
+    var player: PracticeCandidate? { candidate(playerID) }
+    var opponent: PracticeCandidate? { candidate(opponentID) }
     /// A running battle or an unseen result: the popover reopens on the practice screen.
-    var isActive: Bool { false }
+    var isActive: Bool { battle?.phase == .running || (battle?.phase == .finished && !resultSeen) }
     /// Menu bar suffix for the current state (`PracticeStatusBadge`).
-    var statusBadge: String? { nil }
+    var statusBadge: String? { PracticeStatusBadge.text(phase: battle?.phase, resultSeen: resultSeen) }
 
     /// Creates the engine once and rebuilds the roster from `state`. Keeps a still-eligible selection,
     /// otherwise defaults to the first eligible candidate (player) and the next one (opponent). Leaves a
     /// running battle untouched. Failures land in `loadError`.
-    func prepare(state: CompanionState, activeName: String?) {}
+    func prepare(state: CompanionState, activeName: String?) {
+        guard battle?.phase != .running else { return }
+        let engine: BattleEngine
+        do { engine = try self.engine ?? BattleEngine(url: engineURL) }
+        catch { loadError = PracticeText.failure(error); roster = nil; return }
+        self.engine = engine; loadError = nil
+        let roster = PracticeRoster(state: state, activeName: activeName, engine: engine)
+        self.roster = roster
+        let ids = roster.eligible.map(\.id)
+        let player = playerID.flatMap { ids.contains($0) ? $0 : nil } ?? ids.first
+        let opponent = opponentID.flatMap { ids.contains($0) && $0 != player ? $0 : nil } ?? ids.first { $0 != player }
+        playerID = player; opponentID = opponent
+    }
     /// Starts a battle with the current selection and mode; a rematch is the same call.
-    func start() {}
+    func start() {
+        guard let engine, let player, let opponent, player.id != opponent.id else { return }
+        stopDriver(); battle?.cancel()
+        let next = PracticeBattle(engine: engine, clock: clock)
+        battle = next
+        next.start(player: player, opponent: opponent, mode: mode)
+        resultSeen = true
+        applyPause()
+    }
     /// Manual move choice for the player; ignored while paused or in automatic mode.
-    func choose(slot: Int) {}
+    func choose(slot: Int) {
+        guard let battle, battle.phase == .running, battle.mode == .manual, !battle.isPaused else { return }
+        battle.choose(slot: slot); afterStep()
+    }
     /// Gives up the running battle and returns to the selection screen.
-    func forfeit() {}
+    func forfeit() {
+        stopDriver(); battle?.cancel(); battle = nil; resultSeen = true
+    }
     /// Leaves a finished battle for the selection screen (to pick another opponent).
-    func backToSelection() {}
+    func backToSelection() {
+        guard battle?.phase != .running else { return }
+        battle = nil; resultSeen = true
+    }
     /// The result screen calls this when it is shown.
-    func markResultSeen() {}
+    func markResultSeen() { resultSeen = true }
     /// Adds or removes a pause reason, then holds or resumes the battle per `PracticePauseReason`.
-    func setPaused(_ paused: Bool, reason: PracticePauseReason) {}
+    func setPaused(_ paused: Bool, reason: PracticePauseReason) {
+        if paused { pauseReasons.insert(reason) } else { pauseReasons.remove(reason) }
+        applyPause()
+    }
     /// Advances deadlines and automatic turns at `clock()`. The internal driver calls it while a battle
     /// runs; with `drivesAutomatically: false` the caller does.
-    func tick() {}
+    func tick() {
+        guard let battle, battle.phase == .running else { return }
+        battle.tick(); afterStep()
+    }
     /// Drops the engine and roster when no battle is active (popover closed, practice screen left).
-    func releaseIfIdle() {}
+    func releaseIfIdle() {
+        guard !isActive else { return }
+        stopDriver(); battle?.cancel(); battle = nil; resultSeen = true
+        roster = nil; engine = nil
+    }
+
+    private func candidate(_ id: String?) -> PracticeCandidate? {
+        guard let id else { return nil }
+        return roster?.eligible.first { $0.id == id }
+    }
+    /// A ready, finished, failed or cancelled battle belongs to the old selection; a running one is never dropped.
+    private func dropIdleBattle() {
+        guard let battle, battle.phase != .running else { return }
+        self.battle = nil; resultSeen = true
+    }
+    /// Manual turns wait on any reason; automatic play only on display sleep.
+    private var isHeld: Bool {
+        battle?.mode == .automatic ? pauseReasons.contains(.displayAsleep) : !pauseReasons.isEmpty
+    }
+    private func applyPause() {
+        if let battle, battle.phase == .running { if isHeld { battle.pause() } else { battle.resume() } }
+        syncDriver()
+    }
+    /// Detects the end of the battle after the engine advanced it.
+    private func afterStep() {
+        if battle?.phase == .finished { resultSeen = false }
+        syncDriver()
+    }
+    private func syncDriver() {
+        let shouldDrive = drivesAutomatically && battle?.phase == .running && !isHeld
+        if shouldDrive { if driver == nil { startDriver() } } else { stopDriver() }
+    }
+    private func startDriver() {
+        driverGeneration &+= 1
+        let generation = driverGeneration
+        driver = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(250))
+                guard let self, !Task.isCancelled, self.driverGeneration == generation else { return }
+                self.tick()
+            }
+        }
+    }
+    private func stopDriver() {
+        driverGeneration &+= 1
+        driver?.cancel(); driver = nil
+    }
 }
 
 /// One-glyph menu bar suffix: a running battle shows "⚔︎", a finished and unseen one "⚑", otherwise nil.
 enum PracticeStatusBadge {
-    static func text(phase: PracticeBattle.Phase?, resultSeen: Bool) -> String? { nil }
+    static func text(phase: PracticeBattle.Phase?, resultSeen: Bool) -> String? {
+        switch phase {
+        case .running: return "\u{2694}\u{FE0E}"
+        case .finished: return resultSeen ? nil : "\u{2691}"
+        case .ready, .failed, .cancelled, nil: return nil
+        }
+    }
 }
