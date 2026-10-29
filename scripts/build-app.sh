@@ -52,6 +52,7 @@ cp assets/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 # 전투 엔진 번들(engine/ 에서 빌드해 커밋한 단일 JS). 없으면 배틀 화면이 엔진 없음 오류를 보여 준다.
 if [[ -f "$ENGINE_BUNDLE" ]]; then
     cp "$ENGINE_BUNDLE" "$APP/Contents/Resources/battle-engine.js"
+    cp engine/LICENSE.pokemon-showdown "$APP/Contents/Resources/LICENSE.pokemon-showdown"
 else
     echo "   ⚠ $ENGINE_BUNDLE 없음 — 배틀 기능 없이 조립합니다 (cd engine && npm ci && npm run build)."
 fi

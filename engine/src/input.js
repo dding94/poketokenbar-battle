@@ -42,7 +42,7 @@ export function makeSet(s) {
     Object.values(s.ivs).some(n=>!Number.isInteger(n)||n<0||n>31))fail('invalid_ivs');
   if(typeof s.shiny!=='boolean')fail('invalid_shiny');
   return {name:species.name,species:species.name,level:s.level,gender:{male:'M',female:'F',genderless:'N'}[s.gender],
-    nature:Dex.natures.get(s.nature).name,ability:Dex.abilities.get(s.ability).name,moves:s.moves.map(toID),
+    nature:Dex.natures.get(s.nature).name,ability:Dex.abilities.get(s.ability).name,moves:s.moves.map(m=>Dex.moves.get(m).id),
     ivs:Object.fromEntries(Object.entries(stats).map(([k,v])=>[v,s.ivs[k]])),
     evs:{hp:0,atk:0,def:0,spa:0,spd:0,spe:0},item:'',shiny:s.shiny};
 }

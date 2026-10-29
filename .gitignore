@@ -53,3 +53,7 @@ coverage/
 
 # Stray coverage output from running a test binary directly
 *.profraw
+
+# Reproducible engine test outputs and downloaded public reference data
+engine/out/
+engine/.cache/

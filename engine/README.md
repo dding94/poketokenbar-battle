@@ -1,46 +1,37 @@
-# engine/ — 전투 엔진 (PR 01 진행 전)
+# 전투 엔진
 
-양쪽 맥이 같은 입력으로 같은 결과를 계산하는 전투 엔진(`@pkmn/sim`, Pokémon Showdown 시뮬레이터 추출본)을
-Swift 앱의 JavaScriptCore(`JSContext`)에서 실행하기 위한 폴더다. 설계는 [../docs/BATTLE_PLAN.md](../docs/BATTLE_PLAN.md)
-§4·§6.3, PR 01, 부록 A(API 계약)를 따른다.
-
-## 지금 있는 것
-
-- `package.json`, `package-lock.json`: `@pkmn/sim` 0.10.12, `esbuild` 0.28.2 고정. 설치는 `npm ci --ignore-scripts`.
-- `probe/`: 2026-10-29 사전 실측에 쓴 **연구용 프로토타입**이다. 검토된 제품 코드가 아니며 PR 01의 정식 어댑터·테스트로
-  대체한다. 5세대(`gen5customgame`) 규칙으로 작성됐다. 채택한 규칙은 9세대·테라스탈 금지라서 PR 01에서 다시 검증해야 한다.
-
-## 아직 없는 것
-
-- PR 01의 정식 어댑터(`PTBEngine` API 계약 구현), `dist/battle-engine.js` 번들과 해시, `npm test` 계약 테스트,
-  9세대 결정성 코퍼스, 기술 커버리지 검사. `scripts/build-app.sh`는 `dist/battle-engine.js`가 있으면 앱 리소스로 복사한다.
-
-## 프로브 재현
+`@pkmn/sim` **0.10.12**, esbuild **0.28.2**를 고정한다. 제품 계약은
+[부록 A](../docs/BATTLE_PLAN.md#부록-a-전투-엔진-api-계약-pr-01-초안), 실제 검증 상태는
+[AI_HANDOFF](../docs/AI_HANDOFF.md)에 기록한다. `probe/`는 5세대 연구 자료이며 제품 코드가 아니다.
 
 ```sh
 cd engine
 npm ci --ignore-scripts
-npm run probe        # 번들 → 2,500판 코퍼스 → Node 실행 → JavaScriptCore 실행 → 비교
+npm test                 # 번들 생성 + 계약
+npm run corpus           # 2,000 무작위 + 200 장기전, Node ↔ Swift JSContext
+npm run compatibility    # 고정 PokéAPI 참조 다운로드 → 541개 기술·649종·106개 폼 대조
 ```
 
-`probe/out/`은 Git에 넣지 않는다(코퍼스·로그 수십 MB). JavaScriptCore 실행에는 `swiftc`(Command Line Tools로 충분)가 필요하다.
+`dist/battle-engine.js`, SHA-256 파일, Swift `BattleEngineManifest.swift`를 함께 생성·커밋한다.
+앱은 해시가 맞는 번들만 실행한다. 최소화의 **keepNames: true는 필수**다.
+Showdown 상태 직렬화가 생성자 이름을 참조한다. 학습·합법성 데이터만 번들에서 제거하며,
+명시적으로 전달받은 기술로 전투한다. 제거 전후 2,200판 결과가 같은지 검사했다.
+`PTB_FULL_ENGINE=1 npm run corpus:generate`로 전체 데이터 비교용 번들을 만들 수 있다.
 
-2026-10-29 저장소 위치에서 다시 실행한 결과(macOS 26.5, Node 24.14.0, Swift 6.3.2):
+입출력은 동기 JSON 문자열이다. `createBattle(JSON.stringify(config))`가 반환한 id 역시
+`request(JSON.stringify(id), JSON.stringify('p1'))`처럼 JSON 인자로 전달한다.
+`inputLog`는 `{version:1,config,choices:[{side,choice}]}` 객체다. `replay`는 이 구조와
+모든 선택을 다시 검증한다. 시뮬레이터 명령 스트림을 받지 않는다. 로그의 플레이어 이름은
+결과의 일관성을 위해 p1/p2로 고정하고, 앱이 화면용 이름을 표시한다.
 
-| 항목 | 결과 |
-|---|---|
-| 무작위 5세대 1:1 | 2,500판, Node와 JavaScriptCore의 로그·승자·inputLog 불일치 0 |
-| inputLog 재생 | Node·JSC 모두 실패 0 |
-| 3턴 시점 상태 직렬화 왕복 | Node·JSC 모두 실패 0 (`--keep-names` 빌드) |
-| 번들 | 최소화 + `--keep-names` 약 6.6MB |
+9세대, 테라스탈 금지, 도구 없음, EV 0, 실제 레벨/IV/성격, 200턴 무승부다.
+도구 의존 폼(기라티나·아르세우스·게노세크트), 날씨/전투 중 변하는 폼은 기본 폼에서 시작한다.
+외형 폼은 기본 데이터로, 데오키스·로토무 등 독립 전투 폼은 해당 9세대 데이터로 매핑한다.
+출전 화면은 실제 적용되는 종·타입·능력치를 보여 줘야 한다.
 
-## 지켜야 할 발견
+현재 자동 선택은 첫 합법 기술이다. PR 03에서 정책 v1로 교체하며 그때 코퍼스를 다시 검증한다.
+봉인 등 숨은 정보로 선택이 거절되면 갱신된 요청으로 재선택한다. 코퍼스는 이 경계와
+첫 선택 직후 상태 복원을 포함한다. 단순 기술 호출 검사는 모든 조건별 효과를 증명하지 않는다.
 
-- **최소화할 때 `--keep-names`가 필수다.** Showdown `sim/state.js`는 객체 참조를 `obj.constructor.name`으로 기록한다.
-  이름을 바꾸는 최소화 빌드에서는 상태 직렬화 왕복이 100판 중 65판에서 어긋났다(전투 결과 해시 자체는 같았다).
-  재접속 복원은 inputLog 재생을 기본으로 하고, 상태 직렬화를 쓰면 이 조건을 테스트로 고정한다.
-- **`|t:|` 줄은 실제 시각이다.** 결과 해시 전에 뺀다.
-- **`probe/adapter.js`의 `replay()`는 inputLog를 `BattleStream`에 그대로 넣는다.** 이 스트림은 `>eval`도 받으므로
-  자기 앱이 만든 기록에만 쓴다. 상대에게 받은 기록·중계 텍스트는 검증한 선택 토큰으로만 다시 구성한다.
-- **JIT:** macOS 26.5에서 `JSContext`의 JIT는 `com.apple.security.cs.allow-jit` entitlement로 서명해야 켜졌다
-  (`probe/jit.entitlements`, 앱은 `scripts/battle.entitlements`). 없으면 경기당 약 8ms로 느려질 뿐 결과는 같다.
+공개 참조 데이터는 `.cache/`, 실행 결과는 `out/`에만 저장하며 Git에서 제외한다.
+개인 세이브·사용량 로그를 읽지 않는다. `LICENSE.pokemon-showdown`은 번들과 함께 앱에 포함한다.

@@ -89,6 +89,9 @@ jobs:
           node-version: '24.14.0'
       - name: Isolate test state
         run: echo "PTB_STATE_DIR=$RUNNER_TEMP/ptb-engine-state" >> "$GITHUB_ENV"
+      - name: Select Swift 6 on macOS 14
+        if: matrix.os == 'macos-14'
+        run: sudo xcode-select -s /Applications/Xcode_16.2.app/Contents/Developer
       - name: Swift JavaScriptCore boundary
         run: swift test --filter BattleEngineTests
       - name: Install pinned dependencies
@@ -98,4 +101,4 @@ jobs:
       - name: Engine contracts and deterministic corpus
         if: ${{ inputs.scope == 'engine' }}
         working-directory: engine
-        run: npm test && npm run corpus
+        run: npm test && npm run corpus && npm run compatibility

@@ -2,7 +2,7 @@
   "name": "ptb-battle-engine",
   "version": "1.0.0",
   "private": true,
-  "description": "Battle engine for PokeTokenBar Battle (Pokemon Showdown simulator via @pkmn/sim) — PR 01 scaffold plus the 2026-10-29 probe",
+  "description": "Battle engine for PokeTokenBar Battle (Pokemon Showdown simulator via @pkmn/sim) \u2014 PR 01 scaffold plus the 2026-10-29 probe",
   "license": "MIT",
   "scripts": {
     "probe:bundle": "esbuild probe/adapter.js --bundle --minify --keep-names --format=iife --platform=neutral --target=es2020 --main-fields=module,main --conditions=import --alias:path=./probe/empty-path.js --log-level=warning --outfile=probe/out/engine.js",
@@ -12,7 +12,13 @@
     "probe:compare": "node probe/compare.js probe/out/node.json probe/out/jsc.json",
     "probe": "npm run probe:bundle && npm run probe:corpus && npm run probe:node && npm run probe:jsc && npm run probe:compare",
     "build": "node scripts/build.mjs",
-    "test": "npm run build && node --test tests/*.test.cjs"
+    "test": "npm run build && node --test tests/*.test.cjs",
+    "corpus:generate": "node scripts/corpus.mjs generate",
+    "corpus:node": "node scripts/corpus.mjs node",
+    "corpus:jsc": "swiftc -O scripts/run-jsc.swift -o out/run-jsc && codesign -f -s - --entitlements ../scripts/battle.entitlements out/run-jsc && out/run-jsc out/corpus-engine.js out/corpus.json out/jsc.json",
+    "corpus:compare": "node scripts/corpus.mjs compare",
+    "corpus": "npm run corpus:generate && npm run corpus:node && npm run corpus:jsc && npm run corpus:compare",
+    "compatibility": "python3 scripts/reference.py && node scripts/compatibility.mjs"
   },
   "dependencies": {
     "@pkmn/sim": "0.10.12"
