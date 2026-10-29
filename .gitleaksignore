@@ -1,0 +1,3 @@
+# Upstream test expectation: rateLimitTier is the public plan label
+# "default_claude_max_20x", not an API credential. Ignore only this historical line.
+df6252462c816edb1587e1a77b7092ece48bb235:Tests/PokeTokenBarTests/PokeTokenBarTests.swift:generic-api-key:256

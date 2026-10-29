@@ -8,7 +8,11 @@ final class AppIdentityTests: XCTestCase {
         .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
 
     private func script(_ name: String) throws -> String {
+        // Safety comments may name upstream paths; assertions inspect executable lines.
         try String(contentsOf: Self.repoRoot.appendingPathComponent("scripts/\(name)"), encoding: .utf8)
+            .split(separator: "\n")
+            .filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("#") }
+            .joined(separator: "\n")
     }
 
     func testForkIdentityNeverReusesUpstreamValues() {
@@ -22,6 +26,7 @@ final class AppIdentityTests: XCTestCase {
         XCTAssertFalse(AppIdentity.loginAgentLabel.hasPrefix(AppIdentity.Upstream.bundleID))
     }
 
+    @MainActor
     func testLoginItemUsesForkAgent() {
         XCTAssertEqual(LoginItem.label, AppIdentity.loginAgentLabel)
         XCTAssertEqual(LoginItem.plistName, AppIdentity.loginAgentLabel + ".plist")

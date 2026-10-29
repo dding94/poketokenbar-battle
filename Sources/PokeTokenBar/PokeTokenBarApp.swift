@@ -527,8 +527,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         return img
     }
 
-    /// TokenMac→PokeTokenBar 리네임에 따른 1회 이전: 기존 Application Support 폴더를
-    /// 새 이름으로 옮겨 companion 진행상황·스프라이트 캐시·스냅샷을 보존한다(신규 폴더 없을 때만).
+    /// 원본 세이브를 포크 폴더에 한 번 복사하며 원본 폴더는 수정하지 않는다.
     /// `PTB_STATE_DIR` 실행(개발·QA)은 그 폴더 내용으로만 시작한다 — 실제 세이브를 끌어오지 않는다.
     private static func importUpstreamSaveIfNeeded() {
         guard AppStatePaths.overrideDirectory() == nil else { return }
