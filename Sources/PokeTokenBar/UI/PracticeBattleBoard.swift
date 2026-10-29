@@ -67,7 +67,25 @@ struct PracticeBattleBoard: View {
         return PracticeSideCard(side: pokemon, own: own, name: wording.name(side),
                                 snapshot: own ? session.player?.snapshot : session.opponent?.snapshot,
                                 l: l, artwork: artwork, display: shown(side),
-                                beatID: beat?.id, delta: beat?.hpDelta[side], hitTrigger: lastHit(side))
+                                beatID: beat?.id, delta: beat?.hpDelta[side], hitTrigger: lastHit(side),
+                                reveal: own ? nil : stagedReveal)
+    }
+
+    /// What the staged beats have shown of the opponent so far (history plus the beat on screen). The
+    /// engine's view is already at the end of the step, so it would reveal a move before its beat plays.
+    /// nil without a playback: the view is then the only source.
+    private var stagedReveal: PracticeReveal? {
+        guard let playback else { return nil }
+        let beats = playback.history + (playback.beat.map { [$0] } ?? [])
+        var reveal = PracticeReveal()
+        for beat in beats {
+            if beat.actor == .opponent, let moveID = beat.moveID, moveID != "struggle", moveID != "recharge",
+               !reveal.moves.contains(moveID) {
+                reveal.moves.append(moveID)
+            }
+            for case .abilityRevealed(.opponent, let abilityID) in beat.callouts { reveal.ability = abilityID }
+        }
+        return reveal
     }
 
     private var versus: some View {
@@ -284,6 +302,14 @@ struct PracticeSideCard: View {
     var beatID: Int?
     var delta: Int?
     var hitTrigger: Int?
+    /// The opponent's moves and ability as staged so far; nil reads them from the engine's view.
+    var reveal: PracticeReveal?
+
+    private var revealedMoves: [String] { reveal?.moves ?? side.moves }
+    private var revealedAbility: String? {
+        if let reveal { return reveal.ability }
+        return side.ability
+    }
 
     private var hp: Int { display?.hp ?? side.hp }
     private var maxHP: Int { display?.maxHP ?? side.maxhp }
@@ -369,12 +395,12 @@ struct PracticeSideCard: View {
     private var movesRow: some View {
         HStack(spacing: 4) {
             Text(l.practiceMoves).font(.caption2).foregroundStyle(.secondary)
-            ForEach(Array(side.moves.prefix(4)), id: \.self) { move in
+            ForEach(Array(revealedMoves.prefix(4)), id: \.self) { move in
                 PracticeChip {
                     PracticeMetadataName(kind: .move, id: move, snapshot: snapshot, l: l, artwork: artwork)
                 }
             }
-            ForEach(0..<max(0, 4 - side.moves.count), id: \.self) { _ in
+            ForEach(0..<max(0, 4 - revealedMoves.count), id: \.self) { _ in
                 PracticeChip(dimmed: true) { Text("?") }
             }
         }
@@ -383,7 +409,7 @@ struct PracticeSideCard: View {
     private var abilityRow: some View {
         HStack(spacing: 4) {
             Text(l.practiceAbility).font(.caption2).foregroundStyle(.secondary)
-            if let ability = side.ability {
+            if let ability = revealedAbility {
                 PracticeChip {
                     PracticeMetadataName(kind: .ability, id: ability, snapshot: snapshot, l: l, artwork: artwork)
                 }
@@ -455,4 +481,10 @@ struct PracticeMoveCard: View {
         default: PracticeMetadataName(kind: .move, id: move.id, snapshot: snapshot, l: l, artwork: artwork)
         }
     }
+}
+
+/// The opponent's moves (Showdown ids, first-use order) and ability as far as the playback has shown them.
+struct PracticeReveal: Equatable {
+    var moves: [String] = []
+    var ability: String?
 }
