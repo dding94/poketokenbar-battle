@@ -347,6 +347,62 @@ final class PracticePlaybackTests: XCTestCase {
         XCTAssertEqual(playback.summary.damageTakenPercent, 30 + 30)
         XCTAssertEqual(playback.summary.damageDealtPercent, 0)
     }
+
+    func testSethpBecomesDamageOrHealFromTheSidesLastKnownHP() {
+        XCTAssertEqual(parse([
+            "|switch|p1a: Snorlax|Snorlax, L50, M|280/280", "|switch|p2a: Gengar|Gengar, L50, M|100/100",
+            "|-damage|p1a: Snorlax|250/280", "|-sethp|p1a: Snorlax|219/280|[from] move: Pain Split|[silent]",
+            "|-sethp|p1a: Snorlax|260/280|[from] move: Pain Split", "|-sethp|p2a: Gengar|60/100 psn|[from] move: Pain Split",
+        ]), [
+            .switchIn(.player, hp: 280, maxHP: 280), .switchIn(.opponent, hp: 100, maxHP: 100),
+            .damage(.player, hp: 250, maxHP: 280, cause: nil),
+            .damage(.player, hp: 219, maxHP: 280, cause: "pain split"),
+            .heal(.player, hp: 260, maxHP: 280, cause: "pain split"),
+            .damage(.opponent, hp: 60, maxHP: 100, cause: "pain split"),
+        ])
+    }
+
+    func testSetboostIsABoostWithItsAbsoluteStage() {
+        XCTAssertEqual(parse(["|-setboost|p1a: Snorlax|atk|6|[from] move: Belly Drum"]), [.boost(.player, stat: "atk", stages: 6)])
+    }
+
+    func testPainSplitMovesBothBarsAndTheDeltasStayExact() throws {
+        let playback = makePlayback(Clock())
+        playback.enqueue(parse([
+            "|switch|p1a: Snorlax|Snorlax, L50, M|280/280", "|switch|p2a: Gengar|Gengar, L50, M|100/100", "|turn|1",
+            "|move|p1a: Snorlax|Pain Split|p2a: Gengar", "|-sethp|p2a: Gengar|60/100|[from] move: Pain Split|[silent]",
+            "|-sethp|p1a: Snorlax|258/280|[from] move: Pain Split",
+        ]))
+        playback.skipToEnd()
+        XCTAssertEqual(playback.history.map(\.actor), [.player])
+        let beat = try XCTUnwrap(playback.history.first)
+        XCTAssertEqual(beat.hpDelta[.opponent], -40); XCTAssertEqual(beat.hpDelta[.player], -8)
+        XCTAssertEqual(playback.display[.player]?.hp, 258); XCTAssertEqual(playback.display[.opponent]?.hp, 60)
+        XCTAssertEqual(playback.summary.damageTakenPercent, 8); XCTAssertEqual(playback.summary.damageDealtPercent, 40)
+    }
+
+    func testMoveSelfDamageStaysInTheActionBeatButMoveResidualsDoNot() {
+        // Crash damage names the move the actor just used; so can a trap, a seed or the weather it set.
+        let crash = makePlayback(Clock())
+        crash.enqueue(seeded + [
+            .move(.opponent, moveID: "splash"), .move(.player, moveID: "highjumpkick"),
+            .damage(.player, hp: 60, maxHP: 100, cause: "highjumpkick"),
+        ])
+        crash.skipToEnd()
+        XCTAssertEqual(crash.history.map(\.actor), [.opponent, .player])
+        XCTAssertEqual(crash.history.last?.hpDelta[.player], -40)
+        let jump = makePlayback(Clock())
+        jump.enqueue(seeded + [.move(.player, moveID: "jumpkick"), .damage(.player, hp: 70, maxHP: 100, cause: "jumpkick")])
+        jump.skipToEnd()
+        XCTAssertEqual(jump.history.map(\.actor), [.player])
+        for (move, cause) in [("leechseed", "leech seed"), ("wrap", "wrap"), ("firespin", "fire spin"), ("sandstorm", "sandstorm"),
+                              ("curse", "curse"), ("nightmare", "nightmare")] {
+            let residual = makePlayback(Clock())
+            residual.enqueue(seeded + [.move(.player, moveID: move), .damage(.opponent, hp: 88, maxHP: 100, cause: cause)])
+            residual.skipToEnd()
+            XCTAssertEqual(residual.history.map(\.actor), [.player, nil], move)
+        }
+    }
 }
 
 // MARK: engine
@@ -397,5 +453,41 @@ final class PracticePlaybackEngineTests: XCTestCase {
         XCTAssertLessThan(beat.hpDelta[.player] ?? 0, 0)
         XCTAssertEqual(playback.summary.finishingMoveID, "volttackle")
         XCTAssertEqual(playback.display[.opponent]?.fainted, true)
+    }
+
+    func testMidBattleAbilityRevealIsStagedWithinTheTurnThatRevealedIt() throws {
+        let engine = try engine(); var now = 0.0
+        let model = PracticeBattle(engine: engine, clock: { now })
+        model.start(player: try candidate("pika", species: 25, ability: "static", moves: ["thunderbolt"], engine: engine),
+                    opponent: try candidate("lantern", species: 171, ability: "volt-absorb", moves: ["splash"], engine: engine),
+                    mode: .automatic, seed: [1, 2, 3, 4])
+        XCTAssertFalse(model.events.contains(.abilityRevealed(.opponent, abilityID: "voltabsorb")))
+        now = 1; model.tick()
+        let events = model.events
+        let reveal = try XCTUnwrap(events.firstIndex(of: .abilityRevealed(.opponent, abilityID: "voltabsorb")), "\(events)")
+        let nextTurn = try XCTUnwrap(events.firstIndex(of: .turn(2)), "\(events)")
+        XCTAssertLessThan(reveal, nextTurn, "the reveal belongs to the turn that caused it")
+
+        let playback = PracticePlayback(clock: { now })
+        playback.enqueue(events)
+        playback.skipToEnd()
+        let revealing = playback.history.filter { $0.callouts.contains(.abilityRevealed(.opponent, abilityID: "voltabsorb")) }
+        XCTAssertEqual(revealing.map(\.turn), [1])
+    }
+
+    func testCrashDamageFromTheRealEngineStaysInTheCrashingMovesBeat() throws {
+        let engine = try engine(); var now = 0.0
+        let model = PracticeBattle(engine: engine, clock: { now })
+        model.start(player: try candidate("lee", species: 106, ability: "limber", moves: ["high-jump-kick"], engine: engine),
+                    opponent: try candidate("gengar", species: 94, ability: "cursed-body", moves: ["splash"], engine: engine),
+                    mode: .automatic, seed: [1, 2, 3, 4])
+        now = 1; model.tick()
+        XCTAssertTrue(model.events.contains { if case .damage(.player, _, _, "highjumpkick") = $0 { return true } else { return false } },
+                      "\(model.events)")
+        let playback = PracticePlayback(clock: { now })
+        playback.enqueue(model.events)
+        playback.skipToEnd()
+        XCTAssertEqual(playback.history.map(\.actor), [.opponent, .player])
+        XCTAssertLessThan(playback.history.last?.hpDelta[.player] ?? 0, 0)
     }
 }
