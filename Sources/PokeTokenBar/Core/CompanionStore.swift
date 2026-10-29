@@ -1997,6 +1997,8 @@ final class CompanionStore {
             pokemonDetailsByID[speciesID] = details
             enrichProfiles(for: speciesID, with: details)
         } catch {
+            // The Dex page closed mid-request (SwiftUI cancels its .task): nobody is waiting, nothing failed.
+            if Task.isCancelled { return }
             failedPokemonDetailIDs.insert(speciesID)
             AppLog.write("pokemon details fetch failed id=\(speciesID): \(error)")
         }

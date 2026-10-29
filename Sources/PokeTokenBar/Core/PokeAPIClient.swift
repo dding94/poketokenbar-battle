@@ -84,6 +84,9 @@ actor PokeAPIClient: PokeProviding, PokemonDetailProviding {
             }
             return details
         } catch {
+            // A cancelled request is not an outage: serving (and memory-caching) the stale entry would pin it
+            // for the whole session even once the network is back.
+            if Task.isCancelled { throw CancellationError() }
             if let disk {
                 detailsCache[speciesID] = disk.details
                 return disk.details
@@ -163,6 +166,9 @@ actor PokeAPIClient: PokeProviding, PokemonDetailProviding {
             }
             return entries
         } catch {
+            // 취소는 장애가 아니다 — 디스크 폴백·REST 구축(세션 1회 소진)·장애 로그 어느 것도 하지 않는다.
+            // 연습전 야생 탐색이 취소되면(팝오버 닫힘·플레이어 변경·시작) 여기로 URLError(.cancelled) 가 온다.
+            if Task.isCancelled { throw CancellationError() }
             if let disk, !disk.entries.isEmpty {   // 오프라인 — 오래된 인덱스라도 사용
                 baseIndexCache = disk.entries
                 return disk.entries
