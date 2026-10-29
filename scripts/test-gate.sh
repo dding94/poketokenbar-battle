@@ -19,6 +19,7 @@ cd "$(dirname "$0")/.."
 THRESHOLD="${THRESHOLD:-75}"
 
 LOGIC_CORE=(
+  "Sources/PokeTokenBar/Core/BattleSnapshot.swift"
   "Sources/PokeTokenBar/Core/CompanionModel.swift"
   "Sources/PokeTokenBar/Core/PokemonForm.swift"
   "Sources/PokeTokenBar/Core/CollectionWeight.swift"

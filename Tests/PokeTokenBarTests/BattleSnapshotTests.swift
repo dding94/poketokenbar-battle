@@ -108,4 +108,24 @@ final class BattleSnapshotTests: XCTestCase {
         }
     }
 
+    func testUnresolvedProfileGenderAndIdentityAreRejected() throws {
+        let engine = try engine()
+        XCTAssertThrowsError(try BattleSnapshot.make(speciesID: 25, nature: .hardy, profile: nil, using: engine)) {
+            XCTAssertEqual($0 as? BattleSnapshot.Failure, .missingProfile)
+        }
+        var p = profile(); p.gender = nil
+        XCTAssertThrowsError(try BattleSnapshot.make(speciesID: 25, nature: .hardy, profile: p, using: engine)) {
+            XCTAssertEqual($0 as? BattleSnapshot.Failure, .missingGender)
+        }
+        p = profile(id: "")
+        XCTAssertThrowsError(try BattleSnapshot.make(speciesID: 25, nature: .hardy, profile: p, using: engine)) {
+            XCTAssertEqual($0 as? BattleSnapshot.Failure, .invalidIdentity)
+        }
+        let mon = MonState(baseID: 25, pathIDs: [], stageIndex: 0, usedAtStage: 0,
+                           rarity: .common, totalForms: 1, nature: .hardy, profile: profile())
+        XCTAssertThrowsError(try BattleSnapshot.from(mon, using: engine)) {
+            XCTAssertEqual($0 as? BattleSnapshot.Failure, .invalidSchema)
+        }
+    }
+
 }
