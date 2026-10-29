@@ -753,6 +753,16 @@ read_when:
   (출발할 때 봐야 할 시계를 도착해서 보는 격). 가드를 넣을 땐 그 함수 위의 await 까지 거슬러 확인하고,
   회귀 테스트도 **그 await 를 실제로 지나는 진입점**으로 써라 — `hatch(baseID:)` 경로 테스트는
   `chooseBase()` 를 안 지나 통과하면서 아무것도 지키지 않았다(`testImportDuringSpeciesRollDiscardsTheHatch`).
+- **취소는 실패가 아니다 — `catch` 가 폴백·로그·표시를 하기 전에 `Task.isCancelled` 를 먼저 본다.** 포크 PR
+  03B-4에서 연습전 야생 탐색을 취소할 수 있게 되자(팝오버 닫힘·플레이어 변경·시작), URLSession 이 던지는
+  `URLError(.cancelled)` 를 기존 `catch` 들이 장애로 받았다. `baseSpeciesIndex` 는 세션당 한 번뿐인 REST 인덱스
+  구축(종 648건)을 시작하고 장애 로그를 남겼다. `pokemonDetails` 는 오래된 디스크 항목을 메모리 캐시에 박아
+  세션 내내 고정했다. `loadPokemonDetails` 는 닫힌 도감 페이지의 종을 실패로 표시했다. **왜 못 걸렀나:** 이
+  `catch` 들은 취소할 수 없는 호출자(부화의 비구조 `Task`)만 가정했고, 취소 가능한 새 호출자를 붙일 때 아래
+  `catch` 를 점검하지 않았다. → 세 곳 모두 `catch` 맨 앞에서 취소면 `CancellationError` 를 던지거나 조용히
+  끝낸다. 회귀 가드는 `PokeAPIClientCancellationTests`(URLProtocol 스텁이 요청을 붙잡아 실제 취소를 재현하고,
+  같은 오류의 비취소 대조군을 함께 둔다). 비동기 함수에 취소 가능한 호출자를 새로 붙이면 그 아래 `catch` 를
+  전수 점검한다. 스텁을 쓰는 테스트는 테스트가 띄운 백그라운드 작업이 끝날 때까지 기다린 뒤 스텁을 해제한다.
 
 ## 프로세스·인스턴스
 
