@@ -44,6 +44,25 @@ test('rejects malformed JSON and forged seeds without escaping exceptions',()=>{
     const c=config();c.seed=seed;assert.deepEqual(call('createBattle',c),{ok:false,error:'invalid_seed'});
   }
 });
+test('a player may name an opponent temperament; anything else is invalid_policy',()=>{
+  for (const policy of ['standard','aggressive','tactical','erratic']) {
+    const c=config();c.p2.policy=policy;const id=create(c);round(id);const r=call('result',id);
+    assert.equal(r.inputLog.policyVersion,'auto-v2');assert.equal(r.inputLog.config.p2.policy,policy);
+    assert.equal('policy' in r.inputLog.config.p1,false);
+    assert.deepEqual(call('replay',r.inputLog),{winner:r.winner,logHash:r.logHash});call('destroy',id);
+  }
+  for (const policy of ['chaotic','Standard','',null,0,['erratic'],{}]) for (const side of ['p1','p2']) {
+    const c=config();c[side].policy=policy;
+    assert.deepEqual(call('createBattle',c),{ok:false,error:'invalid_policy'},`${side} ${JSON.stringify(policy)}`);
+  }
+  const c=config();c.p2.temperament='erratic';assert.deepEqual(call('createBattle',c),{ok:false,error:'invalid_player'});
+});
+test('replay runs only auto-v2 logs and validates the policies they carry',()=>{
+  const c=config();c.p1.policy='tactical';c.p2.policy='erratic';const id=create(c);round(id);
+  const log=call('result',id).inputLog;call('destroy',id);
+  assert.deepEqual(call('replay',{...log,policyVersion:'auto-v1'}),{ok:false,error:'invalid_replay'});
+  assert.deepEqual(call('replay',{...log,config:{...log.config,p2:{...log.config.p2,policy:'reckless'}}}),{ok:false,error:'invalid_policy'});
+});
 test('rejects raw commands, tera, noninteger slots and out of range slots',()=>{
   const id=create();
   for (const choice of ['move 1', '>eval globalThis.hacked=true', {type:'move',slot:1,tera:true},

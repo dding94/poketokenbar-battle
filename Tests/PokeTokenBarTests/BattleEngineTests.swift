@@ -53,4 +53,30 @@ final class BattleEngineTests: XCTestCase {
         XCTAssertEqual(chart.damage["Electric"]?["Ground"], 0)
         XCTAssertEqual(chart.damage["Steel"]?["Water"], 0.5)
     }
+    /// Snapshots record the policy version the engine runs, and every practice temperament is an engine policy.
+    @MainActor func testEngineRunsTheSnapshotPolicyVersionAndEveryPracticeTemperament() throws {
+        let engine = try BattleEngine(url: engineURL, expectedHash: expectedHash)
+        let ivs = Dictionary(uniqueKeysWithValues: ["hp", "attack", "defense", "special-attack", "special-defense", "speed"].map { ($0, 31) })
+        let set = BattleSet(speciesNum: 25, form: nil, level: 50, gender: .male, nature: "hardy", ability: "static",
+                            moves: ["thunderbolt", "quick-attack"], ivs: ivs, shiny: false)
+        func config(_ policy: String?) -> BattleConfig {
+            BattleConfig(seed: [1, 2, 3, 4], policySeed: 42, p1: .init(name: "p1", set: set), p2: .init(name: "p2", set: set, policy: policy))
+        }
+        struct Created: Decodable { let id: String }
+        for policy in [nil] + PracticeTemperament.allCases.map({ Optional($0.policyID) }) {
+            let created: Created = try BattleJSON.decode(engine.call(.createBattle, arguments: [BattleJSON.encode(config(policy))]))
+            let id = try BattleJSON.encode(created.id)
+            for side in ["p1", "p2"] {
+                _ = try engine.call(.choose, arguments: [id, BattleJSON.encode(side), BattleJSON.encode(["type": "auto"])])
+            }
+            let result: BattleResult = try BattleJSON.decode(engine.call(.result, arguments: [id]))
+            XCTAssertEqual(result.inputLog.policyVersion, BattleSnapshot.policy)
+            XCTAssertEqual(result.inputLog.config.p2.policy, policy)
+            XCTAssertEqual(result.inputLog.choices.count, 2)
+            _ = try engine.call(.destroy, arguments: [id])
+        }
+        XCTAssertThrowsError(try engine.call(.createBattle, arguments: [BattleJSON.encode(config("reckless"))])) {
+            XCTAssertEqual($0 as? BattleEngine.Failure, .engine("invalid_policy"))
+        }
+    }
 }
