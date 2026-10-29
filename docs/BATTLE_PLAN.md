@@ -327,11 +327,13 @@
 ### PR 02 — 전투 입력 매핑·스냅샷·공개 범위
 
 - 의존: PR 01.
-- [ ] **RED:** 레벨·IV·성격·특성·기술·폼 매핑, EV 0, 같은 종 다른 개체, 잘못된 입력 거절, 성장 진행도만 바뀌면 스냅샷 해시가 같음을 검증한다.
-- [ ] **GREEN:** 버전이 있는 스냅샷 schema, 앱·서버 공통 검증, 공개 정보(종·레벨·타입·능력치) 뷰를 구현한다.
-- [ ] **REFACTOR:** 앱 DTO와 엔진 타입 경계를 분리하고 에러 코드를 고정한다.
-- [ ] PokéAPI 최신 데이터와 Showdown 9세대 데이터를 649종 전수 대조하고, 메타몽·껍질몬·다중 폼을 확인한다.
-- [ ] 실제 기존 세이브 형태를 익명 fixture로 재현하고 원본 개인 데이터는 테스트에 넣지 않는다.
+- [x] **RED:** 레벨·IV·성격·특성·기술·폼 매핑, EV 0, 같은 종 다른 개체, 잘못된 입력 거절, 성장 진행도만 바뀌면 스냅샷 해시가 같음을 검증한다.
+- [x] **GREEN:** 버전이 있는 스냅샷 schema, 앱·서버 공통 검증, 공개 정보(종·레벨·타입·능력치) 뷰를 구현한다.
+- [x] **REFACTOR:** 앱 DTO와 엔진 타입 경계를 분리하고 에러 코드를 고정한다.
+- [x] PokéAPI 최신 데이터와 Showdown 9세대 데이터를 649종 전수 대조하고, 메타몽·껍질몬·다중 폼을 확인한다.
+- [x] 실제 기존 세이브 형태를 익명 fixture로 재현하고 원본 개인 데이터는 테스트에 넣지 않는다.
+
+검증: CI `40808781003` 대상 45건·전체 1,560 통과/16 skip/실패 0, 보충 `40809341124` 스냅샷/래퍼 12건 통과. Node 계약 20건 통과. 649종 대조는 PR 01의 고정 참조 검사로 재사용한다. 실제 서버 구현/배포는 포함하지 않는다.
 
 ### PR 03 — 자동 선택 정책과 공개 이벤트
 
@@ -551,12 +553,15 @@ npm run test:acceptance
 | `choose(id, side, choice)` | choice = `{"type":"move","slot":1~4}` 또는 `{"type":"auto"}` → `{"ok":true,"resolved":bool}`. Showdown 거절은 `{"ok":false,"error":"rejected"}`(결정적). 그 밖의 입력은 거절 |
 | `autoChoice(id, side)` | `{"slot":n}`, 적용하지 않음 |
 | `state(id, viewer)` | viewer = `p1`·`p2`·`spectator`. 양쪽 VIEW: 종·레벨·타입·HP는 항상, 상대 기술은 이미 쓴 것만, 특성은 로그로 드러난 뒤에만 |
+| `drainEvents(id, viewer)` | viewer별 최초 기술·특성 공개 이벤트 `{kind,side,id,turn}` 배열(PR 03 추가). 중복 없이 별도 커서로 읽음 |
 | `drainLog(id, viewer)` | 그 viewer가 볼 새 프로토콜 줄. 상대의 정확한 HP를 노출하지 않고 `|t:|` 줄을 뺀다 |
 | `result(id)` | `{"ended","winner","turns","logHash","inputLog"}`. logHash = `|t:|`를 뺀 전체 로그의 SHA-256 |
 | `replay(inputLog)` | 입력 기록으로 다시 실행해 `{"winner","logHash"}`. 검증한 선택 토큰으로 다시 구성하며 `>eval` 같은 스트림 명령을 통과시키지 않는다 |
 | `destroy(id)` | 정리 |
 
 SET = `{"speciesNum","form"(앱 PokemonForm 원시값 또는 null),"level","gender":"male"·"female"·"genderless","nature"(소문자),"ability"(PokéAPI slug),"moves"(PokéAPI slug 1~4개),"ivs":{"hp","attack","defense","special-attack","special-defense","speed"},"shiny"}`. slug에서 Showdown id로의 변환은 영숫자만 남기는 것이 기본이며, 실제 데이터에서 어긋나는 것은 별칭 표로 고정한다.
+
+inputLog v2 = `{version:2,policyVersion:"auto-v1",config,choices:[{side,choice}]}`. 이전 버전/정책 기록은 명시적 오류로 거절하며 조용히 새 정책으로 해석하지 않는다.
 
 규칙: 9세대, 테라스탈 금지, 도구 없음, EV 0, 200턴 무승부(어댑터가 강제), 팀 미리보기와 강제 행동(재충전·발버둥)은 어댑터가 처리한다.
 

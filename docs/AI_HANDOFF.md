@@ -1,8 +1,8 @@
 # 다음 AI를 위한 작업 인계
 
-최종 갱신: 2026-10-29. **PR 00 격리·설치 검증과 PR 01 엔진 결정성 게이트를 완료했다. 다음은 PR 02 → 03 → 03A다. 배틀 화면은 아직 없다.**
+최종 갱신: 2026-10-29. **PR 00·01·02 검증을 완료했다. 다음은 PR 03 → PR 03A다. 배틀 화면은 아직 없다.**
 
-## 진행 중인 작업 (2026-10-29 기준, PR 01 검증 완료 → PR 02 착수)
+## 진행 중인 작업 (2026-10-29 기준, PR 02 검증 완료 → PR 03 착수)
 
 - 브랜치: `feat/local-practice-battle` (`main` 5e9af78에서 분기). 인수 시 모든 변경은 미커밋이었다. 사용자 승인으로 문서(`372eba0`)·PR 00(`c04769a`)·프로브(`0ddc584`)를 나누어 커밋·푸시했고 CI 수정은 `f1dad46`, `cc0b9fe`다. 이후 사용자 승인으로 별도 포크 앱을 설치·실행했으나 아래 격리 누락을 발견해 종료했다. 배포·공개 전환은 하지 않았다.
 - 문서 개정: `docs/BATTLE_PLAN.md`(새 구조, PR 00~13 + PR 03A, 부록 A), `docs/AI_HANDOFF.md`, `AGENTS.md`, `README.md`(고지), `CLAUDE.md`(첫 단락 경고 한 줄).
@@ -49,9 +49,16 @@
 
 이어서 할 일:
 
-1. PR 02의 스냅샷·개체 매핑을 TDD로 구현한다. 엔진의 입력 검사와 공개 능력치 계산 경계를 재사용한다.
+1. PR 03 자동 선택 정책 v1과 최초 공개 이벤트를 구현하고 변경된 정책으로 결정성 코퍼스를 다시 실행한다.
 2. PR 02 → PR 03 → PR 03A(로컬 연습전) 순서로 진행한다. 설치·실행 및 계속 진행은 사용자가 승인했다.
 3. 사용자에게 연습전 시험 방법을 안내하고 멈춘다. 공개 전환은 필요하지 않아 private를 유지한다.
+
+### PR 03 진행
+
+- Node RED `npm test --prefix engine`: 종료 1, 30건 중 23 통과·7 실패·skip 0. 변화기 반복·동점·공개 이벤트·정책 기록 등 실제 동작 실패를 확인했다.
+- 자동 v1은 피해 점수와 조건부 변화기 점수, 전투 RNG와 독립된 policySeed/턴/진영 동점 선택을 쓴다. inputLog v2에 정책 버전을 고정하고 최초 공개 이벤트를 viewer별로 추출한다. Trace/Skill Swap의 현재 특성 소유자도 검사한다.
+- GREEN 과정에서 재충전은 Dex의 일반 기술이 아니어서 NaN 점수가 되던 결함을 발견했다. 강제 행동 요청은 평가 없이 지정 슬롯을 반환한다. PP 소진·재충전 테스트가 이 분기를 검증한다. 속도 동률/동일 선택 재생 테스트도 추가했다.
+- PR 03A는 변경량을 나눠 **03A-1 읽기 전용 후보/세션/시간 제한** → **03A-2 별도 창/한국어 표시/이미지/설치 검증** 순서로 구현한다. 현재 보유 개체가 여러 마리 있으므로 첫 버전 상대는 내 다른 개체를 사용한다. 야생 개체 생성은 이번 범위에 추가하지 않는다.
 
 ### PR 02 진행
 
@@ -60,6 +67,12 @@
 - Swift RED: [CI 40808265569](https://github.com/dding94/poketokenbar-battle/actions/runs/40808265569), `ba79906`. `swift test --filter "BattleEngineTests|BattleSnapshotTests"` 종료 1, 10건 실행(기존 4 통과·스냅샷 6 실패), 11개 실패 assertion/오류·skip 0. 테스트 컴파일이 아닌 실제 stub 동작 실패다.
 - 스냅샷 schema 1, instanceID·엔진 해시·규칙/정책 버전·전투 입력·공개 능력치만 저장한다. 성장량/단계 진행도는 포함하지 않는다. 개인 데이터 없이 합성 `CompanionState`의 실제 Codable 형태를 인코딩/복원해 검사한다.
 - `BattleSnapshot`은 저장소 참조나 파일 쓰기 기능이 없는 값 타입이다. 누락된 성격/성별/특성/기술은 오류로 남기고 기본값으로 채우지 않는다. 원격 GREEN·전체 앱 게이트는 다음 검증이다.
+
+### PR 02 완료 증거
+
+- [CI 40808781003](https://github.com/dding94/poketokenbar-battle/actions/runs/40808781003), `32dfcbd`, macOS 15: 대상 `swift test --filter "AppIdentityTests|SupportMailTests|UpdateCheckerTests|BattleEngineTests|BattleSnapshotTests"` 종료 0, 45건 통과·실패/skip 0. `./scripts/test-gate.sh` 종료 0, 1,576건 중 1,560 통과·16 skip·실패 0, 기존 로직 코어 커버리지 93.82%. 기존 16개 선택적 시나리오는 미검증이다. 결함 주입/원복 가드 종료 0, Gitleaks 398커밋 발견 0.
+- 보충 [CI 40809341124](https://github.com/dding94/poketokenbar-battle/actions/runs/40809341124), `e29e6ec`: `swift test --enable-code-coverage --filter "BattleEngineTests|BattleSnapshotTests"` 종료 0, 스냅샷 8 + 래퍼 4 = 12건 통과·실패/skip 0. `./scripts/battle-coverage.sh` 종료 0으로 `llvm-cov show --show-regions`를 확인했다. 스냅샷 거절 분기에 `^0`은 없고, 래퍼의 정상 계약상 항상 있는 error 문자열이 누락됐을 때의 대체 코드 `engine_failure`는 미실행이다. 런타임 할당 실패/손상 JS 예외 조합 전체를 검증한 것은 아니다.
+- Node 계약 20/20 통과·skip 0, 로컬 `swift build` 종료 0. 최신 PokéAPI 649종/폼/기술 대조는 PR 01의 같은 고정 데이터 검사로 재사용했다. 서버는 아직 없으며 공통 검증 경계는 `engine/src/input.js`다.
 
 ### PR 01 완료 증거
 
