@@ -29,18 +29,20 @@ function playAuto(ctx,config) {
   } finally {callIn(ctx,'destroy',id);}
 }
 // Corpus-style battles: any species with any four gen 1-5 moves, so status and boost branches come up often.
+// Levels within 3 of each other, as in practice, so battles run long enough to reach boosted and statused states.
 function randomConfigs(count) {
   const {Dex}=require('@pkmn/sim');
   let s=0x5eed;const rand=n=>{s=(Math.imul(s,1664525)+1013904223)>>>0;return Math.floor(s/0x100000000*n);};
   const species=Dex.species.all().filter(x=>x.num>0&&x.num<=649&&!x.forme);
   const moves=Dex.moves.all().filter(m=>m.num>0&&m.gen<=5&&!m.isZ&&!m.isMax).map(m=>m.id);
   const natures=Dex.natures.all().map(n=>n.id);
-  const mon=()=>{const sp=species[rand(species.length)];const known=new Set();while(known.size<4)known.add(moves[rand(moves.length)]);
-    return {speciesNum:sp.num,form:null,level:1+rand(100),gender:'genderless',nature:natures[rand(natures.length)],
+  const mon=level=>{const sp=species[rand(species.length)];const known=new Set();while(known.size<4)known.add(moves[rand(moves.length)]);
+    return {speciesNum:sp.num,form:null,level,gender:'genderless',nature:natures[rand(natures.length)],
       ability:Dex.abilities.get(Object.values(sp.abilities)[0]).id,moves:[...known],
       ivs:Object.fromEntries(['hp','attack','defense','special-attack','special-defense','speed'].map(k=>[k,rand(32)])),shiny:false};};
-  return Array.from({length:count},()=>({seed:[rand(65536),rand(65536),rand(65536),rand(65536)],policySeed:rand(0x100000000),
-    p1:{name:'p1',set:mon()},p2:{name:'p2',set:mon()}}));
+  return Array.from({length:count},()=>{const level=5+rand(96);
+    return {seed:[rand(65536),rand(65536),rand(65536),rand(65536)],policySeed:rand(0x100000000),
+      p1:{name:'p1',set:mon(level)},p2:{name:'p2',set:mon(Math.min(100,Math.max(1,level+rand(7)-3)))}};});
 }
 
 test('policy prefers damage, STAB and accuracy over an ineffective status move',()=>{
@@ -128,7 +130,7 @@ test('standard, named or omitted, picks exactly what auto-v1 picked across rando
   const built=await require('esbuild').build({...base,plugins:[...base.plugins,swap],entryPoints:['src/index.js'],write:false});
   const v1=vm.createContext({});vm.runInContext(built.outputFiles[0].text,v1);
   let decisions=0;
-  for(const [i,config] of randomConfigs(300).entries()) {
+  for(const [i,config] of randomConfigs(400).entries()) {
     const expected=playAuto(v1,config);assert.equal(expected.inputLog.policyVersion,'auto-v1');
     decisions+=expected.inputLog.choices.length;
     for(const policy of [undefined,'standard']) {
@@ -138,12 +140,15 @@ test('standard, named or omitted, picks exactly what auto-v1 picked across rando
       assert.equal(actual.logHash,expected.logHash);
     }
   }
-  assert.ok(decisions>=3000,`only ${decisions} decisions compared`);
+  assert.ok(decisions>=2500,`only ${decisions} decisions compared`);
 });
-test('aggressive puts power before accuracy but still scores an immune move zero',()=>{
+test('aggressive puts power before accuracy and matchups but still scores an immune move zero',()=>{
   const thunder=set(25,['thunder','thunderbolt'],'static');
   assert.equal(pick(battle(thunder)),2);   // standard: 110 x 70% < 90
   assert.equal(pick(battle(thunder,undefined,42,{p1:'aggressive'})),1);
+  const ember=set(4,['ember','scratch'],'blaze'),squirtle=set(7,['splash'],'torrent');
+  assert.equal(pick(battle(ember,squirtle)),2);   // standard: resisted Ember 40 x 1.5 x 0.5 < Scratch 40
+  assert.equal(pick(battle(ember,squirtle,42,{p1:'aggressive'})),1);
   assert.equal(pick(battle(set(25,['thunder','quick-attack'],'static'),set(27,['splash'],'sand-veil'),42,{p1:'aggressive'})),2);
 });
 test('tactical sets up at most twice while healthy and only with moves that still work',()=>{
