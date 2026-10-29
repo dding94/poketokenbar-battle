@@ -1,8 +1,9 @@
 import SwiftUI
 
-/// Practice selection: my entry (changeable inline), the opponent radio list with a paired stat
-/// comparison on the selected row, unavailable Pokémon, the mode, and the start button. The list
-/// scrolls; the mode and the start button stay pinned at the bottom of the 520pt body.
+/// Practice selection: my entry (changeable inline), then the opponents — level-matched wild ones first,
+/// my own below — as one radio list with a paired stat comparison on the selected row, unavailable
+/// Pokémon, the mode, and the start button. The list scrolls; the mode and the start button stay pinned
+/// at the bottom of the 520pt body.
 @MainActor
 struct PracticeSelectionView: View {
     @Bindable var session: PracticeSession
@@ -23,9 +24,10 @@ struct PracticeSelectionView: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     // No roster yet: `prepare` runs synchronously on appear, so there is nothing to wait for
-                    // (and no spinner — the popover avoids open-ended animations).
-                    if session.roster != nil, eligible.count < 2 {
-                        Label(l.practiceNeedsPair, systemImage: "info.circle")
+                    // (and no spinner — the popover avoids open-ended animations). One entry is enough now:
+                    // the wild section supplies the opponent.
+                    if session.roster != nil, session.player == nil {
+                        Label(l.practiceNeedsEntry, systemImage: "info.circle")
                             .font(.caption).foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -34,13 +36,8 @@ struct PracticeSelectionView: View {
                         Text(l.practiceOpponentCaption)
                             .font(.caption).foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
-                        VStack(spacing: 6) {
-                            ForEach(Array(eligible.enumerated()), id: \.element.id) { index, candidate in
-                                if candidate.id != session.playerID {
-                                    opponentRow(candidate, number: index + 1)
-                                }
-                            }
-                        }
+                        wildSection
+                        ownedSection
                     }
                     blockedSection
                 }
@@ -57,6 +54,16 @@ struct PracticeSelectionView: View {
             .keyboardShortcut(.defaultAction)
             .disabled(session.player == nil || session.opponent == nil)
         }
+        // Wild opponents are matched to the entry's level: search on appear and again whenever a player
+        // change returns the search to idle.
+        .onAppear { searchWildIfIdle() }
+        .onChange(of: session.playerID) { searchWildIfIdle() }
+        .onChange(of: session.wildState) { searchWildIfIdle() }
+    }
+
+    private func searchWildIfIdle() {
+        guard session.wildState == .idle, session.player != nil else { return }
+        session.findWildOpponents()
     }
 
     // MARK: My entry
@@ -95,10 +102,12 @@ struct PracticeSelectionView: View {
         .practiceCard()
     }
 
-    /// Picking my current opponent as my entry swaps the two, so the pair stays valid.
+    /// Picking my current opponent as my entry swaps the two, so the pair stays valid. A new entry drops the
+    /// wild opponents matched to the old one; a wild pick that went with them falls back to one of my own.
     private func choosePlayer(_ id: String) {
         if id == session.opponentID { session.opponentID = session.playerID }
         session.playerID = id
+        if session.opponent == nil { session.opponentID = eligible.first { $0.id != id }?.id }
         changingPlayer = false
     }
 
@@ -116,19 +125,138 @@ struct PracticeSelectionView: View {
 
     // MARK: Opponents
 
-    private func opponentRow(_ candidate: PracticeCandidate, number: Int) -> some View {
+    /// The entry's level ±3 within the app's 5...100, the band the wild search draws from.
+    static func wildLevels(around level: Int) -> ClosedRange<Int> {
+        let low = min(100, max(5, level - 3)), high = max(5, min(100, level + 3))
+        return low...high
+    }
+
+    /// Level-matched wild opponents, made in memory by the hatch rule: a header with the level band and a
+    /// reroll, then the search state or the three candidates.
+    @ViewBuilder
+    private var wildSection: some View {
+        if let level = session.player?.snapshot?.set.level {
+            let band = Self.wildLevels(around: level)
+            VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: 1) {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        sectionTitle(l.practiceWildHeader(low: band.lowerBound, high: band.upperBound))
+                        Spacer(minLength: 4)
+                        if session.wildState == .ready {
+                            Button { session.findWildOpponents() } label: {
+                                Label(l.practiceWildReroll, systemImage: "arrow.triangle.2.circlepath")
+                            }
+                            .buttonStyle(.borderless)
+                            .font(.caption)
+                            .fixedSize()
+                        }
+                    }
+                    // Describes the candidates, so it waits for them; the header's band says enough before.
+                    if session.wildState == .ready {
+                        Text(l.practiceWildHint)
+                            .font(.caption2).foregroundStyle(.secondary)
+                            .lineLimit(1).minimumScaleFactor(0.85)
+                    }
+                }
+                switch session.wildState {
+                case .ready:
+                    VStack(spacing: 6) {
+                        ForEach(session.wildCandidates) { candidate in
+                            opponentRow(candidate, number: nil)
+                        }
+                    }
+                case .idle, .searching:
+                    wildNotice {
+                        // The only spinner on the screen, and only while a search is in flight.
+                        if session.wildState == .searching {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Image(systemName: "leaf").foregroundStyle(.secondary)
+                        }
+                        Text(l.practiceWildSearching).foregroundStyle(.secondary)
+                    }
+                case .unavailable(let reason):
+                    wildNotice {
+                        Image(systemName: "exclamationmark.triangle").foregroundStyle(.orange)
+                        // Two lines at most keep my own opponents in view; the tooltip has the rest.
+                        Text(reason).foregroundStyle(.secondary)
+                            .lineLimit(2)
+                            .help(reason)
+                        Spacer(minLength: 4)
+                        Button(l.retry) { session.findWildOpponents() }
+                            .buttonStyle(.borderless)
+                            .fixedSize()
+                    }
+                }
+            }
+        }
+    }
+
+    /// A one-line row in place of the wild candidates while they are missing.
+    private func wildNotice<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        HStack(spacing: 8) {
+            content()
+            Spacer(minLength: 0)
+        }
+        .font(.caption)
+        .padding(.horizontal, 8).padding(.vertical, 7)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.secondary.opacity(0.04), in: RoundedRectangle(cornerRadius: 10))
+    }
+
+    /// My own Pokémon as opponents. Their numbers follow the roster, so they match the Home list.
+    @ViewBuilder
+    private var ownedSection: some View {
+        let owned = eligible.enumerated().filter { $0.element.id != session.playerID }
+        if !owned.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                sectionTitle(l.practiceOwnedHeader)
+                ForEach(owned, id: \.element.id) { index, candidate in
+                    opponentRow(candidate, number: index + 1)
+                }
+            }
+        }
+    }
+
+    private func sectionTitle(_ text: String) -> some View {
+        Text(text)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .monospacedDigit()
+            .lineLimit(1)
+    }
+
+    /// One opponent; a wild one adds its rarity, shininess and the wild tag on a second line, the way
+    /// Home's companion header shows them.
+    private func opponentRow(_ candidate: PracticeCandidate, number: Int?) -> some View {
         let selected = candidate.id == session.opponentID
+        let font: Font = .callout.weight(selected ? .semibold : .regular)
         return VStack(alignment: .leading, spacing: 8) {
             Button { session.opponentID = candidate.id } label: {
                 HStack(spacing: 8) {
                     Image(systemName: selected ? "largecircle.fill.circle" : "circle")
                         .foregroundStyle(selected ? Color.accentColor : Color.secondary)
                     PracticeSpriteTile(set: candidate.snapshot?.set, size: 32, artwork: artwork)
-                    PracticeNameLevel(name: candidate.name, level: candidate.snapshot?.set.level ?? 0,
-                                      font: .callout.weight(selected ? .semibold : .regular))
-                    PracticeTypeBadges(types: candidate.snapshot?.publicInfo.types ?? [], l: l, artwork: artwork)
+                    if let wild = candidate.origin.wildTraits {
+                        VStack(alignment: .leading, spacing: 3) {
+                            HStack(spacing: 5) {
+                                PracticeNameLevel(name: candidate.name, level: candidate.snapshot?.set.level ?? 0, font: font)
+                                if wild.shiny { Text("✨").font(.system(size: 11)) }
+                                Badge(l.rarityLabel(wild.rarity).uppercased(), tint: .rarity(wild.rarity)).fixedSize()
+                            }
+                            HStack(spacing: 5) {
+                                PracticeTypeBadges(types: candidate.snapshot?.publicInfo.types ?? [], l: l, artwork: artwork)
+                                PracticeWildTag(l: l)
+                            }
+                        }
+                    } else {
+                        PracticeNameLevel(name: candidate.name, level: candidate.snapshot?.set.level ?? 0, font: font)
+                        PracticeTypeBadges(types: candidate.snapshot?.publicInfo.types ?? [], l: l, artwork: artwork)
+                    }
                     Spacer(minLength: 4)
-                    Text("#\(number)").font(.caption2).foregroundStyle(.tertiary).monospacedDigit()
+                    if let number {
+                        Text("#\(number)").font(.caption2).foregroundStyle(.tertiary).monospacedDigit()
+                    }
                 }
                 .contentShape(Rectangle())
             }

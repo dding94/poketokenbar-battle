@@ -1652,7 +1652,7 @@ struct L {
 // Local practice defaults to Korean; other languages use the English fallback until translated.
 extension L {
     var practicePlayer: String { lang == .ko ? "내 출전 개체" : "Your Pokémon" }
-    var practiceNeedsPair: String { lang == .ko ? "출전할 수 있는 개체가 두 마리 필요해요. 개체 정보가 준비되면 여기에 바로 나타나요." : "Two eligible Pokémon are needed. They appear here as soon as their profiles are ready." }
+    var practiceNeedsEntry: String { lang == .ko ? "출전할 수 있는 개체가 필요해요. 개체 정보가 준비되면 여기에 바로 나타나요." : "An eligible Pokémon is needed. It appears here as soon as its profile is ready." }
     var practiceMissingInfo: String { lang == .ko ? "정보 없음" : "Missing information" }
     var practiceRules: String { lang == .ko ? "9세대 · 테라스탈·도구 없음 · EV 0 · 200턴 무승부" : "Gen 9 · no Tera/items · EV 0 · draw at 200 turns" }
     var practiceChoose: String { lang == .ko ? "개체를 골라 주세요" : "Choose a Pokémon" }
@@ -1700,7 +1700,7 @@ extension L {
     var practiceAutoAgain: String { lang == .ko ? "자동으로 다시" : "Again on auto" }
     var practiceCaptionBattle: String { lang == .ko ? "팝오버를 닫아도 배틀은 그대로 남아요" : "Closing the popover keeps the battle" }
     var practiceCaptionResult: String { lang == .ko ? "연습 결과는 저장되지 않아요 · 200턴이 지나면 무승부" : "Practice results are not saved · draw at 200 turns" }
-    var practiceEntryIdle: String { lang == .ko ? "내 개체끼리 가볍게 겨뤄 보세요" : "Spar between your own Pokémon" }
+    var practiceEntryIdle: String { lang == .ko ? "레벨을 맞춘 야생 상대와 겨뤄 보세요" : "Spar with level-matched wild Pokémon" }
     var practiceEntryResult: String { lang == .ko ? "결과가 나왔어요" : "The result is in" }
     var practiceEntryStart: String { lang == .ko ? "시작" : "Start" }
     var practiceEntryResume: String { lang == .ko ? "이어하기" : "Resume" }
@@ -1889,4 +1889,13 @@ extension L {
         }
     }
     var practiceSkipToResult: String { lang == .ko ? "결과로 건너뛰기" : "Skip to result" }
+    // Wild opponents on the selection screen (level-matched, in memory only) and their tag in battle.
+    func practiceWildHeader(low: Int, high: Int) -> String {
+        lang == .ko ? "야생 상대 · Lv.\(low)–\(high)" : "Wild opponents · Lv.\(low)–\(high)"
+    }
+    var practiceWildHint: String { lang == .ko ? "내 레벨에 맞춰 뽑아서 승부가 팽팽해요" : "Matched to your level for a close fight" }
+    var practiceWildReroll: String { lang == .ko ? "다른 야생 상대" : "Reroll" }
+    var practiceWildSearching: String { lang == .ko ? "레벨에 맞는 상대를 찾는 중…" : "Finding opponents at your level…" }
+    var practiceWildTag: String { lang == .ko ? "야생" : "Wild" }
+    var practiceOwnedHeader: String { lang == .ko ? "내 개체" : "Your collection" }
 }

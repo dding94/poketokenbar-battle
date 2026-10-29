@@ -64,7 +64,8 @@ struct PracticeBattleBoard: View {
                                 snapshot: own ? session.player?.snapshot : session.opponent?.snapshot,
                                 l: l, artwork: artwork, display: shown(side),
                                 beatID: beat?.id, delta: beat?.hpDelta[side], hitTrigger: lastHit(side),
-                                reveal: own ? nil : stagedReveal)
+                                reveal: own ? nil : stagedReveal,
+                                wild: !own && session.opponent?.origin.wildTraits != nil)
     }
 
     /// What the staged beats have shown of the opponent so far (history plus the beat on screen). The
@@ -347,6 +348,8 @@ struct PracticeSideCard: View {
     var hitTrigger: Int?
     /// The opponent's moves and ability as staged so far; nil reads them from the engine's view.
     var reveal: PracticeReveal?
+    /// A wild opponent reads "야생 이상해꽃" as in the games: the tag takes the "Foe" label's place.
+    var wild = false
 
     private var revealedMoves: [String] { reveal?.moves ?? side.moves }
     private var revealedAbility: String? {
@@ -371,8 +374,12 @@ struct PracticeSideCard: View {
                     .practiceHitReaction(trigger: hitTrigger)
                 VStack(alignment: .leading, spacing: 5) {
                     HStack(spacing: 6) {
-                        Text(own ? l.practiceYou : l.practiceFoe)
-                            .font(.caption2).foregroundStyle(.secondary).fixedSize()
+                        if wild {
+                            PracticeWildTag(l: l)
+                        } else {
+                            Text(own ? l.practiceYou : l.practiceFoe)
+                                .font(.caption2).foregroundStyle(.secondary).fixedSize()
+                        }
                         PracticeNameLevel(name: name, level: side.level)
                         PracticeTypeBadges(types: side.types, l: l, artwork: artwork).fixedSize()
                         Spacer(minLength: 0)

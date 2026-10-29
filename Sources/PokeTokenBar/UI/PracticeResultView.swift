@@ -210,7 +210,12 @@ struct PracticeResultView: View {
             .controlSize(.large)
             .keyboardShortcut(.defaultAction)
             HStack(spacing: 8) {
-                Button { session.backToSelection() } label: {
+                Button {
+                    // A wild foe was just fought: offer fresh ones instead of the same three.
+                    let wasWild = session.opponent?.origin.wildTraits != nil
+                    session.backToSelection()
+                    if wasWild { session.findWildOpponents() }
+                } label: {
                     Text(l.practiceOtherOpponent).frame(maxWidth: .infinity)
                 }
                 Button {

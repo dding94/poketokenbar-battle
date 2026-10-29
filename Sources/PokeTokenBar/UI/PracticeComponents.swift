@@ -173,6 +173,34 @@ struct PracticeMetadataName: View {
     }
 }
 
+extension PracticeOrigin {
+    /// A wild candidate's hatch rarity and shininess for its row and tag; nil for one of my own.
+    var wildTraits: (rarity: Rarity, shiny: Bool)? {
+        if case let .wild(rarity, shiny) = self { return (rarity, shiny) }
+        return nil
+    }
+}
+
+/// "야생" next to a wild opponent's name: a faint teal capsule with a leaf, quieter than the rarity and
+/// type badges beside it.
+@MainActor
+struct PracticeWildTag: View {
+    let l: L
+
+    var body: some View {
+        HStack(spacing: 2) {
+            Image(systemName: "leaf.fill").font(.system(size: 7, weight: .bold))
+            Text(l.practiceWildTag)
+        }
+        .font(.system(size: 9, weight: .bold))
+        .lineLimit(1)
+        .foregroundStyle(Color.teal)
+        .padding(.horizontal, 5).padding(.vertical, 1)
+        .background(Color.teal.opacity(0.14), in: Capsule())
+        .fixedSize()
+    }
+}
+
 /// "Name Lv.50" with the name truncating first.
 @MainActor
 struct PracticeNameLevel: View {
