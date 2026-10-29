@@ -1,3 +1,6 @@
+import AppKit
+import SwiftUI
+import Vision
 import XCTest
 @testable import PokeTokenBar
 
@@ -85,6 +88,41 @@ final class PopoverNavigationTests: XCTestCase {
         }
     }
 
+    /// The practice battle covers the popover like Settings/Recap, so it drops an open Pokédex page.
+    func testShowingPracticeDropsDexDetail() {
+        let nav = PopoverNavigation()
+        nav.openDexEntry(collectionID: "25")
+        nav.showingPractice = true
+        XCTAssertNil(nav.dexDetailCollectionID)
+    }
+
+    /// Closing the practice screen (Back) is not a cover, so a page opened meanwhile stays.
+    func testLeavingPracticeKeepsDexDetail() {
+        let nav = PopoverNavigation()
+        nav.openDexEntry(collectionID: "25")
+        nav.showingPractice = false
+        XCTAssertEqual(nav.dexDetailCollectionID, "25")
+    }
+
+    /// Reopening the popover lands on Home; `AppDelegate` restores the practice screen only while a
+    /// battle is active, after `reset()`.
+    func testResetLeavesPractice() {
+        let nav = PopoverNavigation()
+        nav.showingPractice = true
+        nav.reset()
+        XCTAssertFalse(nav.showingPractice)
+        XCTAssertEqual(nav.tab, .home)
+    }
+
+    /// The footer shield opens the in-popover practice screen; the separate window is gone.
+    func testPopoverFooterOpensPracticeInsideThePopover() throws {
+        let source = try String(contentsOf: Self.popoverSource, encoding: .utf8)
+        let footer = try XCTUnwrap(source.range(of: "private var footer"))
+        let body = String(source[footer.lowerBound...])
+        XCTAssertTrue(body.contains("nav.showingPractice = true"), "the shield button must open the practice screen")
+        XCTAssertFalse(source.contains("PracticeWindowController"), "practice no longer opens a window")
+    }
+
     /// #301: Hide is a right-click. Show has to live on the popover footer, bound to the same
     /// `floatingPetEnabled` the Settings checkbox already uses. Removing the button must fail this.
     func testPopoverFooterTogglesFloatingPetWithoutOpeningSettings() throws {
@@ -108,6 +146,100 @@ final class PopoverNavigationTests: XCTestCase {
             .deletingLastPathComponent()
             .appendingPathComponent("Sources/PokeTokenBar/UI/PopoverView.swift")
     }()
+}
+
+private struct PracticeRouteProvider: UsageProvider {
+    let id = "fixture"
+    let displayName = "Fixture"
+    let reportsCost = false
+    func fetchDaily() async throws -> DailyUsage? { nil }
+    func fetchEnrichment() async -> ProviderEnrichment { ProviderEnrichment() }
+}
+private struct PracticeRouteClaude: ClaudeLimitsProviding {
+    func fetch(allowKeychainPrompt: Bool) async throws -> LimitStatus {
+        throw LimitsError.keychainInteractionNotAllowed
+    }
+}
+private struct PracticeRouteCodex: CodexLimitsProviding {
+    func fetch() async throws -> CodexRateLimitStatus? { nil }
+}
+private struct PracticeRouteAntigravity: AntigravityLimitsProviding {
+    func fetch(allowKeychainPrompt: Bool) async throws -> AntigravityRateLimitStatus {
+        throw LimitsError.keychainInteractionNotAllowed
+    }
+}
+private struct PracticeRouteCursor: CursorLimitsProviding {
+    func fetch() async throws -> CursorRateLimitStatus? { nil }
+}
+private struct PracticeRouteStatus: ProviderStatusProviding {
+    func fetch() async -> [String: ProviderStatus] { [:] }
+}
+private struct PracticeRoutePokemon: PokeProviding {
+    func line(baseSpeciesID: Int) async throws -> EvoLine { throw URLError(.notConnectedToInternet) }
+    func baseSpeciesIndex() async throws -> [BaseSpecies] { [] }
+    func baseSpecies(id: Int) async throws -> BaseSpecies? { nil }
+}
+
+/// The production `PopoverView` routes `showingPractice` to the practice screen when a session is in
+/// the environment, the way `AppDelegate` injects it. Read off the rendered pixels in English.
+@MainActor
+final class PopoverPracticeRoutingTests: XCTestCase {
+    func testShowingPracticeReplacesTheTabsWithThePracticeScreen() async throws {
+        let suite = "PracticeRoute-\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("\(suite).json")
+        defer { try? FileManager.default.removeItem(at: file) }
+        var state = PracticeScreenRenderingTests.syntheticState()
+        state.language = .en
+        try JSONEncoder().encode(state).write(to: file)
+        let companion = CompanionStore(provider: PracticeRoutePokemon(), fileURL: file, defaults: defaults)
+        let store = UsageStore(providers: [PracticeRouteProvider()],
+            claudeLimitsProvider: PracticeRouteClaude(), discoverClaudeConfigDirs: { [] },
+            readDefaultIdentity: { nil }, claudeUsageEntries: { _ in [] },
+            codexLimitsProvider: PracticeRouteCodex(), antigravityLimitsProvider: PracticeRouteAntigravity(),
+            cursorLimitsProvider: PracticeRouteCursor(), statusProvider: PracticeRouteStatus(),
+            autoRefresh: false, defaults: defaults)
+        let practice = PracticeSession(engineURL: PracticeScreenRenderingTests.engineURL, clock: { 0 },
+                                       drivesAutomatically: false)
+        let nav = PopoverNavigation()
+        nav.showingPractice = true
+
+        let height = 640.0
+        let host = NSHostingView(rootView: PopoverView()
+            .environment(store).environment(companion).environment(UpdateChecker(defaults: defaults))
+            .environment(nav).environment(practice)
+            .environment(\.colorScheme, .light)
+            .frame(width: PopoverMetrics.width, height: height)
+            .background(Color.white))
+        host.frame = NSRect(x: 0, y: 0, width: PopoverMetrics.width, height: height)
+        let window = NSWindow(contentRect: NSRect(x: -10000, y: -10000, width: PopoverMetrics.width, height: height),
+                              styleMask: .borderless, backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.appearance = NSAppearance(named: .aqua)
+        window.contentView = host
+        window.orderFront(nil)
+        defer { window.close() }
+
+        var text = ""
+        let deadline = ContinuousClock.now + .seconds(5)
+        repeat {
+            try await Task.sleep(for: .milliseconds(100))
+            host.layoutSubtreeIfNeeded()
+            let bitmap = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+            host.cacheDisplay(in: host.bounds, to: bitmap)
+            let request = VNRecognizeTextRequest()
+            request.recognitionLevel = .accurate
+            request.recognitionLanguages = ["en-US"]
+            try VNImageRequestHandler(cgImage: XCTUnwrap(bitmap.cgImage)).perform([request])
+            text = (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }.joined(separator: " ")
+        } while !text.contains("Start battle") && ContinuousClock.now < deadline
+
+        XCTAssertTrue(text.contains("Start battle"), "practice selection not shown: \(text)")
+        XCTAssertFalse(text.contains(L(.en).todayTokens), "Home must be covered: \(text)")
+        XCTAssertNotNil(practice.roster, "appearing prepares the session from the companion save")
+        XCTAssertFalse(practice.pauseReasons.contains(.screenHidden), "the visible screen resumes the battle")
+    }
 }
 
 final class RepresentativeLocalizationTests: XCTestCase {
