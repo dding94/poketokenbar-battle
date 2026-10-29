@@ -131,12 +131,10 @@ struct SettingsView: View {
         HStack(spacing: 5) {
             Text("v\(Self.appVersion)")
             Text("·")
-            footerLink("GitHub", "https://github.com/chattymin/PokeTokenBar")
+            footerLink("GitHub", AppIdentity.repositoryURL)
             Text("·")
-            footerLink(l.website, "https://chattymin.github.io/PokeTokenBar/")
-            Text("·")
-            // 개발자 후원 — 기능 잠금·너지 없는 푸터 링크
-            footerLink("♥ " + l.sponsor, "https://github.com/sponsors/chattymin")
+            // 원본 프로젝트 출처 — 포크가 원본 웹사이트·후원 링크를 자기 것처럼 보이지 않게 출처로만 남긴다.
+            footerLink(l.basedOnUpstream, AppIdentity.Upstream.repositoryURL)
             Spacer()
         }
         .font(.caption2)
@@ -856,15 +854,17 @@ struct SettingsView: View {
 
     private var aboutSupportGroup: some View {
         settingsSection(l.aboutSupportSectionTitle) {
-            groupRow {
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(l.reportProblem)
-                    Text(l.reportAttachHint).font(.caption2).foregroundStyle(.tertiary)
+            if SupportMail.address != nil {
+                groupRow {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(l.reportProblem)
+                        Text(l.reportAttachHint).font(.caption2).foregroundStyle(.tertiary)
+                    }
+                    Spacer()
+                    Button(l.reportProblem) { reportProblem() }
                 }
-                Spacer()
-                Button(l.reportProblem) { reportProblem() }
+                Divider()
             }
-            Divider()
             // 로그 파일 보기 — 문제 제보 시 바로 첨부할 수 있게 같은 그룹에 둔다(고급 접기 밖).
             groupRow {
                 Text(l.showLogFile)
@@ -873,11 +873,22 @@ struct SettingsView: View {
                     NSWorkspace.shared.activateFileViewerSelecting([AppLog.logFileURL])
                 }
             }
-            if reportFailed {
-                Text(l.reportMailFallback(SupportMail.address))
+            if reportFailed, let address = SupportMail.address {
+                Text(l.reportMailFallback(address))
                     .font(.caption2).foregroundStyle(.orange).textSelection(.enabled)
                     .padding(.horizontal, 12).padding(.bottom, 6)
             }
+            Divider()
+            // 비공식 팬 프로젝트 고지 — README 와 같은 내용. 공개 배포 전 필수(BATTLE_PLAN PR 00).
+            VStack(alignment: .leading, spacing: 6) {
+                Text(l.forkDisclaimer)
+                Text(l.thirdPartyNotice)
+            }
+            .font(.caption2).foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+            .textSelection(.enabled)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 12).padding(.vertical, 8)
         }
     }
 
@@ -955,11 +966,12 @@ struct SettingsView: View {
     /// 문제점 알리기 — 진단 정보(버전·macOS)가 채워진 리포트 메일을 기본 메일 앱으로 연다.
     /// 메일 앱이 없거나 열기에 실패하면 수신 주소를 안내(복사 가능)한다.
     private func reportProblem() {
+        guard let address = SupportMail.address else { return }
         let subject = l.reportMailSubject(Self.appVersion)
         let body = l.reportMailBody(
             version: Self.appVersion,
             os: ProcessInfo.processInfo.operatingSystemVersionString)
-        guard let url = SupportMail.mailtoURL(subject: subject, body: body),
+        guard let url = SupportMail.mailtoURL(to: address, subject: subject, body: body),
               NSWorkspace.shared.open(url) else {
             reportFailed = true
             return

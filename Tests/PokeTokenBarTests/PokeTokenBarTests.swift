@@ -430,10 +430,11 @@ final class LimitsBackoffTests: XCTestCase {
 final class SupportMailTests: XCTestCase {
     func testMailtoURLEncodesSubjectAndBody() throws {
         let url = try XCTUnwrap(SupportMail.mailtoURL(
+            to: "support@example.com",
             subject: "[PokeTokenBar] 문제 리포트 (v2.3.3)",
             body: "문제 내용:\n(설명)\n---\n앱 버전: v2.3.3"))
         let s = url.absoluteString
-        XCTAssertTrue(s.hasPrefix("mailto:parkdongmin123@gmail.com?"), s)
+        XCTAssertTrue(s.hasPrefix("mailto:support@example.com?"), s)
         XCTAssertTrue(s.contains("subject="))
         XCTAssertTrue(s.contains("body="))
         // 개행·한글·대괄호가 raw 로 남지 않아야 함 (percent-encode)
@@ -447,7 +448,7 @@ final class SupportMailTests: XCTestCase {
     }
 
     func testMailtoEncodesPlusSign() throws {
-        let url = try XCTUnwrap(SupportMail.mailtoURL(subject: "C++ crash", body: "path a+b\n2+2"))
+        let url = try XCTUnwrap(SupportMail.mailtoURL(to: "support@example.com", subject: "C++ crash", body: "path a+b\n2+2"))
         let s = url.absoluteString
         XCTAssertFalse(s.contains("+"), "query 의 '+' 는 %2B 로 인코딩돼야 함(메일 클라이언트 공백 오독 방지): \(s)")
         let comps = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false))

@@ -12,9 +12,19 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-REPO="chattymin/PokeTokenBar"
-TAP_REPO="chattymin/homebrew-tap"
-CASK_PATH="Casks/poke-token-bar.rb"
+# 포크(PokeTokenBar Battle) 릴리스 절차는 아직 검증되지 않았다(AGENTS.md "Git·PR·릴리스").
+# 포크 저장소·tap·서명 인증서를 준비하고 이 절차를 검증한 뒤에만 PTB_FORK_RELEASE_READY=1 로 실행한다.
+if [[ "${PTB_FORK_RELEASE_READY:-0}" != "1" && "${1:-}" != "--check-only" ]]; then
+  echo "✗ 포크 릴리스 절차가 아직 검증되지 않았습니다. 준비 후 PTB_FORK_RELEASE_READY=1 로 실행하세요." >&2
+  exit 1
+fi
+
+REPO="dding94/poketokenbar-battle"
+TAP_REPO="dding94/homebrew-tap"
+CASK_NAME="poke-token-bar-battle"
+CASK_PATH="Casks/$CASK_NAME.rb"
+APP_NAME="PokeTokenBar Battle"
+EXEC_NAME="PokeTokenBarBattle"
 
 # ── 문서 일관성 검토 (배포 전 항상 실행) ───────────────────────────────────
 # 기계적으로 잡을 수 있는 것만 자동 경고. 내용(기능 설명) 변경 여부는 사람이 체크리스트로 판단.
@@ -111,9 +121,11 @@ echo "▶ 코드서명 신원 게이트 (배포 전 — ad-hoc 릴리스 차단�
 # 릴리스가 ad-hoc(빌드마다 cdhash 변경) 또는 다른 인증서로 나가면, 기존 사용자의 Keychain "항상 허용"이
 # 앱의 지정요구(DR: identifier + certificate leaf)와 안 맞아 매 업그레이드마다 깨진다 → Claude 한도 조회 시
 # macOS 키체인 접근 다이얼로그가 재프롬프트된다. 안정적 자체서명 신원(고정 leaf)으로만 배포되게 강제한다.
-SIGN_IDENTITY="${CODESIGN_IDENTITY:-PokeTokenBar Local}"
-# "PokeTokenBar Local" leaf SHA-1 — 설치본 DR 의 certificate leaf pin. 인증서를 재생성/교체하면 갱신 필요.
-EXPECTED_LEAF="507F814330C727B38AC9A987ECBA929721C52C62"
+SIGN_IDENTITY="${CODESIGN_IDENTITY:-PokeTokenBar Battle Local}"
+# 포크 서명 인증서 leaf SHA-1 — 설치본 DR 의 certificate leaf pin. 원본 관리자 인증서와 다르며,
+# 포크 인증서를 만든 뒤(./scripts/create-signing-cert.sh) 그 leaf 를 PTB_EXPECTED_LEAF 로 넘긴다.
+EXPECTED_LEAF="${PTB_EXPECTED_LEAF:-}"
+[[ -n "$EXPECTED_LEAF" ]] || { echo "✗ PTB_EXPECTED_LEAF(포크 서명 인증서 leaf SHA-1)가 필요합니다."; exit 1; }
 LEAF=$(security find-identity -v -p codesigning | awk -v id="\"$SIGN_IDENTITY\"" '$0 ~ id {print $2; exit}')
 if [[ -z "$LEAF" ]]; then
   echo "✗ 유효 codesigning identity '$SIGN_IDENTITY' 없음(미설치·만료 포함)."
@@ -135,13 +147,14 @@ perl -pi -e "s/VERSION=\"[0-9.]+\"/VERSION=\"$VERSION\"/" scripts/build-app.sh
 
 echo "▶ 4/8 빌드 + zip (push 전 검증 — 실패해도 범프 미커밋이라 origin/main 무손상)"
 ./scripts/build-app.sh >/dev/null
-rm -f build/PokeTokenBar.zip
-ditto -c -k --keepParent build/PokeTokenBar.app build/PokeTokenBar.zip
-BUILT=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" build/PokeTokenBar.app/Contents/Info.plist)
+ZIP="build/$EXEC_NAME.zip"
+rm -f "$ZIP"
+ditto -c -k --keepParent "build/$APP_NAME.app" "$ZIP"
+BUILT=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" "build/$APP_NAME.app/Contents/Info.plist")
 [[ "$BUILT" == "$VERSION" ]] || { echo "✗ 빌드 버전 불일치: $BUILT (수동 복구: git checkout scripts/build-app.sh)"; exit 1; }
 # v2.5.4 는 arm64 단일 바이너리로 나가 Intel 에서 "bad CPU type" 으로 실행 불가였다(#358).
-lipo build/PokeTokenBar.app/Contents/MacOS/PokeTokenBar -verify_arch arm64 x86_64 \
-  || { echo "✗ universal 바이너리 아님: $(lipo -archs build/PokeTokenBar.app/Contents/MacOS/PokeTokenBar) (arm64 + x86_64 필요)"; exit 1; }
+lipo "build/$APP_NAME.app/Contents/MacOS/$EXEC_NAME" -verify_arch arm64 x86_64 \
+  || { echo "✗ universal 바이너리 아님: $(lipo -archs "build/$APP_NAME.app/Contents/MacOS/$EXEC_NAME") (arm64 + x86_64 필요)"; exit 1; }
 
 echo "▶ 5/8 커밋 + push (빌드 성공 후)"
 git add scripts/build-app.sh
@@ -149,8 +162,8 @@ git commit -q -m "$COMMIT_MESSAGE"
 git push -q origin main
 
 echo "▶ 6/8 GitHub Release v$VERSION"
-gh release create "v$VERSION" build/PokeTokenBar.zip --repo "$REPO" \
-  --title "PokeTokenBar v$VERSION" --target main --notes-file "$NOTES_FILE"
+gh release create "v$VERSION" "$ZIP" --repo "$REPO" \
+  --title "PokeTokenBar Battle v$VERSION" --target main --notes-file "$NOTES_FILE"
 
 echo "▶ 7/8 Homebrew cask $VERSION"
 TMP_CASK=$(mktemp)
@@ -158,11 +171,11 @@ gh api "repos/$TAP_REPO/contents/$CASK_PATH" --jq '.content' | base64 -d \
   | perl -pe "s/version \"[0-9.]+\"/version \"$VERSION\"/" > "$TMP_CASK"
 SHA=$(gh api "repos/$TAP_REPO/contents/$CASK_PATH" --jq '.sha')
 gh api -X PUT "repos/$TAP_REPO/contents/$CASK_PATH" \
-  -f message="cask: poke-token-bar $VERSION" \
+  -f message="cask: $CASK_NAME $VERSION" \
   -f content="$(base64 -i "$TMP_CASK")" -f sha="$SHA" --jq '.commit.html_url'
 rm -f "$TMP_CASK"
 
 echo "▶ 8/8 GitHub Pages 재빌드(랜딩 동적 배지 갱신 유도)"
 gh api -X POST "repos/$REPO/pages/builds" >/dev/null 2>&1 || true
 
-echo "✓ v$VERSION 배포 완료. 검증: brew upgrade --cask poke-token-bar"
+echo "✓ v$VERSION 배포 완료. 검증: brew upgrade --cask $CASK_NAME"

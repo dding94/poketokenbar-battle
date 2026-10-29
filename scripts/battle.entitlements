@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- JavaScriptCore(JSContext) 전투 엔진의 JIT. 없으면 인터프리터로 동작한다(경기당 약 8ms). -->
+    <key>com.apple.security.cs.allow-jit</key><true/>
+</dict>
+</plist>

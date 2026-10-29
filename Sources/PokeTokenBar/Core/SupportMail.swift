@@ -3,11 +3,12 @@ import Foundation
 /// 설정의 "문제점 알리기" — 기본 메일 클라이언트로 사전 작성된 리포트 메일을 연다.
 /// 앱은 메일을 직접 전송하지 않는다(SMTP/계정 불필요) — mailto URL 조립까지만 담당.
 enum SupportMail {
-    /// 수신 주소 — 개발자 공개 연락처(GitHub 프로필 공개 이메일과 동일).
-    static let address = "parkdongmin123@gmail.com"
+    /// 수신 주소 — 포크의 리포트 수신처. 원본 개발자 개인 메일로 포크 리포트가 가지 않게
+    /// `AppIdentity.supportEmail` 만 쓰며, nil 이면 설정에서 리포트 행을 숨긴다.
+    static var address: String? { AppIdentity.supportEmail }
 
     /// mailto URL 조립 — subject/body 는 URLComponents 가 percent-encode (개행·한글 포함).
-    static func mailtoURL(to: String = address, subject: String, body: String) -> URL? {
+    static func mailtoURL(to: String, subject: String, body: String) -> URL? {
         var components = URLComponents()
         components.scheme = "mailto"
         components.path = to

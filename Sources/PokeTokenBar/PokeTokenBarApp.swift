@@ -79,7 +79,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         // Tooltips show 40% sooner than AppKit's 1 s default; the app's hover hints are short and
         // the popover closes quickly. Registration domain only, so a user `defaults write` still wins.
         UserDefaults.standard.register(defaults: ["NSInitialToolTipDelay": 600])
-        Self.migrateLegacyStorageIfNeeded()   // TokenMac → PokeTokenBar 리네임: 기존 companion/캐시 보존
+        // 포크는 원본 앱 폴더를 옮기거나 쓰지 않는다(원본의 TokenMac → PokeTokenBar 이관도 원본 몫).
+        // 첫 실행에만 원본 세이브를 포크 폴더로 복사해 온다.
+        Self.importUpstreamSaveIfNeeded()
         LoginItem.migrateFromLegacyLoginItemIfNeeded()   // 로그인아이템 → KeepAlive 에이전트(크래시 자동 재실행)
         store = UsageStore()
         companion = CompanionStore()
@@ -527,13 +529,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
     /// TokenMac→PokeTokenBar 리네임에 따른 1회 이전: 기존 Application Support 폴더를
     /// 새 이름으로 옮겨 companion 진행상황·스프라이트 캐시·스냅샷을 보존한다(신규 폴더 없을 때만).
-    private static func migrateLegacyStorageIfNeeded() {
-        let fm = FileManager.default
-        let base = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        let old = base.appendingPathComponent("TokenMac")
-        let new = base.appendingPathComponent("PokeTokenBar")
-        guard fm.fileExists(atPath: old.path), !fm.fileExists(atPath: new.path) else { return }
-        try? fm.moveItem(at: old, to: new)
+    /// `PTB_STATE_DIR` 실행(개발·QA)은 그 폴더 내용으로만 시작한다 — 실제 세이브를 끌어오지 않는다.
+    private static func importUpstreamSaveIfNeeded() {
+        guard AppStatePaths.overrideDirectory() == nil else { return }
+        let outcome = UpstreamSaveImport.runIfNeeded(
+            from: AppStatePaths.upstreamDirectory(applicationSupport: AppStatePaths.applicationSupportDirectory()),
+            to: AppStatePaths.directory())
+        if outcome != .alreadyHasState { AppLog.write("upstream save import: \(outcome)") }
     }
 
     /// 스프라이트가 아직 없을 때(부화 전/로딩 중) 메뉴바에 표시하는 알 글리프.

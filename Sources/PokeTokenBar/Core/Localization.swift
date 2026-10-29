@@ -193,6 +193,26 @@ struct L {
     var tokenCacheRead: String { t("캐시 읽기", "Cache read", "キャッシュ読込", "Lectura caché", "Lecture cache", "Leitura cache", "Cache lesen", "Чтение кэша") }
     var website: String { t("웹사이트", "Website", "ウェブサイト", "Sitio web", "Site web", "Site", "Website", "Сайт") }
     var sponsor: String { t("후원", "Sponsor", "支援", "Apoyar", "Soutenir", "Apoiar", "Unterstützen", "Поддержать") }
+    var basedOnUpstream: String { t("원본 PokeTokenBar", "Original PokeTokenBar", "元の PokeTokenBar", "PokeTokenBar original", "PokeTokenBar d’origine", "PokeTokenBar original", "Original-PokeTokenBar", "Оригинальный PokeTokenBar") }
+    /// README 의 "라이선스와 고지"와 같은 내용. 문구를 바꾸면 README 도 함께 바꾼다.
+    var forkDisclaimer: String { t(
+        "PokeTokenBar Battle은 PokeTokenBar를 바탕으로 한 비공식·비상업 팬 프로젝트입니다. Nintendo, Game Freak, Creatures Inc., The Pokémon Company와 관련이 없으며 이들의 승인·후원을 받지 않았습니다. Pokémon과 관련 이름·캐릭터·이미지는 각 권리자의 상표이자 저작물입니다.",
+        "PokeTokenBar Battle is an unofficial, non-commercial fan project based on PokeTokenBar. It is not affiliated with, endorsed, sponsored, or approved by Nintendo, Game Freak, Creatures Inc., or The Pokémon Company. Pokémon and all related names, characters, and imagery are trademarks and copyrights of their respective owners.",
+        "PokeTokenBar Battle は PokeTokenBar をもとにした非公式・非営利のファンプロジェクトです。任天堂、ゲームフリーク、クリーチャーズ、株式会社ポケモンとは関係がなく、承認や支援も受けていません。ポケモンおよび関連する名称・キャラクター・画像は各権利者の商標・著作物です。",
+        "PokeTokenBar Battle es un proyecto de fans no oficial y sin fines comerciales basado en PokeTokenBar. No está afiliado, respaldado, patrocinado ni aprobado por Nintendo, Game Freak, Creatures Inc. ni The Pokémon Company. Pokémon y todos los nombres, personajes e imágenes relacionados son marcas y obras de sus respectivos titulares.",
+        "PokeTokenBar Battle est un projet de fans non officiel et non commercial basé sur PokeTokenBar. Il n’est ni affilié, ni approuvé, ni sponsorisé par Nintendo, Game Freak, Creatures Inc. ou The Pokémon Company. Pokémon ainsi que les noms, personnages et images associés sont des marques et des œuvres de leurs détenteurs respectifs.",
+        "PokeTokenBar Battle é um projeto de fãs não oficial e sem fins comerciais baseado no PokeTokenBar. Não é afiliado, endossado, patrocinado nem aprovado pela Nintendo, Game Freak, Creatures Inc. ou The Pokémon Company. Pokémon e todos os nomes, personagens e imagens relacionados são marcas e obras de seus respectivos titulares.",
+        "PokeTokenBar Battle ist ein inoffizielles, nicht kommerzielles Fanprojekt auf Basis von PokeTokenBar. Es steht in keiner Verbindung zu Nintendo, Game Freak, Creatures Inc. oder The Pokémon Company und wird von ihnen weder unterstützt noch genehmigt. Pokémon sowie alle zugehörigen Namen, Figuren und Bilder sind Marken und Werke ihrer jeweiligen Inhaber.",
+        "PokeTokenBar Battle — неофициальный некоммерческий фанатский проект на основе PokeTokenBar. Он не связан с Nintendo, Game Freak, Creatures Inc. и The Pokémon Company и не одобрен и не спонсируется ими. Pokémon и все связанные названия, персонажи и изображения — товарные знаки и объекты авторского права их владельцев.") }
+    var thirdPartyNotice: String { t(
+        "배틀 엔진: Pokémon Showdown 시뮬레이터(@pkmn/sim, MIT 라이선스). 원본 앱: PokeTokenBar(MIT 라이선스).",
+        "Battle engine: Pokémon Showdown simulator (@pkmn/sim, MIT License). Original app: PokeTokenBar (MIT License).",
+        "バトルエンジン: Pokémon Showdown シミュレーター(@pkmn/sim、MIT ライセンス)。元のアプリ: PokeTokenBar(MIT ライセンス)。",
+        "Motor de combate: simulador de Pokémon Showdown (@pkmn/sim, licencia MIT). App original: PokeTokenBar (licencia MIT).",
+        "Moteur de combat : simulateur Pokémon Showdown (@pkmn/sim, licence MIT). Application d’origine : PokeTokenBar (licence MIT).",
+        "Motor de batalha: simulador do Pokémon Showdown (@pkmn/sim, licença MIT). App original: PokeTokenBar (licença MIT).",
+        "Kampf-Engine: Pokémon-Showdown-Simulator (@pkmn/sim, MIT-Lizenz). Original-App: PokeTokenBar (MIT-Lizenz).",
+        "Боевой движок: симулятор Pokémon Showdown (@pkmn/sim, лицензия MIT). Исходное приложение: PokeTokenBar (лицензия MIT).") }
     var evolutionScrollPrevious: String { t("이전 진화 보기", "Show previous evolutions", "前の進化を見る", "Ver evoluciones anteriores", "Voir les évolutions précédentes", "Ver evoluções anteriores", "Vorherige Entwicklungen anzeigen", "Показать предыдущие эволюции") }
     var evolutionScrollNext: String { t("다음 진화 보기", "Show next evolutions", "次の進化を見る", "Ver evoluciones siguientes", "Voir les évolutions suivantes", "Ver próximas evoluções", "Nächste Entwicklungen anzeigen", "Показать следующие эволюции") }
 

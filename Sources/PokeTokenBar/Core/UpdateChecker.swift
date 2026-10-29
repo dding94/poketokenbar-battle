@@ -44,7 +44,7 @@ final class UpdateChecker {
             ?? (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String) ?? "0"
         self.clock = clock
         self.defaults = defaults
-        self.fetchLatest = fetchLatest ?? { await Self.liveLatestRelease(repo: "chattymin/PokeTokenBar") }
+        self.fetchLatest = fetchLatest ?? { await Self.liveLatestRelease(repo: AppIdentity.releaseRepo) }
     }
 
     var settingsNotice: SettingsNotice {
@@ -177,12 +177,13 @@ final class UpdateChecker {
 
     // MARK: brew 적용 (nonisolated — 블로킹 Process 는 detached 에서)
 
-    /// poke-token-bar 가 brew cask 로 설치돼 있으면 brew 경로 반환, 아니면 nil(→ 릴리스 페이지 폴백).
+    /// 포크 cask(`AppIdentity.caskName`)가 brew 로 설치돼 있으면 brew 경로 반환, 아니면 nil(→ 릴리스 페이지 폴백).
+    /// 원본 cask 를 보면 "업데이트"가 원본 앱 업그레이드가 된다.
     private nonisolated static func brewCaskPath() -> String? {
         guard let brew = BinaryLocator.resolve("brew", staticPaths: [
             "/opt/homebrew/bin/brew", "/usr/local/bin/brew",
         ]) else { return nil }
-        return run(brew, ["list", "--cask", "poke-token-bar"], timeout: 20) ? brew : nil
+        return run(brew, ["list", "--cask", AppIdentity.caskName], timeout: 20) ? brew : nil
     }
 
     private nonisolated static func run(_ binary: String, _ args: [String], timeout: TimeInterval) -> Bool {
@@ -210,12 +211,12 @@ final class UpdateChecker {
     nonisolated static let detachedUpgradeScript = """
     for i in $(seq 1 40); do kill -0 "$3" 2>/dev/null || break; sleep 0.5; done
     export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
-    ( "$1" update; "$1" upgrade --cask poke-token-bar ) &
+    ( "$1" update; "$1" upgrade --cask \(AppIdentity.caskName) ) &
     brew_pid=$!
     for i in $(seq 1 300); do kill -0 "$brew_pid" 2>/dev/null || break; sleep 1; done
     kill "$brew_pid" 2>/dev/null
     for i in $(seq 1 15); do
-      launchctl kickstart -k "gui/$(id -u)/io.github.chattymin.poketokenbar.login" 2>/dev/null && break
+      launchctl kickstart -k "gui/$(id -u)/\(AppIdentity.loginAgentLabel)" 2>/dev/null && break
       open "$2" 2>/dev/null && break
       sleep 1
     done

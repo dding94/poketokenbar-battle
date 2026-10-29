@@ -50,3 +50,6 @@ server/dist/
 .env.*
 !.env.example
 coverage/
+
+# Stray coverage output from running a test binary directly
+*.profraw
