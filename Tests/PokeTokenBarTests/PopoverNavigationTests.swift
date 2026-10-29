@@ -200,8 +200,10 @@ final class PopoverPracticeRoutingTests: XCTestCase {
             codexLimitsProvider: PracticeRouteCodex(), antigravityLimitsProvider: PracticeRouteAntigravity(),
             cursorLimitsProvider: PracticeRouteCursor(), statusProvider: PracticeRouteStatus(),
             autoRefresh: false, defaults: defaults)
+        // The selection screen searches wild opponents on appear; an offline stub keeps the test off PokéAPI.
         let practice = PracticeSession(engineURL: PracticeScreenRenderingTests.engineURL, clock: { 0 },
-                                       drivesAutomatically: false)
+                                       drivesAutomatically: false,
+                                       wildSource: PracticeWildSource(provider: NoWildData(), details: NoWildData()))
         let nav = PopoverNavigation()
         nav.showingPractice = true
 
@@ -285,4 +287,12 @@ final class RepresentativeLocalizationTests: XCTestCase {
             XCTAssertFalse(l.representativeBadge.isEmpty)
         }
     }
+}
+
+/// No PokéAPI in tests: every wild lookup fails as if offline with nothing cached.
+private struct NoWildData: PokeProviding, PokemonDetailProviding {
+    func line(baseSpeciesID: Int) async throws -> EvoLine { throw URLError(.notConnectedToInternet) }
+    func baseSpeciesIndex() async throws -> [BaseSpecies] { throw URLError(.notConnectedToInternet) }
+    func baseSpecies(id: Int) async throws -> BaseSpecies? { throw URLError(.notConnectedToInternet) }
+    func pokemonDetails(speciesID: Int) async throws -> PokemonDetails { throw URLError(.notConnectedToInternet) }
 }

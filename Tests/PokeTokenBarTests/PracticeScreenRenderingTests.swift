@@ -177,7 +177,10 @@ final class PracticeScreenRenderingTests: XCTestCase {
         XCTAssertEqual(session.roster?.eligible.count, 2, "the synthetic save holds two eligible Pokémon")
         XCTAssertNil(session.battle)
         let host = host(session)
-        let needles = ["Lv.50", "Start battle", "30", "200"]   // level, CTA, manual timer, rules caption
+        // The level sits next to a Korean name that en-US Vision mangles ("Lv.50" read as "#5450"), so the level
+        // is asserted by data and OCR only checks that a level label renders.
+        XCTAssertEqual(session.player?.snapshot?.set.level, 50)
+        let needles = ["Lv.", "Start battle", "30", "200"]   // level label, CTA, manual timer, rules caption
         let (text, bitmap) = try await waitForText(needles, in: host)
         assertRendered(needles, in: text)
         assertPopoverSized(host)
@@ -556,8 +559,10 @@ final class PracticeScreenRenderingTests: XCTestCase {
             XCTAssertTrue(Self.isWild(candidate), "\(candidate.name) must be marked wild")
             let level = candidate.snapshot?.set.level ?? 0
             XCTAssertTrue((47...53).contains(level), "\(candidate.name) Lv.\(level) is outside Lv.47–53")
-            XCTAssertTrue([1, 2, 3].contains(candidate.snapshot?.set.speciesNum ?? 0), "only the stubbed line hatches")
+            XCTAssertTrue((1...9).contains(candidate.snapshot?.set.speciesNum ?? 0), "only the stubbed lines hatch")
         }
+        XCTAssertEqual(Set(session.wildCandidates.compactMap { $0.snapshot?.set.speciesNum }).count, 3,
+                       "one wild opponent per species")
         XCTAssertFalse(session.roster?.candidates.contains { Self.isWild($0) } ?? true,
                        "wild opponents stay out of the roster")
 
@@ -616,42 +621,59 @@ final class PracticeScreenRenderingTests: XCTestCase {
 
 /// Bulbasaur's line with Black 2/White 2 level-up moves and abilities, so the hatch rule picks base #1 and the
 /// generator builds legal sets at any stage without the network.
+/// Three starter lines (distinct species, so the generator's one-per-species rule can fill three rows) with
+/// plausible B2W2 level-up moves the engine accepts.
 private struct WildLineProvider: PokeProviding, PokemonDetailProviding {
-    func line(baseSpeciesID: Int) async throws -> EvoLine {
-        EvoLine(baseID: 1,
-                tree: EvoNode(speciesID: 1, children: [EvoNode(speciesID: 2, children: [EvoNode(speciesID: 3, children: [])])]),
-                rarity: .rare,
-                names: [1: ["en": "Bulbasaur", "ko": "이상해씨"], 2: ["en": "Ivysaur", "ko": "이상해풀"],
-                        3: ["en": "Venusaur", "ko": "이상해꽃"]])
+    private struct Mon {
+        let name: String, ko: String, types: [String], stats: [Int], abilities: [String], moves: [(String, Int)]
     }
-    func baseSpeciesIndex() async throws -> [BaseSpecies] { [BaseSpecies(id: 1, captureRate: 45)] }
-    func baseSpecies(id: Int) async throws -> BaseSpecies? { id == 1 ? BaseSpecies(id: 1, captureRate: 45) : nil }
+    private static let lines: [Int: [Int]] = [1: [1, 2, 3], 4: [4, 5, 6], 7: [7, 8, 9]]
+    private static let grass: [(String, Int)] = [("tackle", 1), ("growl", 3), ("leech-seed", 7), ("vine-whip", 9),
+        ("poison-powder", 13), ("sleep-powder", 13), ("take-down", 15), ("razor-leaf", 19), ("sweet-scent", 21),
+        ("growth", 25), ("double-edge", 27), ("worry-seed", 31), ("synthesis", 33), ("seed-bomb", 37), ("solar-beam", 44)]
+    private static let fire: [(String, Int)] = [("scratch", 1), ("growl", 1), ("ember", 7), ("smokescreen", 10),
+        ("scary-face", 19), ("fire-fang", 25), ("slash", 34), ("flamethrower", 37), ("fire-spin", 43), ("inferno", 46)]
+    private static let water: [(String, Int)] = [("tackle", 1), ("tail-whip", 4), ("water-gun", 7), ("withdraw", 10),
+        ("bite", 16), ("rapid-spin", 19), ("protect", 22), ("water-pulse", 25), ("aqua-tail", 28),
+        ("iron-defense", 34), ("rain-dance", 37), ("hydro-pump", 40)]
+    private static let mons: [Int: Mon] = [
+        1: Mon(name: "bulbasaur", ko: "이상해씨", types: ["grass", "poison"], stats: [45, 49, 49, 65, 65, 45],
+               abilities: ["overgrow", "chlorophyll"], moves: grass),
+        2: Mon(name: "ivysaur", ko: "이상해풀", types: ["grass", "poison"], stats: [60, 62, 63, 80, 80, 60],
+               abilities: ["overgrow", "chlorophyll"], moves: grass),
+        3: Mon(name: "venusaur", ko: "이상해꽃", types: ["grass", "poison"], stats: [80, 82, 83, 100, 100, 80],
+               abilities: ["overgrow", "chlorophyll"], moves: grass),
+        4: Mon(name: "charmander", ko: "파이리", types: ["fire"], stats: [39, 52, 43, 60, 50, 65],
+               abilities: ["blaze", "solar-power"], moves: fire),
+        5: Mon(name: "charmeleon", ko: "리자드", types: ["fire"], stats: [58, 64, 58, 80, 65, 80],
+               abilities: ["blaze", "solar-power"], moves: fire),
+        6: Mon(name: "charizard", ko: "리자몽", types: ["fire", "flying"], stats: [78, 84, 78, 109, 85, 100],
+               abilities: ["blaze", "solar-power"], moves: fire),
+        7: Mon(name: "squirtle", ko: "꼬부기", types: ["water"], stats: [44, 48, 65, 50, 64, 43],
+               abilities: ["torrent", "rain-dish"], moves: water),
+        8: Mon(name: "wartortle", ko: "어니부기", types: ["water"], stats: [59, 63, 80, 65, 80, 58],
+               abilities: ["torrent", "rain-dish"], moves: water),
+        9: Mon(name: "blastoise", ko: "거북왕", types: ["water"], stats: [79, 83, 100, 85, 105, 78],
+               abilities: ["torrent", "rain-dish"], moves: water),
+    ]
+
+    func line(baseSpeciesID: Int) async throws -> EvoLine {
+        guard let ids = Self.lines[baseSpeciesID] else { throw URLError(.fileDoesNotExist) }
+        let tree = EvoNode(speciesID: ids[0], children: [EvoNode(speciesID: ids[1], children: [EvoNode(speciesID: ids[2], children: [])])])
+        let names = Dictionary(uniqueKeysWithValues: ids.map { id in (id, ["en": Self.mons[id]!.name.capitalized, "ko": Self.mons[id]!.ko]) })
+        return EvoLine(baseID: ids[0], tree: tree, rarity: .rare, names: names)
+    }
+    func baseSpeciesIndex() async throws -> [BaseSpecies] { [1, 4, 7].map { BaseSpecies(id: $0, captureRate: 45) } }
+    func baseSpecies(id: Int) async throws -> BaseSpecies? { Self.lines[id] == nil ? nil : BaseSpecies(id: id, captureRate: 45) }
     func pokemonDetails(speciesID: Int) async throws -> PokemonDetails {
-        let name: String, stats: [Int], moves: [(String, Int)]
-        switch speciesID {
-        case 2:
-            name = "ivysaur"; stats = [60, 62, 63, 80, 80, 60]
-            moves = [("tackle", 1), ("growl", 1), ("leech-seed", 1), ("vine-whip", 9), ("poison-powder", 13),
-                     ("sleep-powder", 13), ("take-down", 15), ("razor-leaf", 20), ("sweet-scent", 23), ("growth", 28),
-                     ("double-edge", 31), ("worry-seed", 36), ("synthesis", 39), ("solar-beam", 44)]
-        case 3:
-            name = "venusaur"; stats = [80, 82, 83, 100, 100, 80]
-            moves = [("tackle", 1), ("growl", 1), ("leech-seed", 1), ("vine-whip", 1), ("poison-powder", 13),
-                     ("sleep-powder", 13), ("take-down", 15), ("razor-leaf", 20), ("sweet-scent", 23), ("growth", 28),
-                     ("petal-dance", 32), ("double-edge", 39), ("worry-seed", 45), ("synthesis", 50), ("solar-beam", 53)]
-        default:
-            name = "bulbasaur"; stats = [45, 49, 49, 65, 65, 45]
-            moves = [("tackle", 1), ("growl", 3), ("leech-seed", 7), ("vine-whip", 9), ("poison-powder", 13),
-                     ("sleep-powder", 13), ("take-down", 15), ("razor-leaf", 19), ("sweet-scent", 21), ("growth", 25),
-                     ("double-edge", 27), ("worry-seed", 31), ("synthesis", 33), ("seed-bomb", 37)]
-        }
+        guard let mon = Self.mons[speciesID] else { throw URLError(.fileDoesNotExist) }
         let keys = ["hp", "attack", "defense", "special-attack", "special-defense", "speed"]
         return PokemonDetails(
-            speciesID: speciesID, name: name, height: 7, weight: 69, baseExperience: 64, genderRate: 1,
-            types: ["grass", "poison"], baseStats: Dictionary(uniqueKeysWithValues: zip(keys, stats)),
-            abilities: [PokemonAbilityOption(name: "overgrow", slot: 1, isHidden: false),
-                        PokemonAbilityOption(name: "chlorophyll", slot: 3, isHidden: true)],
-            moves: moves.map { PokemonMoveOption(name: $0.0, learnMethods: [PokemonMoveLearnMethod(method: "level-up", level: $0.1)]) })
+            speciesID: speciesID, name: mon.name, height: 7, weight: 69, baseExperience: 64, genderRate: 1,
+            types: mon.types, baseStats: Dictionary(uniqueKeysWithValues: zip(keys, mon.stats)),
+            abilities: [PokemonAbilityOption(name: mon.abilities[0], slot: 1, isHidden: false),
+                        PokemonAbilityOption(name: mon.abilities[1], slot: 3, isHidden: true)],
+            moves: mon.moves.map { PokemonMoveOption(name: $0.0, learnMethods: [PokemonMoveLearnMethod(method: "level-up", level: $0.1)]) })
     }
 }
 
