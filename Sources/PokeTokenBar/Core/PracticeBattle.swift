@@ -95,6 +95,10 @@ final class PracticeBattle {
     enum Mode: String, CaseIterable { case manual, automatic }
     enum Phase: Equatable { case ready, running, finished, failed, cancelled }
     private(set) var phase: Phase = .ready
+    /// The pair `start` was given. The selection may change while the battle is on screen (a wild search
+    /// replacing its batch), so the battle and result screens read these, never the selection.
+    private(set) var player: PracticeCandidate?
+    private(set) var opponent: PracticeCandidate?
     private(set) var view: BattleView?
     private(set) var request = BattleRequest(kind: "none", moves: [])
     private(set) var result: BattleResult?
@@ -121,6 +125,7 @@ final class PracticeBattle {
     func start(player: PracticeCandidate, opponent: PracticeCandidate, mode: Mode,
                seed: [UInt32] = (0..<4).map { _ in UInt32.random(in: 0...65535) }) {
         release()
+        self.player = player; self.opponent = opponent
         view = nil; result = nil; messages = []; events = []; parser = PracticeEventParser()
         notice = nil; remainingSeconds = 30
         request = BattleRequest(kind: "none", moves: []); self.mode = mode
