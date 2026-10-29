@@ -10,6 +10,15 @@ final class PracticeWordingTests: XCTestCase {
         XCTAssertEqual(PracticeCalloutTone(.boost(.player, stat: "spe", stages: 0)), .muted)
     }
 
+    /// Reopening the popover before the first move rebuilds the board; the splash must not play again.
+    func testVersusSplashPlaysOncePerBattle() {
+        XCTAssertTrue(PracticeBattleBoard.splashDue(phase: .running, turn: 1, introShown: false, played: false))
+        XCTAssertFalse(PracticeBattleBoard.splashDue(phase: .running, turn: 1, introShown: true, played: false))
+        XCTAssertFalse(PracticeBattleBoard.splashDue(phase: .running, turn: 1, introShown: false, played: true))
+        XCTAssertFalse(PracticeBattleBoard.splashDue(phase: .running, turn: 2, introShown: false, played: false))
+        XCTAssertFalse(PracticeBattleBoard.splashDue(phase: .finished, turn: 1, introShown: false, played: false))
+    }
+
     func testBoostArrowsFollowTheStageSign() {
         let l = L(.ko)
         XCTAssertEqual(l.practiceBoost(stat: "atk", stages: 1), "공격 ↑")

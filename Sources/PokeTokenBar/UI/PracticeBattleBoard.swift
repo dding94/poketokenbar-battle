@@ -99,10 +99,17 @@ struct PracticeBattleBoard: View {
             .allowsHitTesting(false)
     }
 
-    /// Under a second, once per battle: only before anything has been played.
+    /// Under a second, once per battle, before anything has played. The playback remembers it: reopening
+    /// the popover rebuilds this view and would otherwise replay the splash.
+    static func splashDue(phase: PracticeBattle.Phase, turn: Int?, introShown: Bool, played: Bool) -> Bool {
+        phase == .running && turn == 1 && !introShown && !played
+    }
+
     private func playSplash() async {
-        guard battle.phase == .running, battle.view?.turn == 1,
-              playback?.history.isEmpty ?? true, playback?.beat == nil else { return }
+        guard let playback,
+              Self.splashDue(phase: battle.phase, turn: battle.view?.turn, introShown: playback.introShown,
+                             played: !playback.history.isEmpty || playback.beat != nil) else { return }
+        playback.introShown = true
         withAnimation(.spring(duration: 0.25, bounce: 0.3)) { splash = true }
         try? await Task.sleep(for: .milliseconds(450))
         withAnimation(.easeIn(duration: 0.25)) { splash = false }
