@@ -240,7 +240,12 @@ final class PracticeWindowController: NSObject, NSWindowDelegate {
         super.init()
     }
     func open(state: CompanionState, activeName: String?) {
-        if let window { window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true); return }
+        if let window {
+            if window.isMiniaturized { window.deminiaturize(nil) }
+            window.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
         do {
             let engine = try BattleEngine(url: engineURL)
             let roster = PracticeRoster(state: state, activeName: activeName, engine: engine)

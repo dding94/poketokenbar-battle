@@ -7,3 +7,6 @@ BIN="$BIN_PATH/PokeTokenBarPackageTests.xctest/Contents/MacOS/PokeTokenBarPackag
 PROF="$BIN_PATH/codecov/default.profdata"
 xcrun llvm-cov show "$BIN" -instr-profile="$PROF" --show-regions --show-line-counts-or-regions \
   Sources/PokeTokenBar/Core/BattleEngine.swift Sources/PokeTokenBar/Core/BattleSnapshot.swift Sources/PokeTokenBar/Core/PracticeBattle.swift Sources/PokeTokenBar/Core/PracticeText.swift
+xcrun llvm-cov show "$BIN" -instr-profile="$PROF" --show-regions --show-line-counts-or-regions \
+  --name-regex='PracticeWindowController|applicationShouldHandleReopen' \
+  Sources/PokeTokenBar/PokeTokenBarApp.swift Sources/PokeTokenBar/UI/PracticeBattleView.swift
