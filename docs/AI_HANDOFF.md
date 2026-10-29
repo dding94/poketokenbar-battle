@@ -1,8 +1,8 @@
 # 다음 AI를 위한 작업 인계
 
-최종 갱신: 2026-10-29. **PR 00의 식별·저장 경로 격리를 CI와 실제 설치에서 검증했다. 최초 설치에서 발견한 캐시·로그 누락은 회귀 테스트 RED 후 수정했고 수정본으로 교체했다. 다음은 PR 01이다. 배틀 기능은 아직 구현하지 않았다.**
+최종 갱신: 2026-10-29. **PR 00 격리·설치 검증과 PR 01 엔진 결정성 게이트를 완료했다. 다음은 PR 02 → 03 → 03A다. 배틀 화면은 아직 없다.**
 
-## 진행 중인 작업 (2026-10-29 기준, PR 00 검증 완료 → PR 01 착수)
+## 진행 중인 작업 (2026-10-29 기준, PR 01 검증 완료 → PR 02 착수)
 
 - 브랜치: `feat/local-practice-battle` (`main` 5e9af78에서 분기). 인수 시 모든 변경은 미커밋이었다. 사용자 승인으로 문서(`372eba0`)·PR 00(`c04769a`)·프로브(`0ddc584`)를 나누어 커밋·푸시했고 CI 수정은 `f1dad46`, `cc0b9fe`다. 이후 사용자 승인으로 별도 포크 앱을 설치·실행했으나 아래 격리 누락을 발견해 종료했다. 배포·공개 전환은 하지 않았다.
 - 문서 개정: `docs/BATTLE_PLAN.md`(새 구조, PR 00~13 + PR 03A, 부록 A), `docs/AI_HANDOFF.md`, `AGENTS.md`, `README.md`(고지), `CLAUDE.md`(첫 단락 경고 한 줄).
@@ -17,7 +17,7 @@
   - `scripts/battle.entitlements`(신규), `scripts/release.sh`(포크 값, `PTB_FORK_RELEASE_READY=1` 없으면 중단, `PTB_EXPECTED_LEAF` 필수), `scripts/create-signing-cert.sh`(인증서 이름).
   - 테스트: `Tests/PokeTokenBarTests/AppIdentityTests.swift`(신규), `PokeTokenBarTests.swift`의 SupportMail 테스트가 수신 주소를 명시하도록 수정.
   - `default.profraw` 삭제, `.gitignore`에 `*.profraw`.
-- `engine/`: `@pkmn/sim` 0.10.12·esbuild 0.28.2 고정 `package.json`·`package-lock.json`, 사전 실측 프로토타입 `engine/probe/`, `engine/README.md`. **PR 01의 정식 어댑터·번들·테스트는 아직 없다.** (중단한 작업이 남긴 것은 설치뿐이었다.)
+- `engine/`: `@pkmn/sim` 0.10.12·esbuild 0.28.2 고정 `package.json`·`package-lock.json`, 사전 실측 프로토타입 `engine/probe/`, `engine/README.md`. 정식 어댑터·번들·계약 및 결정성 테스트는 아래 PR 01 기록대로 구현했다. (중단한 작업이 남긴 것은 설치뿐이었다.)
 
 검증 상태:
 
@@ -49,9 +49,18 @@
 
 이어서 할 일:
 
-1. PR 01을 01A(계약·검증·어댑터), 01B(코퍼스·기술/폼 대조·Swift 래퍼·CI)로 나눠 진행한다. 각 단계에서 계약 테스트부터 실행한다.
+1. PR 02의 스냅샷·개체 매핑을 TDD로 구현한다. 엔진의 입력 검사와 공개 능력치 계산 경계를 재사용한다.
 2. PR 02 → PR 03 → PR 03A(로컬 연습전) 순서로 진행한다. 설치·실행 및 계속 진행은 사용자가 승인했다.
 3. 사용자에게 연습전 시험 방법을 안내하고 멈춘다. 공개 전환은 필요하지 않아 private를 유지한다.
+
+### PR 01 완료 증거
+
+- `npm test` 종료 0: 계약 17건 통과·실패 0·skip 0. 고정 승자/정규화 해시, 입력 거절, 정보 숨김, replay를 검사한다.
+- `npm run corpus` 종료 0: 무작위 2,000 + 장기전 200 = 2,200판. 로컬 macOS 26.5, [macOS 15 CI 40806393060](https://github.com/dding94/poketokenbar-battle/actions/runs/40806393060)(`958ea50`의 해당 job 성공), [macOS 14 CI 40807196393](https://github.com/dding94/poketokenbar-battle/actions/runs/40807196393)(`272df9e`) 각각 Node/JSC 불일치 0·재생 실패 0·상태 복원 실패 0, 200턴 무승부 200건. 두 CI의 엔진 번들은 같은 해시다.
+- `swift test --filter BattleEngineTests` 각 CI 종료 0: macOS 14·15 각각 4건 통과·실패 0·skip 0. 이전 RED 및 도구체인 실패 이력은 아래 보존했다. 로컬 `swift build` 종료 0(3.50초); 로컬 XCTest는 여전히 사용할 수 없다.
+- `npm run compatibility` 종료 0(로컬 및 두 CI): PokéAPI 고정 참조와 649종 메타데이터 차이 0, 앱 폼 106개 일치, BW2 레벨업 541개를 전체/제품 번들 모두 실제 호출. 54개 조건 불충족 기술은 효과 발동 성공으로 보고하지 않는다. 모든 조건별 효과 조합·두 맥 네트워크 경기는 미검증이다.
+- 학습 데이터 제거 전/후 2,200판 결과 동일. `keepNames: true`를 고정한다. 제품 번들 2,811,602바이트, SHA-256 `ecd252b0b41f4fb5c3734656777f6f67f001adec2549467d356af19beb49ff36`. Swift 상수와 번들 해시를 함께 생성하며 변조 번들은 실행 전에 거절한다.
+- 엔진 전용 CI에서는 일반 앱 전체 게이트/비밀값 job을 scope에 따라 실행하지 않았다. 해당 skip은 앱 전체 회귀 통과를 의미하지 않는다. PR 00 전체 게이트 근거는 별도이며 다음 앱 변경 후 다시 실행한다.
 
 ### PR 01A 진행 (2026-10-29)
 
@@ -115,7 +124,7 @@
 
 ## 아직 없는 것 / 검증하지 않은 것
 
-- PR 01의 엔진 어댑터·번들·테스트, `server/`, Cloudflare 리소스·자격 증명·배포 URL.
+- `server/`, Cloudflare 리소스·자격 증명·배포 URL.
 - 배틀 화면(로컬 연습전 포함)·락스텝 프로토콜·소유권 이전·스타터 지급·그룹 화면.
 - CI의 skip 16건 및 macOS 15 이외 환경에서의 XCTest 검증.
 - 저장소 public 전환 및 앱 안 고지의 실제 화면 확인(고지 코드·문자열 테스트는 완료).
