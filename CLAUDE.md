@@ -2,7 +2,7 @@
 
 먼저 [AGENTS.md](AGENTS.md), [docs/AI_HANDOFF.md](docs/AI_HANDOFF.md), [docs/BATTLE_PLAN.md](docs/BATTLE_PLAN.md)를 읽는다.
 
-이 저장소는 `dding94/poketokenbar-battle`이다. 아래 내용은 기준 앱의 개발 규칙이며, 포크의 제품 범위·현재 진행 상태·Git 원격·배포 대상은 위 문서를 따른다. 원본 릴리스 스크립트와 앱 업데이트 주소는 아직 원본 저장소를 가리키므로 포크용 수정·검증 전 실행하지 않는다. `scripts/build-app.sh`는 설치된 원본 `/Applications/PokeTokenBar.app`을 지우고 같은 번들 ID·저장 경로로 덮어쓰므로 PR 00(포크 식별·격리) 전에는 실행하지 않는다.
+이 저장소는 `dding94/poketokenbar-battle`이다. 아래 내용은 기준 앱의 개발 규칙이며, 포크의 제품 범위·현재 진행 상태·Git 원격·배포 대상은 위 문서를 따른다. 현재 브랜치의 빌드·저장·업데이트 경로는 포크 전용으로 분리했다. 원본/main 스크립트는 원본 앱을 덮어쓰므로 실행하지 않는다. 설치 승인·검증 상태는 `docs/AI_HANDOFF.md`를 확인한다.
 
 ---
 

@@ -3,6 +3,12 @@ name: CI
 # Private project bootstrap: enable automatic runs only after reviewing Actions usage.
 on:
   workflow_dispatch:
+    inputs:
+      scope:
+        description: Validation scope
+        type: choice
+        default: app
+        options: [app, engine, engine-contract]
 
 permissions:
   contents: read
@@ -14,6 +20,7 @@ concurrency:
 
 jobs:
   build-test:
+    if: ${{ inputs.scope == 'app' }}
     name: build-test
     # macos-15 ships Xcode 16 / Swift 6, which Package.swift requires
     # (swift-tools-version: 6.0, platform macOS 14).
@@ -52,6 +59,7 @@ jobs:
           retention-days: 1
 
   secret-scan:
+    if: ${{ inputs.scope == 'app' }}
     name: secret-scan
     runs-on: ubuntu-latest
     timeout-minutes: 3
@@ -65,3 +73,29 @@ jobs:
         uses: gitleaks/gitleaks-action@v3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  determinism:
+    if: ${{ inputs.scope != 'app' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-14, macos-15]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.14.0'
+      - name: Isolate test state
+        run: echo "PTB_STATE_DIR=$RUNNER_TEMP/ptb-engine-state" >> "$GITHUB_ENV"
+      - name: Swift JavaScriptCore boundary
+        run: swift test --filter BattleEngineTests
+      - name: Install pinned dependencies
+        if: ${{ inputs.scope == 'engine' }}
+        working-directory: engine
+        run: npm ci --ignore-scripts
+      - name: Engine contracts and deterministic corpus
+        if: ${{ inputs.scope == 'engine' }}
+        working-directory: engine
+        run: npm test && npm run corpus
