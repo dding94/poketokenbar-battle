@@ -618,6 +618,20 @@ read_when:
   확인하는 단계가 없었다. `swift build --arch arm64 --arch x86_64` 는 xcbuild(Xcode)가 필요해 CLT 환경에서
   실패하므로, 아키텍처별 빌드 + `lipo -create` 로 합친다. 회귀 가드: `build-app.sh` 의 `lipo -verify_arch`
   와 release.sh 4/8 의 `lipo -verify_arch arm64 x86_64` 하드 게이트(릴리스는 `PTB_NATIVE_ARCH_ONLY` 금지).
+- **`swift test --filter` 의 대안 하나가 아무 테스트에도 맞지 않아도 단계는 성공한다.** 포크 PR 03B-4에서
+  CI 빠른 필터에 `PracticeWildTests` 를 넣었지만 실제 클래스는 `PracticeWildRulesTests`·`PracticeWildStoreOracleTests`·
+  `PracticeWildGeneratorTests`·`PracticeWildSessionTests` 였다. 새 테스트 네 클래스가 빠른 필터에서 한 번도 돌지 않았다.
+  **왜 못 걸렀나:** RED 확인이 "단계가 실패했는가"만 보고 "무엇이 실행됐는가"는 보지 않았다. 필터는 자유 문자열이라
+  검사하는 장치가 없었다. → 필터 단계는 출력을 남기고 `scripts/check-test-filter.sh "$FILTER" <log>` 로 대안마다
+  실행된 테스트가 1건 이상인지 확인한다(빌드 작업의 빠른 필터와 엔진 작업의 JavaScriptCore 경계 두 곳).
+  `run:` 은 `shell` 을 지정하지 않으면 pipefail 이 없으므로 `set -o pipefail` 을 함께 둔다.
+  결함 주입: `fb23ab8` GREEN 로그에 옛 대안을 넣으면 종료 1, 실제 필터는 245건으로 종료 0.
+- **작업이 `timeout-minutes` 를 넘으면 GitHub 는 "cancelled" 로 표시한다.** 같은 ref 의 새 실행이 앞 실행을
+  끊었을 때와 구분되지 않는다. 포크 GREEN `40847367673` 은 빠른 필터와 전체 게이트를 모두 통과한 뒤 마지막
+  단계에서 10분 제한에 걸렸다. **왜 못 걸렀나:** 10분은 작업이 약 5분이던 PR 00 때 정한 값이다. 이후 테스트가
+  1,562건에서 1,765건으로 늘었고, 같은 테스트도 러너에 따라 30~40% 느려지는데 예산을 다시 보지 않았다.
+  → 예산은 가장 느린 성공 실행의 약 1.5배로 두고 근거를 `ci.yml` 주석에 적는다(빌드 15분, 엔진 결정성 6분).
+  "cancelled" 를 보면 같은 ref 에 더 새 실행이 있는지와 단계별 시간을 먼저 읽고, 스위트를 추가할 때 예산을 다시 본다.
 
 ## 자격증명·Keychain
 
