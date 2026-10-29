@@ -43,7 +43,7 @@ jobs:
         run: swift --version
 
       - name: Fork isolation tests
-        run: swift test --filter "AppIdentityTests|SupportMailTests|UpdateCheckerTests|BattleEngineTests|BattleSnapshotTests|PracticeBattleTests|PracticeSessionTests|PracticeScreenRenderingTests|PracticeLaunchTests|PopoverNavigationTests|LocalizedUILiteralTests|ScrollerLaneTests|SwiftUIIsolationTests|LocalizationColumnTests|LocalizationInterpolationTests"
+        run: swift test --filter "AppIdentityTests|SupportMailTests|UpdateCheckerTests|BattleEngineTests|BattleSnapshotTests|PracticeBattleTests|PracticeSessionTests|PracticePlaybackTests|PracticeScreenRenderingTests|PracticeLaunchTests|PopoverNavigationTests|LocalizedUILiteralTests|ScrollerLaneTests|SwiftUIIsolationTests|LocalizationColumnTests|LocalizationInterpolationTests"
 
       # test-gate.sh runs `swift test --enable-code-coverage` and then enforces a
       # line-coverage floor on the logic-core files. It replaces a bare `swift test`:
@@ -101,7 +101,7 @@ jobs:
         run: sudo xcode-select -s /Applications/Xcode_16.2.app/Contents/Developer
       - name: Swift JavaScriptCore boundary
         run: |
-          swift test --enable-code-coverage --filter "BattleEngineTests|BattleSnapshotTests|PracticeBattleTests|PracticeSessionTests|PracticeScreenRenderingTests|LocalizedUILiteralTests|ScrollerLaneTests"
+          swift test --enable-code-coverage --filter "BattleEngineTests|BattleSnapshotTests|PracticeBattleTests|PracticeSessionTests|PracticePlaybackTests|PracticeScreenRenderingTests|LocalizedUILiteralTests|ScrollerLaneTests"
           ./scripts/battle-coverage.sh
       - name: Install pinned dependencies
         if: ${{ inputs.scope == 'engine' }}
