@@ -231,19 +231,25 @@ struct PracticeBattleView: View {
 final class PracticeWindowController: NSObject, NSWindowDelegate {
     static let shared = PracticeWindowController()
     private let l = L(.ko)
-    private var window: NSWindow?
-    private var model: PracticeBattle?
+    private(set) var window: NSWindow?
+    private(set) var model: PracticeBattle?
+    private let engineURL: URL?
+    private let artwork: Bool
+    init(engineURL: URL? = Bundle.main.url(forResource: "battle-engine", withExtension: "js"), artwork: Bool = true) {
+        self.engineURL = engineURL; self.artwork = artwork
+        super.init()
+    }
     func open(state: CompanionState, activeName: String?) {
         if let window { window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true); return }
         do {
-            let engine = try BattleEngine()
+            let engine = try BattleEngine(url: engineURL)
             let roster = PracticeRoster(state: state, activeName: activeName, engine: engine)
             let model = PracticeBattle(engine: engine)
             let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 760),
                                   styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
             window.title = l.practiceWindowTitle
             window.isReleasedWhenClosed = false; window.delegate = self
-            window.contentView = NSHostingView(rootView: PracticeBattleView(roster: roster, model: model))
+            window.contentView = NSHostingView(rootView: PracticeBattleView(roster: roster, model: model, artwork: artwork))
             window.minSize = NSSize(width: 850, height: 730)
             self.window = window; self.model = model
             window.center(); window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true)

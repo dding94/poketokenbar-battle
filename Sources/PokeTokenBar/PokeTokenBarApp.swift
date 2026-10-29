@@ -24,6 +24,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private var updater: UpdateChecker!
     private var floatingPet: FloatingPetController!
     private let navigation = PopoverNavigation()
+    var onOpenPractice: (() -> Void)?
 
     // 메뉴바 캐릭터 애니메이션 — 단일 타이머로 프레임 순환.
     // 프레임 = 이미 22px 로 합성된 이미지 + delay. egg/static 은 2프레임 bob, animated 는 GIF 실제 프레임.
@@ -85,6 +86,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         LoginItem.migrateFromLegacyLoginItemIfNeeded()   // 로그인아이템 → KeepAlive 에이전트(크래시 자동 재실행)
         store = UsageStore()
         companion = CompanionStore()
+        onOpenPractice = { [weak self] in
+            guard let self else { return }
+            PracticeWindowController.shared.open(state: self.companion.state, activeName: self.companion.displayName)
+        }
         Task { await companion.preparePokemonProfiles() }
         updater = UpdateChecker()
         store.localizationLanguage = companion.language   // 알림 현지화용 미러 시드
@@ -118,7 +123,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         observePowerState()
         applyState()
         if CommandLine.arguments.contains("--practice") {
-            PracticeWindowController.shared.open(state: companion.state, activeName: companion.displayName)
+            onOpenPractice?()
         }
     }
 
