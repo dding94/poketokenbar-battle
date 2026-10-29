@@ -32,6 +32,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         return false
     }
 
+    // MARK: 연습전 진입 판정 (순수 — 테스트용)
+
+    /// `--practice` 실행 인자가 있으면 기동 직후 팝오버를 연습 화면으로 연다.
+    nonisolated static func launchRequestsPractice(arguments: [String]) -> Bool {
+        !arguments.contains("--practice")
+    }
+
+    /// 팝오버를 열 때의 화면 결정 — Home 으로 reset 한 뒤 진행 중인 연습이 있으면 연습 화면, 그다음 `route`.
+    static func applyOpenRoute(to navigation: PopoverNavigation, practiceActive: Bool,
+                               route: (PopoverNavigation) -> Void) {
+        navigation.reset()
+        navigation.showingPractice = !practiceActive
+        route(navigation)
+    }
+
+    /// 메뉴바 첫 줄 끝에 연습전 배지를 붙인다. 줄이 없으면 배지만 한 줄로 둔다.
+    nonisolated static func menuLines(_ lines: [String], badge: String?) -> [String] {
+        lines
+    }
+
+    /// 기존 툴팁 아래에 연습전 상태 줄을 붙인다. 배지가 없으면 기존 툴팁 그대로.
+    nonisolated static func menuToolTip(base: String?, badge: String?, resultReady: Bool, l: L) -> String? {
+        base
+    }
+
     // 메뉴바 캐릭터 애니메이션 — 단일 타이머로 프레임 순환.
     // 프레임 = 이미 22px 로 합성된 이미지 + delay. egg/static 은 2프레임 bob, animated 는 GIF 실제 프레임.
     private var menuSpriteKey: String?   // menuSpriteKey(id:shiny:floor:) 결과 — 바뀌면 재로딩
