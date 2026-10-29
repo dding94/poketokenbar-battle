@@ -99,8 +99,9 @@ struct BattleResult: Decodable {
 final class PracticeBattle {
     enum Mode: String, CaseIterable { case manual, automatic }
     enum Phase: Equatable { case ready, running, finished, failed, cancelled }
-    /// Seconds a manual practice turn waits for the player before the automatic choice plays it.
-    static let manualTurnSeconds = 30   // RED: 03B-5 sets 15
+    /// Seconds a manual practice turn waits for the player before the automatic choice plays it (03B-5). Every
+    /// deadline, countdown and reset reads this; the 30 s proposed for online battles is a separate decision.
+    static let manualTurnSeconds = 15
     private(set) var phase: Phase = .ready
     /// The pair `start` was given. The selection may change while the battle is on screen (a wild search
     /// replacing its batch), so the battle and result screens read these, never the selection.
