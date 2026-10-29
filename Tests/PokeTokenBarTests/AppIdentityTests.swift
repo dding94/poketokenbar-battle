@@ -92,6 +92,37 @@ final class AppIdentityTests: XCTestCase {
         XCTAssertEqual(AppStatePaths.overrideDirectory(environment: ["PTB_STATE_DIR": "/tmp/qa"])?.path, "/tmp/qa")
     }
 
+    @MainActor
+    func testSpriteCachesUseTheSelectedStateDirectory() {
+        let expected = AppStatePaths.directory().appendingPathComponent("sprites", isDirectory: true)
+        XCTAssertEqual(SpriteStore().directory.standardizedFileURL, expected.standardizedFileURL)
+        XCTAssertEqual(SpriteLoader.cacheDir.standardizedFileURL, expected.standardizedFileURL)
+    }
+
+    func testLogIsInsideTheSelectedStateDirectory() {
+        let expected = AppStatePaths.directory().appendingPathComponent("Logs", isDirectory: true)
+        XCTAssertEqual(AppLog.logFileURL.deletingLastPathComponent().standardizedFileURL,
+                       expected.standardizedFileURL)
+    }
+
+    /// Every app-owned write location must respect PTB_STATE_DIR, including caches and diagnostics.
+    /// Save-only tests previously missed writers that constructed their own upstream paths.
+    func testStateWritersDoNotBypassPathResolver() throws {
+        let sources = Self.repoRoot.appendingPathComponent("Sources/PokeTokenBar")
+        let files = try XCTUnwrap(FileManager.default.enumerator(at: sources,
+            includingPropertiesForKeys: nil))
+        for case let file as URL in files where file.pathExtension == "swift" {
+            if file.lastPathComponent == "AppStatePaths.swift" { continue }
+            let code = try String(contentsOf: file, encoding: .utf8).split(separator: "\n")
+                .filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("//") }
+                .joined(separator: "\n")
+            XCTAssertFalse(code.contains(".applicationSupportDirectory"), file.lastPathComponent)
+            XCTAssertFalse(code.contains(".libraryDirectory"), file.lastPathComponent)
+            XCTAssertFalse(code.contains("appendingPathComponent(\"PokeTokenBar\")"), file.lastPathComponent)
+            XCTAssertFalse(code.contains("appendingPathComponent(\"PokeTokenBar/sprites\")"), file.lastPathComponent)
+        }
+    }
+
     // MARK: 원본 세이브 1회 복사
 
     private func makeDirs() throws -> (upstream: URL, fork: URL) {
