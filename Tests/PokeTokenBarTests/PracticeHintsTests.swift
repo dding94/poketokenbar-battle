@@ -179,16 +179,89 @@ final class PracticeHintsTests: XCTestCase {
         XCTAssertEqual(found.order, .speedTie)
     }
 
-    func testMatchupResistedOnlyOffenseIsReportedButNotRecommended() throws {
+    func testMatchupResistedOnlyOffenseNamesTheLeastBadMoves() throws {
         let session = makeSession(Clock(), [pikachu(moves: ["iron-tail"]), magikarp()], player: "p", opponent: "m")
         let found = try matchup(session)
-        XCTAssertEqual(found.bestOffense, 0.5); XCTAssertEqual(found.bestMoveIDs, [])
+        XCTAssertEqual(found.bestOffense, 0.5); XCTAssertEqual(found.bestMoveIDs, ["irontail"], "below 1 is worth a warning too")
     }
 
-    func testMatchupWithOnlyStatusMovesHasNeutralOffense() throws {
+    func testMatchupWhereEveryDamagingMoveIsImmuneNamesThemAtZero() throws {
+        let geodude = Spec(id: "g", species: 74, moves: ["rock-throw"], ability: "sturdy")
+        let found = try matchup(makeSession(Clock(), [pikachu(moves: ["thunderbolt", "volt-tackle"]), geodude], player: "p", opponent: "g"))
+        XCTAssertEqual(found.bestOffense, 0); XCTAssertEqual(found.bestMoveIDs, ["thunderbolt", "volttackle"])
+    }
+
+    func testMatchupWithOnlyStatusMovesHasNoOffenseAtAll() throws {
         let splasher = Spec(id: "s", species: 129, moves: ["splash"], ability: "swift-swim")
         let found = try matchup(makeSession(Clock(), [splasher, pikachu()], player: "s", opponent: "p"))
+        XCTAssertEqual(found.bestOffense, 0, "no damaging move is different from a neutral one")
+        XCTAssertEqual(found.bestMoveIDs, [])
+    }
+
+    func testMatchupNeutralBestKeepsTheMoveListEmpty() throws {
+        let found = try matchup(makeSession(Clock(), [pikachu(moves: ["quick-attack", "iron-tail"]), magikarp()], player: "p", opponent: "m"))
         XCTAssertEqual(found.bestOffense, 1); XCTAssertEqual(found.bestMoveIDs, [])
+    }
+
+    // MARK: matchup: fixed-damage and variable-type moves
+
+    /// Fixed-damage moves (levels, set amounts, HP, one-hit KOs) ignore effectiveness except immunity. Each row is a move
+    /// and a target that the move's listed type would hit super effectively.
+    func testFixedDamageMovesNeverCountAsSuperEffectiveInTheMatchup() throws {
+        let rows: [(String, Int)] = [
+            ("night-shade", 65), ("seismic-toss", 242), ("counter", 242), ("fissure", 25), ("dragon-rage", 149),
+            ("sheer-cold", 149), ("psywave", 68), ("mirror-coat", 68),
+        ]
+        for (move, target) in rows {
+            let player = Spec(id: "x", species: 94, moves: [move])
+            let found = try matchup(makeSession(Clock(), [player, Spec(id: "t", species: target, moves: ["tackle"])], player: "x", opponent: "t"))
+            XCTAssertEqual(found.bestOffense, 1, "\(move) against species \(target)")
+            XCTAssertEqual(found.bestMoveIDs, [], move)
+        }
+    }
+
+    func testFixedDamageMovesStillRespectImmunityInTheMatchup() throws {
+        let rows: [(String, Int)] = [
+            ("night-shade", 242), ("seismic-toss", 94), ("horn-drill", 94), ("guillotine", 94), ("sonic-boom", 94),
+            ("super-fang", 94), ("endeavor", 94), ("fissure", 18), ("dragon-rage", 36), ("mirror-coat", 197),
+        ]
+        for (move, target) in rows {
+            let player = Spec(id: "x", species: 25, moves: [move])
+            let found = try matchup(makeSession(Clock(), [player, Spec(id: "t", species: target, moves: ["tackle"])], player: "x", opponent: "t"))
+            XCTAssertEqual(found.bestOffense, 0, "\(move) against species \(target)")
+            XCTAssertEqual(found.bestMoveIDs, [move.replacingOccurrences(of: "-", with: "")], move)
+        }
+    }
+
+    func testFixedDamageMoveDoesNotHideARealWeakSpot() throws {
+        let gengar = Spec(id: "g", species: 94, moves: ["night-shade", "shadow-ball"])
+        let alakazam = Spec(id: "a", species: 65, moves: ["psychic"])
+        let found = try matchup(makeSession(Clock(), [gengar, alakazam], player: "g", opponent: "a"))
+        XCTAssertEqual(found.bestOffense, 2); XCTAssertEqual(found.bestMoveIDs, ["shadowball"])
+    }
+
+    func testVariableTypeMovesCountAsNeutralInTheMatchup() throws {
+        // Hidden Power is never Normal, so a Ghost target is not immune to it; Weather Ball changes with the weather.
+        let rows: [(Int, String, Int)] = [(201, "hidden-power", 94), (351, "weather-ball", 94), (201, "hidden-power", 65)]
+        for (species, move, target) in rows {
+            let player = Spec(id: "x", species: species, moves: [move], ability: "levitate")
+            let found = try matchup(makeSession(Clock(), [player, Spec(id: "t", species: target, moves: ["tackle"])], player: "x", opponent: "t"))
+            XCTAssertEqual(found.bestOffense, 1, "\(move) against species \(target)")
+            XCTAssertEqual(found.bestMoveIDs, [], move)
+        }
+    }
+
+    func testMoveInfoIsFoundUnderTheSlugAliasAndTheCanonicalId() throws {
+        // "vice-grip" is an alias; the engine answers with its own id, "visegrip".
+        let machop = Spec(id: "m", species: 66, moves: ["vice-grip"])
+        let session = makeSession(Clock(), [machop, pikachu()], player: "m", opponent: "p")
+        XCTAssertEqual(session.moveInfo["visegrip"]?.name, "Vise Grip")
+        XCTAssertEqual(session.moveInfo["vicegrip"], session.moveInfo["visegrip"])
+        XCTAssertNotNil(session.moveInfo["visegrip"])
+        let found = try matchup(session)
+        XCTAssertEqual(found.bestOffense, 1, "the alias move is a damaging move, not a missing one")
+        session.start()
+        XCTAssertNotNil(session.moveHint("visegrip"))
     }
 
     func testMatchupUsesBothTypesOfTheOpponentAndTheThreatOfEachOfItsTypes() throws {
@@ -254,6 +327,40 @@ final class PracticeHintsTests: XCTestCase {
         XCTAssertNil(session.battle)
         let bolt = try XCTUnwrap(session.moveHint("thunderbolt"))
         XCTAssertNil(bolt.multiplier); XCTAssertFalse(bolt.stab)
+    }
+
+    private func hintSession(_ player: Spec, against opponent: Int) -> PracticeSession {
+        let session = makeSession(Clock(), [player, Spec(id: "t", species: opponent, moves: ["tackle"])], player: player.id, opponent: "t")
+        session.start()
+        return session
+    }
+
+    func testFixedDamageMoveHintsShowNeutralWithoutStabAndImmunityAsZero() throws {
+        let gengar = Spec(id: "g", species: 94, moves: ["night-shade", "shadow-ball"])
+        let weak = hintSession(gengar, against: 65)
+        let shade = try XCTUnwrap(weak.moveHint("nightshade"))
+        XCTAssertTrue(shade.info.fixedDamage)
+        XCTAssertEqual(shade.multiplier, 1, "Night Shade ignores the Psychic weakness"); XCTAssertFalse(shade.stab, "no STAB on fixed damage")
+        let ball = try XCTUnwrap(weak.moveHint("shadowball"))
+        XCTAssertEqual(ball.multiplier, 2); XCTAssertTrue(ball.stab)
+        let immune = hintSession(gengar, against: 242)
+        XCTAssertEqual(immune.moveHint("nightshade")?.multiplier, 0); XCTAssertEqual(immune.moveHint("nightshade")?.stab, false)
+        let toss = hintSession(Spec(id: "b", species: 242, moves: ["seismic-toss"]), against: 94)
+        XCTAssertEqual(toss.moveHint("seismictoss")?.multiplier, 0, "Fighting cannot touch a Ghost")
+        let normalTarget = hintSession(Spec(id: "b", species: 242, moves: ["seismic-toss"]), against: 242)
+        XCTAssertEqual(normalTarget.moveHint("seismictoss")?.multiplier, 1, "Fighting is x2 on Normal, but the damage is fixed")
+        XCTAssertEqual(normalTarget.moveHint("seismictoss")?.stab, false)
+    }
+
+    func testVariableTypeMoveHintsHaveNeitherMultiplierNorStab() throws {
+        // The engine lists all of these as Normal; Castform and Arceus are Normal themselves, so STAB would show without the guard.
+        let rows: [(Int, String)] = [(201, "hidden-power"), (351, "weather-ball"), (493, "judgment"), (649, "techno-blast")]
+        for (species, move) in rows {
+            let session = hintSession(Spec(id: "x", species: species, moves: [move], ability: "levitate"), against: 65)
+            let hint = try XCTUnwrap(session.moveHint(move.replacingOccurrences(of: "-", with: "")), move)
+            XCTAssertTrue(hint.info.variableType, move)
+            XCTAssertNil(hint.multiplier, move); XCTAssertFalse(hint.stab, move)
+        }
     }
 
     // MARK: playback speed
