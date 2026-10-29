@@ -806,6 +806,9 @@ read_when:
   근본원인을 고쳤다. 디스플레이가 없는 CI 러너는 `bitmapImageRepForCachingDisplay`를 1배율로 만들어 캡션이
   몇 픽셀 높이에 불과했다. 연습전 OCR은 `PracticeScreenRenderingTests.capture2x`(2배 픽셀 비트맵에
   `cacheDisplay`)로 찍는다. 새 OCR 테스트도 2배 캡처를 쓴다.
+  2배에서도 macOS 14 Vision은 색 배경 위 흰 글자 배지(기술 카드 "×2")를 읽지 못했다. 이런 배지는 문구를
+  순수 함수 테스트(`PracticeWordingTests.testMultiplierBadgeWording`)로, 표시 데이터를 세션 단언으로 확인하고,
+  OCR 단언은 macOS 15 이상에서만 둔다.
 
 - **초기 설정 이동은 애니메이션 완료에 의존하지 않는다.** 세션 키 만료·등록 안내에서
   `startExpanded`로 연 고급 섹션의 animated `scrollTo`가 비활성·non-key native 호스트에서

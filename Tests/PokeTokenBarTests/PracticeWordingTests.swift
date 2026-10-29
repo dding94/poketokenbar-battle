@@ -19,6 +19,18 @@ final class PracticeWordingTests: XCTestCase {
         XCTAssertFalse(PracticeBattleBoard.splashDue(phase: .finished, turn: 1, introShown: false, played: false))
     }
 
+    /// The move-card badge text; the rendering test can only OCR it where Vision reads white-on-tint text.
+    func testMultiplierBadgeWording() {
+        let en = L(.en), ko = L(.ko)
+        XCTAssertEqual(en.practiceMultiplier(4), "×4")
+        XCTAssertEqual(en.practiceMultiplier(2), "×2")
+        XCTAssertEqual(en.practiceMultiplier(0.5), "×½")
+        XCTAssertEqual(en.practiceMultiplier(0.25), "×¼")
+        XCTAssertEqual(en.practiceMultiplier(0), "×0")
+        XCTAssertEqual(ko.practiceMultiplier(0), "무효")
+        XCTAssertEqual(ko.practiceMultiplier(2), "×2")
+    }
+
     func testBoostArrowsFollowTheStageSign() {
         let l = L(.ko)
         XCTAssertEqual(l.practiceBoost(stat: "atk", stages: 1), "공격 ↑")

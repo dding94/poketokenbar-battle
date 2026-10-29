@@ -101,7 +101,7 @@ jobs:
         run: sudo xcode-select -s /Applications/Xcode_16.2.app/Contents/Developer
       - name: Swift JavaScriptCore boundary
         run: |
-          swift test --enable-code-coverage --filter "BattleEngineTests|BattleSnapshotTests|PracticeBattleTests|PracticeSessionTests|PracticePlaybackTests|PracticeScreenRenderingTests|LocalizedUILiteralTests|ScrollerLaneTests"
+          swift test --enable-code-coverage --filter "BattleEngineTests|BattleSnapshotTests|PracticeBattleTests|PracticeSessionTests|PracticePlaybackTests|PracticeHintsTests|PracticeWordingTests|PracticeScreenRenderingTests|LocalizedUILiteralTests|ScrollerLaneTests"
           ./scripts/battle-coverage.sh
       - name: Install pinned dependencies
         if: ${{ inputs.scope == 'engine' }}

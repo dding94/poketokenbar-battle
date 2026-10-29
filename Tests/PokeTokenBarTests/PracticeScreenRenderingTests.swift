@@ -342,7 +342,12 @@ final class PracticeScreenRenderingTests: XCTestCase {
         let (text, bitmap) = try await waitForText(needles, in: host)
         try save(bitmap, as: "practice-popover-hints.png")
         assertRendered(needles, in: text)
-        assertMultiplier("2", in: text)
+        // The badge is white on the strong tint, which macOS 14's Vision cannot read even at 2x. Its data is
+        // asserted here and its wording in PracticeWordingTests; OCR checks it where Vision can read it.
+        XCTAssertEqual(session.moveHint("thunderbolt")?.multiplier, 2)
+        if ProcessInfo.processInfo.isOperatingSystemAtLeast(OperatingSystemVersion(majorVersion: 15, minorVersion: 0, patchVersion: 0)) {
+            assertMultiplier("2", in: text)
+        }
         assertPopoverSized(host)
     }
 
