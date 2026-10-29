@@ -78,7 +78,7 @@ struct PracticeHPBar: View {
                 .scaleEffect(x: ratio, y: 1, anchor: .leading)
         }
         .frame(height: height)
-        .animation(.easeOut(duration: 0.35), value: hp)
+        .animation(.easeInOut(duration: 0.5), value: hp)
         .accessibilityElement()
         .accessibilityValue("\(hp)/\(maxHP)")
     }

@@ -1,7 +1,8 @@
 import SwiftUI
 
-/// A running (or failed) practice battle: both sides, the newest log lines, and the move grid. The
-/// session drives turns and deadlines; this view only reads the battle and forwards choices.
+/// A running (or failed) practice battle: both sides, the staged beat with its callouts, the newest
+/// beats, and the move grid. The session drives turns, deadlines and the playback clock; this view only
+/// reads them and forwards choices. Without a playback it falls back to the battle's own view and log.
 @MainActor
 struct PracticeBattleBoard: View {
     @Bindable var session: PracticeSession
@@ -9,7 +10,13 @@ struct PracticeBattleBoard: View {
     let l: L
     let artwork: Bool
 
+    /// The one-shot "VS" splash at the start of a battle.
+    @State private var splash = false
+
     private var automatic: Bool { session.mode == .automatic }
+    private var playback: PracticePlayback? { session.playback }
+    private var playing: Bool { playback?.isPlaying ?? false }
+    private var wording: PracticeWording { PracticeWording(session: session, battle: battle, l: l) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -18,12 +25,13 @@ struct PracticeBattleBoard: View {
                 Spacer(minLength: 0)
             } else {
                 if let view = battle.view {
-                    PracticeSideCard(side: view.p2, own: false, name: session.opponent?.name ?? view.p2.species,
-                                     snapshot: session.opponent?.snapshot, l: l, artwork: artwork)
-                    PracticeSideCard(side: view.p1, own: true, name: session.player?.name ?? view.p1.species,
-                                     snapshot: session.player?.snapshot, l: l, artwork: artwork)
+                    VStack(alignment: .leading, spacing: 10) {
+                        sideCard(.opponent, view.p2)
+                        sideCard(.player, view.p1)
+                    }
+                    .overlay { if splash { versus.transition(.scale(scale: 1.6).combined(with: .opacity)) } }
                 }
-                ticker
+                stage
                 if let notice = battle.notice {
                     Label(notice, systemImage: "exclamationmark.circle")
                         .font(.caption).foregroundStyle(.orange)
@@ -35,12 +43,132 @@ struct PracticeBattleBoard: View {
                 controls
             }
         }
+        .task(id: ObjectIdentifier(battle)) { await playSplash() }
     }
 
-    // MARK: Log
+    // MARK: Sides
 
-    /// The three newest lines, newest first. Turn separators are left to the full log.
-    private var ticker: some View {
+    /// While a beat plays the sides already show its outcome, so the bar drains, the number floats and
+    /// the sprite reacts together; between beats they show the committed display.
+    private func shown(_ side: PracticeSide) -> PracticeDisplaySide? {
+        playback?.beat?.after[side] ?? playback?.display[side]
+    }
+
+    /// The id of the newest beat that hurt this side. It changes only when a new hit starts, so the
+    /// shake plays once per hit even after the beat moves into the history.
+    private func lastHit(_ side: PracticeSide) -> Int? {
+        if let beat = playback?.beat, (beat.hpDelta[side] ?? 0) < 0 { return beat.id }
+        return playback?.history.last { ($0.hpDelta[side] ?? 0) < 0 }?.id
+    }
+
+    private func sideCard(_ side: PracticeSide, _ pokemon: BattleView.Pokemon) -> some View {
+        let own = side == .player
+        let beat = playback?.beat
+        return PracticeSideCard(side: pokemon, own: own, name: wording.name(side),
+                                snapshot: own ? session.player?.snapshot : session.opponent?.snapshot,
+                                l: l, artwork: artwork, display: shown(side),
+                                beatID: beat?.id, delta: beat?.hpDelta[side], hitTrigger: lastHit(side))
+    }
+
+    private var versus: some View {
+        Text(l.practiceVersus)
+            .font(.system(size: 30, weight: .black, design: .rounded)).italic()
+            .foregroundStyle(.white)
+            .padding(.horizontal, 18).padding(.vertical, 2)
+            .background(LinearGradient(colors: [.orange, .pink], startPoint: .leading, endPoint: .trailing),
+                        in: Capsule())
+            .shadow(color: .black.opacity(0.2), radius: 6, y: 2)
+            .allowsHitTesting(false)
+    }
+
+    /// Under a second, once per battle: only before anything has been played.
+    private func playSplash() async {
+        guard battle.phase == .running, battle.view?.turn == 1,
+              playback?.history.isEmpty ?? true, playback?.beat == nil else { return }
+        withAnimation(.spring(duration: 0.25, bounce: 0.3)) { splash = true }
+        try? await Task.sleep(for: .milliseconds(450))
+        withAnimation(.easeIn(duration: 0.25)) { splash = false }
+    }
+
+    // MARK: Stage
+
+    /// The beat on screen (action and callouts) over the three newest finished beats. Fixed height, so
+    /// beats coming and going never move the move grid.
+    private var stage: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if let playback {
+                current(playback)
+                if !playback.recent.isEmpty {
+                    Divider()
+                    recent(playback)
+                }
+            } else {
+                legacyTicker
+            }
+        }
+        .font(.caption)
+        .frame(maxWidth: .infinity, minHeight: 92, maxHeight: 92, alignment: .topLeading)
+        .practiceCard(padding: 8)
+    }
+
+    private func current(_ playback: PracticePlayback) -> some View {
+        ZStack(alignment: .topLeading) {
+            if let beat = playback.beat {
+                VStack(alignment: .leading, spacing: 4) {
+                    PracticePhraseText(phrase: wording.action(beat), l: l, artwork: artwork)
+                        .font(.callout.weight(.semibold))
+                        .lineLimit(1)
+                    chips(beat)
+                }
+                .id(beat.id)
+                .transition(.asymmetric(insertion: .offset(x: -12).combined(with: .opacity), removal: .opacity))
+            } else {
+                Text(playback.history.isEmpty ? l.practiceBattleBegins : l.practiceTurn(battle.view?.turn ?? 1))
+                    .font(.callout.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+        }
+        .frame(maxWidth: .infinity, minHeight: 38, alignment: .topLeading)
+        .animation(.easeOut(duration: 0.2), value: playback.beat?.id)
+    }
+
+    /// Up to three chips; fewer when the localized words do not fit one line.
+    private func chips(_ beat: PracticeBeat) -> some View {
+        let callouts = wording.chips(beat)
+        return ViewThatFits(in: .horizontal) {
+            chipRow(callouts.prefix(3), beat)
+            chipRow(callouts.prefix(2), beat)
+            chipRow(callouts.prefix(1), beat)
+        }
+        .frame(minHeight: 18, alignment: .leading)
+    }
+
+    private func chipRow(_ callouts: ArraySlice<PracticeCallout>, _ beat: PracticeBeat) -> some View {
+        HStack(spacing: 5) {
+            ForEach(Array(callouts.enumerated()), id: \.offset) { _, callout in
+                PracticeCalloutChip(phrase: wording.callout(callout, in: beat), tone: wording.tone(callout),
+                                    l: l, artwork: artwork)
+            }
+        }
+    }
+
+    /// The three newest finished beats as sentences, newest first.
+    private func recent(_ playback: PracticePlayback) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            ForEach(Array(playback.recent.prefix(3).enumerated()), id: \.element.id) { index, beat in
+                PracticePhraseText(phrase: wording.sentence(beat), l: l, artwork: artwork)
+                    .foregroundStyle(index == 0 ? Color.primary : Color.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .transition(.opacity)
+            }
+        }
+        .animation(.easeOut(duration: 0.2), value: playback.recent.first?.id)
+    }
+
+    /// Without a playback: the three newest log lines, newest first. Turn separators are left out.
+    private var legacyTicker: some View {
         let lines = Array(battle.messages.filter { !$0.hasPrefix("──") }.suffix(3).reversed())
         return VStack(alignment: .leading, spacing: 3) {
             ForEach(Array(lines.enumerated()), id: \.offset) { index, line in
@@ -50,9 +178,6 @@ struct PracticeBattleBoard: View {
                     .truncationMode(.tail)
             }
         }
-        .font(.caption)
-        .frame(maxWidth: .infinity, minHeight: 46, alignment: .topLeading)
-        .practiceCard(padding: 8)
     }
 
     // MARK: Moves
@@ -60,7 +185,9 @@ struct PracticeBattleBoard: View {
     @ViewBuilder
     private var prompt: some View {
         HStack(alignment: .firstTextBaseline) {
-            if battle.isPaused {
+            if playing {
+                Text(l.practicePlayingTurn).font(.callout.weight(.semibold)).foregroundStyle(.secondary)
+            } else if battle.isPaused {
                 Text(l.practicePausedHint).font(.callout.weight(.semibold)).foregroundStyle(.secondary)
             } else if automatic {
                 Text(l.practiceAutoPlaying).font(.callout.weight(.semibold)).foregroundStyle(.secondary)
@@ -68,7 +195,14 @@ struct PracticeBattleBoard: View {
                 Text(l.practiceWhatNext).font(.callout.weight(.semibold))
             }
             Spacer(minLength: 4)
-            if !battle.isPaused && !automatic {
+            if playing, let playback {
+                Button(l.practiceSkip) {
+                    playback.skipToEnd()
+                    session.tick()
+                }
+                .buttonStyle(.borderless)
+                .font(.caption)
+            } else if !battle.isPaused && !automatic {
                 Text(l.practiceKeyHint).font(.caption2).foregroundStyle(.secondary)
             }
         }
@@ -87,7 +221,7 @@ struct PracticeBattleBoard: View {
                     ForEach(Array(moves.enumerated()), id: \.element.slot) { index, move in
                         PracticeMoveCard(move: move, key: index + 1, snapshot: session.player?.snapshot, l: l,
                                          artwork: artwork,
-                                         locked: automatic || battle.isPaused) {
+                                         locked: automatic || battle.isPaused || playing) {
                             session.choose(slot: move.slot)
                         }
                     }
@@ -98,6 +232,7 @@ struct PracticeBattleBoard: View {
 
     // MARK: Controls
 
+    /// Hidden but kept in the layout once the battle has ended and only its last beats are playing.
     private var controls: some View {
         HStack {
             Toggle(l.practiceSwitchToAuto, isOn: Binding(
@@ -112,6 +247,8 @@ struct PracticeBattleBoard: View {
                 .foregroundStyle(.red)
                 .font(.caption)
         }
+        .opacity(battle.phase == .running ? 1 : 0)
+        .disabled(battle.phase != .running)
     }
 
     private var failure: some View {
@@ -132,7 +269,9 @@ struct PracticeBattleBoard: View {
 }
 
 /// One side of the battle: sprite, name and level, types, status, HP, and what is known about its
-/// moves and ability. The opponent's HP comes from the engine as a percentage.
+/// moves and ability. The opponent's HP is a percentage. With a playback, `display` overrides the
+/// engine's HP and status, `delta` floats over the HP for the beat `beatID`, and `hitTrigger` shakes
+/// the sprite once per new hit.
 @MainActor
 struct PracticeSideCard: View {
     let side: BattleView.Pokemon
@@ -141,11 +280,26 @@ struct PracticeSideCard: View {
     let snapshot: BattleSnapshot?
     let l: L
     let artwork: Bool
+    var display: PracticeDisplaySide?
+    var beatID: Int?
+    var delta: Int?
+    var hitTrigger: Int?
+
+    private var hp: Int { display?.hp ?? side.hp }
+    private var maxHP: Int { display?.maxHP ?? side.maxhp }
+    private var status: String { display.map { $0.status ?? "" } ?? side.status }
+    private var fainted: Bool { display?.fainted ?? false }
+    private var hpText: String {
+        if own { return "\(hp)/\(maxHP)" }
+        return l.practicePercent(display?.percent ?? side.hp)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
             HStack(spacing: 10) {
                 PracticeSpriteTile(set: snapshot?.set, size: 44, artwork: artwork)
+                    .practiceFainted(fainted)
+                    .practiceHitReaction(trigger: hitTrigger)
                 VStack(alignment: .leading, spacing: 5) {
                     HStack(spacing: 6) {
                         Text(own ? l.practiceYou : l.practiceFoe)
@@ -153,15 +307,18 @@ struct PracticeSideCard: View {
                         PracticeNameLevel(name: name, level: side.level)
                         PracticeTypeBadges(types: side.types, l: l, artwork: artwork).fixedSize()
                         Spacer(minLength: 0)
-                        if !side.status.isEmpty {
-                            Badge(l.practiceStatusName(side.status), tint: .orange, style: .tinted, size: 9)
+                        // Zero-width anchor: the number floats left of the status badge, above the HP bar.
+                        Color.clear.frame(width: 0, height: 0).overlay(alignment: .trailing) { floating }
+                        if !status.isEmpty {
+                            Badge(l.practiceStatusName(status), tint: .orange, style: .tinted, size: 9)
                                 .fixedSize()
                         }
                     }
                     HStack(spacing: 8) {
-                        PracticeHPBar(hp: side.hp, maxHP: side.maxhp)
-                        Text(own ? "\(side.hp)/\(side.maxhp)" : "\(side.hp)%")
+                        PracticeHPBar(hp: hp, maxHP: maxHP)
+                        Text(hpText)
                             .font(.caption.weight(.semibold)).monospacedDigit()
+                            .foregroundStyle(fainted ? Color.secondary : Color.primary)
                             .frame(minWidth: 52, alignment: .trailing)
                     }
                 }
@@ -169,6 +326,20 @@ struct PracticeSideCard: View {
             if own { ownAbility } else { revealed }
         }
         .practiceCard()
+    }
+
+    /// The beat's HP change next to the name row, right above the HP bar; keyed by the beat so each
+    /// beat plays it once.
+    private var floating: some View {
+        ZStack {
+            if let beatID, let delta, delta != 0 {
+                PracticeFloatingDelta(delta: delta, l: l)
+                    .id(beatID)
+                    .transition(PracticeFloatingDelta.transition)
+            }
+        }
+        .animation(.easeOut(duration: 0.3), value: beatID)
+        .allowsHitTesting(false)
     }
 
     private var ownAbility: some View {

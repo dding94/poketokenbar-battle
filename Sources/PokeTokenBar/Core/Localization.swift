@@ -1732,4 +1732,77 @@ extension L {
     func practiceTurn(_ turn: Int) -> String { lang == .ko ? "\(turn)턴" : "Turn \(turn)" }
     func practiceSeconds(_ seconds: Int) -> String { lang == .ko ? "\(seconds)초" : "\(seconds)s" }
     func practiceMoveLabel(_ slot: Int, _ name: String) -> String { "\(practiceMoves) \(slot): \(name)" }
+    // Staged turns (`PracticePlayback`): callouts, the beat line, the ticker and the result card.
+    // Our own short wording, not the games' battle text.
+    var practiceCalloutSuperEffective: String { lang == .ko ? "약점!" : "Super effective" }
+    var practiceCalloutResisted: String { lang == .ko ? "반감" : "Not very effective" }
+    var practiceCalloutImmune: String { lang == .ko ? "무효" : "No effect" }
+    var practiceCalloutCritical: String { lang == .ko ? "급소!" : "Critical hit" }
+    var practiceCalloutMiss: String { lang == .ko ? "빗나감" : "Missed" }
+    var practiceCalloutFailed: String { lang == .ko ? "실패" : "Failed" }
+    var practiceCalloutRecoil: String { lang == .ko ? "반동 피해" : "Recoil" }
+    var practiceCalloutFainted: String { lang == .ko ? "쓰러짐" : "Fainted" }
+    var practiceCalloutTimedOut: String { lang == .ko ? "시간 초과 · 자동 선택" : "Time's up · auto pick" }
+    var practiceEndOfTurn: String { lang == .ko ? "턴 마무리" : "End of turn" }
+    var practiceBattleBegins: String { lang == .ko ? "배틀 시작! 첫 기술을 골라 보세요" : "Battle on! Pick your first move" }
+    var practicePlayingTurn: String { lang == .ko ? "턴을 보여 주는 중…" : "Playing the turn…" }
+    var practiceSkip: String { lang == .ko ? "건너뛰기" : "Skip" }
+    var practiceVersus: String { "VS" }
+    var practiceFinishingMove: String { lang == .ko ? "결정타" : "Finishing move" }
+    var practiceDamageDealt: String { lang == .ko ? "준 피해" : "Damage dealt" }
+    var practiceDamageTaken: String { lang == .ko ? "받은 피해" : "Damage taken" }
+    var practiceTurnsLabel: String { lang == .ko ? "진행 턴" : "Turns" }
+    var practiceBigHits: String { lang == .ko ? "약점·급소" : "Big hits" }
+    var practiceNone: String { lang == .ko ? "없음" : "None" }
+    /// Joins the parts of a beat line ("Pikachu · Volt Tackle").
+    var practiceSeparator: String { " · " }
+    /// Leads from an action to its target ("… → Magikarp −48%").
+    var practiceArrow: String { " → " }
+    func practiceCantReason(_ reason: String) -> String {
+        let ko = ["par": "마비", "slp": "잠듦", "frz": "얼음", "recharge": "재충전", "flinch": "풀죽음",
+                  "attract": "헤롱헤롱", "taunt": "도발", "disable": "사용 불가", "nopp": "PP 없음"]
+        let en = ["par": "Paralyzed", "slp": "Asleep", "frz": "Frozen", "recharge": "Recharging", "flinch": "Flinched",
+                  "attract": "Infatuated", "taunt": "Taunted", "disable": "Disabled", "nopp": "No PP"]
+        return (lang == .ko ? ko : en)[reason.lowercased()] ?? (lang == .ko ? "행동 불가" : "Can't move")
+    }
+    /// Showdown weather ids ("RainDance", "sandstorm"); nil when the weather ends.
+    func practiceWeather(_ id: String?) -> String {
+        guard let id else { return lang == .ko ? "날씨 갬" : "Weather cleared" }
+        let key = id.filter { $0.isLetter || $0.isNumber }.lowercased()
+        let ko = ["raindance": "비", "sunnyday": "강한 햇살", "sandstorm": "모래바람", "hail": "싸라기눈", "snow": "눈",
+                  "snowscape": "눈", "primordialsea": "폭우", "desolateland": "불볕", "deltastream": "난기류"]
+        let en = ["raindance": "Rain", "sunnyday": "Harsh sun", "sandstorm": "Sandstorm", "hail": "Hail", "snow": "Snow",
+                  "snowscape": "Snow", "primordialsea": "Downpour", "desolateland": "Scorching sun",
+                  "deltastream": "Strong winds"]
+        return (lang == .ko ? ko : en)[key] ?? id
+    }
+    /// "공격 ↑", "Atk ↓↓": one arrow for one stage, two for two or more.
+    func practiceBoost(stat: String, stages: Int) -> String {
+        let arrow = stages >= 2 ? "↑↑" : stages > 0 ? "↑" : stages <= -2 ? "↓↓" : "↓"
+        let name: String
+        switch stat {
+        case "accuracy": name = lang == .ko ? "명중" : "Acc"
+        case "evasion": name = lang == .ko ? "회피" : "Eva"
+        default: name = practiceStatName(stat)
+        }
+        return "\(name) \(arrow)"
+    }
+    func practiceCured(_ code: String) -> String {
+        lang == .ko ? "\(practiceStatusName(code)) 회복" : "\(practiceStatusName(code)) cured"
+    }
+    func practiceAbilityRevealed(_ ability: String) -> String {
+        lang == .ko ? "특성 공개: \(ability)" : "Ability: \(ability)"
+    }
+    /// A callout about the side that did not act: "잉어킹 마비".
+    func practiceTagged(_ name: String, _ text: String) -> String { "\(name) \(text)" }
+    /// Signed HP change in percent points: "−48%" or "+12%".
+    func practiceDelta(_ percent: Int) -> String { percent < 0 ? "\u{2212}\(-percent)%" : "+\(percent)%" }
+    func practiceHit(_ name: String, _ percent: Int) -> String { "\(name) \(practiceDelta(percent))" }
+    /// Turn tag in front of a result log line.
+    func practiceTurnTag(_ turn: Int) -> String { "T\(turn)" }
+    func practicePercent(_ percent: Int) -> String { "\(percent)%" }
+    func practiceHitCounts(superEffective: Int, critical: Int) -> String {
+        lang == .ko ? "약점 \(superEffective)회 · 급소 \(critical)회"
+            : "Super effective ×\(superEffective) · Critical ×\(critical)"
+    }
 }

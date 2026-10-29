@@ -31,7 +31,8 @@ struct PracticeScreen: View {
         switch battle.phase {
         case .ready, .cancelled: return .selection
         case .running, .failed: return .battle(battle)
-        case .finished: return .result(battle)
+        // The board stays until the last beat has played; the result follows the staged finish.
+        case .finished: return session.playback?.isPlaying == true ? .battle(battle) : .result(battle)
         }
     }
 
@@ -91,7 +92,9 @@ struct PracticeScreen: View {
             if session.mode == .automatic {
                 text = l.practiceAutoBadge
             } else {
-                text = l.practiceTurnClock(battle.view?.turn ?? 1, battle.remainingSeconds)
+                // While a turn is being staged the clock is held; show the turn on screen, not the engine's next one.
+                let turn = session.playback?.beat?.turn ?? battle.view?.turn ?? 1
+                text = l.practiceTurnClock(turn, battle.remainingSeconds)
                 urgent = battle.remainingSeconds <= 10 && !battle.isPaused
             }
         }
