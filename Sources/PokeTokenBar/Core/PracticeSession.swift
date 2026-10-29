@@ -3,7 +3,7 @@ import Observation
 
 /// Why a practice battle is held. Manual turns wait while any reason is present (the 30 s deadline
 /// freezes and resumes with the remaining time); automatic play keeps going in the background and
-/// only waits for display sleep.
+/// only waits for display sleep and for the turn on screen.
 enum PracticePauseReason: Hashable, CaseIterable, Sendable {
     /// The popover closed; its hosting tree is gone (`AppDelegate.popoverDidClose`).
     case popoverClosed
@@ -53,6 +53,8 @@ final class PracticeSession {
     private var driver: Task<Void, Never>?
     /// Bumped on every driver start and stop; a task whose captured value is stale must not tick.
     private var driverGeneration = 0
+    /// How many of `battle.events` the playback has been given.
+    private var stagedEvents = 0
 
     /// `drivesAutomatically: false` leaves `tick()` to the caller (tests with an injected clock).
     init(engineURL: URL?, clock: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
@@ -86,44 +88,50 @@ final class PracticeSession {
     /// Starts a battle with the current selection and mode; a rematch is the same call.
     func start() {
         guard let engine, let player, let opponent, player.id != opponent.id else { return }
-        stopDriver(); battle?.cancel()
+        stopDriver(); battle?.cancel(); dropPlayback()
         let next = PracticeBattle(engine: engine, clock: clock)
         battle = next
         next.start(player: player, opponent: opponent, mode: mode)
+        playback = PracticePlayback(clock: clock)
+        stageEvents()
         resultSeen = true
-        applyPause()
+        refreshHold()
     }
     /// Manual move choice for the player; ignored while paused or in automatic mode.
     func choose(slot: Int) {
         guard let battle, battle.phase == .running, battle.mode == .manual, !battle.isPaused else { return }
-        battle.choose(slot: slot); afterStep()
+        step { $0.choose(slot: slot) }
+        refreshHold()
     }
     /// Gives up the running battle and returns to the selection screen.
     func forfeit() {
-        stopDriver(); battle?.cancel(); battle = nil; resultSeen = true
+        stopDriver(); battle?.cancel(); battle = nil; dropPlayback(); resultSeen = true
     }
     /// Leaves a finished battle for the selection screen (to pick another opponent).
     func backToSelection() {
         guard battle?.phase != .running else { return }
-        battle = nil; resultSeen = true
+        battle = nil; dropPlayback(); resultSeen = true
     }
     /// The result screen calls this when it is shown.
     func markResultSeen() { resultSeen = true }
     /// Adds or removes a pause reason, then holds or resumes the battle per `PracticePauseReason`.
     func setPaused(_ paused: Bool, reason: PracticePauseReason) {
         if paused { pauseReasons.insert(reason) } else { pauseReasons.remove(reason) }
-        applyPause()
+        if paused { skipPlaybackIfHidden() }
+        refreshHold()
     }
-    /// Advances deadlines and automatic turns at `clock()`. The internal driver calls it while a battle
-    /// runs; with `drivesAutomatically: false` the caller does.
+    /// Advances the playback, then the deadlines and automatic turns, at `clock()`. The internal driver
+    /// calls it while a battle runs or beats play; with `drivesAutomatically: false` the caller does.
     func tick() {
-        guard let battle, battle.phase == .running else { return }
-        battle.tick(); afterStep()
+        guard battle != nil else { return }
+        playback?.advance(); refreshHold()
+        if !isHeld { step { $0.tick() } }
+        refreshHold()
     }
     /// Drops the engine and roster when no battle is active (popover closed, practice screen left).
     func releaseIfIdle() {
         guard !isActive else { return }
-        stopDriver(); battle?.cancel(); battle = nil; resultSeen = true
+        stopDriver(); battle?.cancel(); battle = nil; dropPlayback(); resultSeen = true
         roster = nil; engine = nil
     }
 
@@ -134,23 +142,51 @@ final class PracticeSession {
     /// A ready, finished, failed or cancelled battle belongs to the old selection; a running one is never dropped.
     private func dropIdleBattle() {
         guard let battle, battle.phase != .running else { return }
-        self.battle = nil; resultSeen = true
+        self.battle = nil; dropPlayback(); resultSeen = true
     }
-    /// Manual turns wait on any reason; automatic play only on display sleep.
+    /// Manual turns wait on any reason; automatic play only on display sleep and while a turn plays.
     private var isHeld: Bool {
-        battle?.mode == .automatic ? pauseReasons.contains(.displayAsleep) : !pauseReasons.isEmpty
+        battle?.mode == .automatic
+            ? !pauseReasons.isDisjoint(with: [.displayAsleep, .playback]) : !pauseReasons.isEmpty
     }
     private func applyPause() {
         if let battle, battle.phase == .running { if isHeld { battle.pause() } else { battle.resume() } }
         syncDriver()
     }
-    /// Detects the end of the battle after the engine advanced it.
-    private func afterStep() {
-        if battle?.phase == .finished { resultSeen = false }
-        syncDriver()
+    /// Runs one engine step of a running battle, stages what it produced and detects its end.
+    private func step(_ body: (PracticeBattle) -> Void) {
+        guard let battle, battle.phase == .running else { return }
+        body(battle)
+        stageEvents()
+        if battle.phase == .finished { resultSeen = false }
     }
+    /// Hands the playback the events the engine added since the last call. A hidden screen plays nothing.
+    private func stageEvents() {
+        guard let battle, let playback else { return }
+        if stagedEvents > battle.events.count { stagedEvents = 0 }
+        let fresh = Array(battle.events[stagedEvents...])
+        stagedEvents = battle.events.count
+        if !fresh.isEmpty { playback.enqueue(fresh) }
+        skipPlaybackIfHidden()
+    }
+    private func skipPlaybackIfHidden() {
+        if !pauseReasons.isDisjoint(with: [.popoverClosed, .screenHidden]) { playback?.skipToEnd() }
+    }
+    /// Holds the battle while beats play and lets go when they are done, then re-applies the pause.
+    private func refreshHold() {
+        let playing = playback?.isPlaying == true
+        if playing != pauseReasons.contains(.playback) {
+            if playing { pauseReasons.insert(.playback) } else { pauseReasons.remove(.playback) }
+        }
+        applyPause()
+    }
+    private func dropPlayback() {
+        playback = nil; stagedEvents = 0; pauseReasons.remove(.playback)
+    }
+    /// The driver runs while the battle can advance or beats are on screen; idle it stops.
     private func syncDriver() {
-        let shouldDrive = drivesAutomatically && battle?.phase == .running && !isHeld
+        let battleRuns = battle?.phase == .running && !isHeld
+        let shouldDrive = drivesAutomatically && (battleRuns || playback?.isPlaying == true)
         if shouldDrive { if driver == nil { startDriver() } } else { stopDriver() }
     }
     private func startDriver() {
@@ -158,7 +194,8 @@ final class PracticeSession {
         let generation = driverGeneration
         driver = Task { [weak self] in
             while !Task.isCancelled {
-                try? await Task.sleep(for: .milliseconds(250))
+                let beatsPlaying = self?.playback?.isPlaying == true
+                try? await Task.sleep(for: .milliseconds(beatsPlaying ? 100 : 250))
                 guard let self, !Task.isCancelled, self.driverGeneration == generation else { return }
                 self.tick()
             }

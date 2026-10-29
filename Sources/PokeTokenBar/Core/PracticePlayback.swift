@@ -40,8 +40,81 @@ enum PracticeEvent: Equatable, Sendable {
 
 /// Turns `drainLog` lines (viewer p1) into events. It keeps each side's max HP from `|switch|` so a
 /// later "0 fnt" still has a scale. Lines it does not model are dropped; the text log keeps them.
+/// `|-weather|...|[upkeep]` repeats a weather already announced, so only changes become events.
 struct PracticeEventParser {
-    mutating func parse(_ lines: [String]) -> [PracticeEvent] { [] }
+    private var maxHP: [PracticeSide: Int] = [:]
+
+    mutating func parse(_ lines: [String]) -> [PracticeEvent] {
+        var events: [PracticeEvent] = []
+        for line in lines { if let event = event(from: line) { events.append(event) } }
+        return events
+    }
+
+    private mutating func event(from line: String) -> PracticeEvent? {
+        let parts = line.split(separator: "|", omittingEmptySubsequences: false).map(String.init)
+        guard parts.count > 1 else { return nil }
+        func field(_ index: Int) -> String { index < parts.count ? parts[index] : "" }
+        let side = Self.side(of: field(2))
+        switch parts[1] {
+        case "turn": return Int(field(2)).map(PracticeEvent.turn)
+        case "switch", "drag":
+            guard let side, let hp = Self.hp(field(4)) else { return nil }
+            let max = hp.max ?? hp.current
+            maxHP[side] = max
+            return .switchIn(side, hp: hp.current, maxHP: max)
+        case "move": return side.map { .move($0, moveID: Self.id(field(3))) }
+        case "cant": return side.map { .cant($0, reason: Self.cause(field(3))) }
+        case "-damage", "-heal":
+            guard let side, let hp = Self.hp(field(3)) else { return nil }
+            let max = hp.max ?? maxHP[side] ?? 100
+            maxHP[side] = max
+            let cause = parts.dropFirst(4).first { $0.hasPrefix("[from] ") }
+                .map { Self.cause(String($0.dropFirst("[from] ".count))) }
+            return parts[1] == "-damage" ? .damage(side, hp: hp.current, maxHP: max, cause: cause)
+                                         : .heal(side, hp: hp.current, maxHP: max, cause: cause)
+        case "-supereffective": return side.map(PracticeEvent.superEffective)
+        case "-resisted": return side.map(PracticeEvent.resisted)
+        case "-immune": return side.map(PracticeEvent.immune)
+        case "-crit": return side.map(PracticeEvent.critical)
+        case "-miss": return side.map(PracticeEvent.miss)
+        case "-fail": return side.map(PracticeEvent.failed)
+        case "-status": return side.map { .status($0, code: field(3).lowercased()) }
+        case "-curestatus": return side.map { .cureStatus($0, code: field(3).lowercased()) }
+        case "-boost", "-unboost":
+            guard let side, let amount = Int(field(4)) else { return nil }
+            return .boost(side, stat: field(3).lowercased(), stages: parts[1] == "-boost" ? amount : -amount)
+        case "faint": return side.map(PracticeEvent.faint)
+        case "-weather":
+            guard !parts.contains("[upkeep]") else { return nil }
+            let weather = Self.id(field(2))
+            return .weather(weather == "none" ? nil : weather)
+        case "win": return .end(winner: PracticeSide(rawValue: field(2)))
+        case "tie": return .end(winner: nil)
+        default: return nil
+        }
+    }
+
+    private static func side(of ident: String) -> PracticeSide? {
+        if ident.hasPrefix("p1") { return .player }
+        if ident.hasPrefix("p2") { return .opponent }
+        return nil
+    }
+    /// "73/100", "73/100 psn" or "0 fnt"; `max` is nil when the field has no denominator.
+    private static func hp(_ field: String) -> (current: Int, max: Int?)? {
+        guard let token = field.split(separator: " ").first else { return nil }
+        let numbers = token.split(separator: "/").map { Int($0) }
+        guard let first = numbers.first, let current = first else { return nil }
+        return (current, numbers.count > 1 ? numbers[1] : nil)
+    }
+    private static func id(_ text: String) -> String {
+        String(text.lowercased().filter { $0.isASCII && ($0.isLetter || $0.isNumber) })
+    }
+    /// Lowercased, without the "item: " / "ability: " / "move: " source prefix.
+    private static func cause(_ text: String) -> String {
+        var cause = text.lowercased()
+        for prefix in ["item: ", "ability: ", "move: "] where cause.hasPrefix(prefix) { cause.removeFirst(prefix.count) }
+        return cause
+    }
 }
 
 /// A short callout on screen while a beat plays. Data only; the screen words it.
@@ -113,19 +186,193 @@ final class PracticePlayback {
     /// Every beat of this battle in order, for the summary and the full log.
     private(set) var history: [PracticeBeat] = []
     /// A beat is on screen or queued.
-    var isPlaying: Bool { false }
-    var summary: PracticeSummary { PracticeSummary() }
+    var isPlaying: Bool { beat != nil || !queue.isEmpty }
+    var summary: PracticeSummary {
+        var summary = PracticeSummary()
+        var fainted: [(side: PracticeSide, beat: PracticeBeat)] = []
+        for beat in history {
+            summary.turns = max(summary.turns, beat.turn)
+            if let delta = beat.hpDelta[.opponent], delta < 0 { summary.damageDealtPercent -= delta }
+            if let delta = beat.hpDelta[.player], delta < 0 { summary.damageTakenPercent -= delta }
+            for callout in beat.callouts {
+                switch callout {
+                case .critical: summary.criticalHits += 1
+                case .superEffective: summary.superEffectiveHits += 1
+                case .fainted(let side): fainted.append((side, beat))
+                default: break
+                }
+            }
+        }
+        // One loser only (both fainting is a draw); a faint from poison or recoil has no finishing move.
+        if fainted.count == 1, let loser = fainted.first, loser.beat.actor == loser.side.foe {
+            summary.finishingMoveID = loser.beat.moveID
+        }
+        return summary
+    }
 
+    @ObservationIgnored private var queue: [PracticeBeat] = []
+    @ObservationIgnored private var beatEnd: TimeInterval = 0
+    /// What the screen will show after every queued beat; the base for the next beat's `after`.
+    @ObservationIgnored private var queued: [PracticeSide: PracticeDisplaySide] = [:]
+    @ObservationIgnored private var turn = 0
+    @ObservationIgnored private var nextID = 0
+    /// A manual timeout waits for the player's next beat; the next `turn` drops it.
+    @ObservationIgnored private var pendingTimeout = false
+    /// Consequences that arrive with no beat open (an ability at battle start, intimidate); they ride on
+    /// the next action beat instead of holding the battle with a beat of their own.
+    @ObservationIgnored private var preamble: [PracticeEvent] = []
     private let clock: () -> TimeInterval
 
     init(clock: @escaping () -> TimeInterval) { self.clock = clock }
 
     /// Queues the events of one engine step as beats. `switchIn` events seed `display` at once. When no
     /// beat is on screen, the first queued beat starts right away at `clock()`.
-    func enqueue(_ events: [PracticeEvent]) {}
+    ///
+    /// Grouping: a `move` or `cant` opens an action beat that collects what follows until the next move,
+    /// cant or turn. Consequences that arrive with no beat open (abilities at battle start) join the next
+    /// action beat. Damage or heal from an end-of-turn source (psn, brn, sandstorm, leftovers, ...)
+    /// closes it and opens an actor-less residual beat; recoil, drain, item and contact damage stay in the
+    /// action beat. A wake-up (`cureStatus`) right before a move belongs to that move's beat, and
+    /// `weather(nil)` is end-of-turn, so it joins a residual beat. `end` makes no beat. `timedOut` becomes
+    /// a callout on the player's next action beat of that turn: the step it precedes is the turn the
+    /// player lost, and it is the player's own action that was picked for them.
+    func enqueue(_ events: [PracticeEvent]) {
+        var drafts: [Draft] = []
+        var open: Draft?
+        func close() {
+            if let draft = open, draft.actor != nil || !draft.events.isEmpty { drafts.append(draft) }
+            open = nil
+        }
+        func begin(_ actor: PracticeSide?, moveID: String? = nil) {
+            var carried: [PracticeEvent] = []
+            if let actor, let last = open?.events.last, case .cureStatus(let side, _) = last, side == actor {
+                carried = [last]; open?.events.removeLast()
+            }
+            close()
+            if actor != nil { carried = preamble + carried; preamble = [] }
+            var draft = Draft(actor: actor, moveID: moveID, turn: turn, events: carried)
+            if actor == .player, pendingTimeout { draft.timedOut = true; pendingTimeout = false }
+            open = draft
+        }
+        func add(_ event: PracticeEvent) {
+            if open == nil { preamble.append(event) } else { open?.events.append(event) }
+        }
+        func addResidual(_ event: PracticeEvent) {
+            if open?.actor != nil { close() }
+            if open == nil { begin(nil) }
+            open?.events.append(event)
+        }
+        for event in events {
+            switch event {
+            case .turn(let value): close(); turn = value; pendingTimeout = false
+            case .switchIn(let side, let hp, let maxHP):
+                let seeded = PracticeDisplaySide(hp: hp, maxHP: maxHP, status: nil, fainted: false)
+                display[side] = seeded; queued[side] = seeded
+            case .move(let side, let moveID): begin(side, moveID: moveID)
+            case .cant(let side, _): begin(side); add(event)
+            case .timedOut: pendingTimeout = true
+            case .end: break
+            case .damage(let side, _, _, let cause), .heal(let side, _, _, let cause):
+                switch Self.phase(of: cause) {
+                case .confusion: begin(side); add(event)
+                case .action: add(event)
+                case .residual: addResidual(event)
+                }
+            case .weather(let id): if id == nil { addResidual(event) } else { add(event) }
+            default: add(event)
+            }
+        }
+        close()
+        for draft in drafts { queue.append(makeBeat(draft)) }
+        startNext()
+    }
     /// Commits the beat on screen once its time is up (`display` takes its `after`, it joins `history`
     /// and `recent`) and starts the next queued beat at `clock()`. `PracticeSession.tick()` calls it.
-    func advance() {}
+    func advance() {
+        if let current = beat {
+            guard clock() >= beatEnd else { return }
+            commit(current)
+        }
+        startNext()
+    }
     /// Plays every queued beat instantly (screen hidden, or the user skips).
-    func skipToEnd() {}
+    func skipToEnd() {
+        if let current = beat { commit(current) }
+        while !queue.isEmpty { commit(queue.removeFirst()) }
+    }
+
+    private struct Draft {
+        var actor: PracticeSide?
+        var moveID: String?
+        var turn: Int
+        var events: [PracticeEvent]
+        var timedOut = false
+    }
+    private enum Phase { case action, residual, confusion }
+    /// Damage and heal sources that happen inside a move; every other source is end-of-turn.
+    private static let actionCauses: Set<String> = [
+        "recoil", "drain", "lifeorb", "rockyhelmet", "roughskin", "ironbarbs", "shellbell", "voltabsorb", "waterabsorb",
+    ]
+    private static func phase(of cause: String?) -> Phase {
+        guard let cause else { return .action }
+        let key = cause.filter { !$0.isWhitespace }
+        if key == "confusion" { return .confusion }
+        return actionCauses.contains(key) ? .action : .residual
+    }
+
+    private func makeBeat(_ draft: Draft) -> PracticeBeat {
+        var state = queued
+        var before = queued
+        var callouts: [PracticeCallout] = draft.timedOut ? [.timedOut] : []
+        for event in draft.events {
+            switch event {
+            case .damage(let side, let hp, let maxHP, let cause), .heal(let side, let hp, let maxHP, let cause):
+                if state[side] == nil {
+                    let full = PracticeDisplaySide(hp: maxHP, maxHP: maxHP, status: nil, fainted: false)
+                    state[side] = full; before[side] = full
+                }
+                state[side]?.hp = hp; state[side]?.maxHP = maxHP
+                if case .damage = event, cause == "recoil" { callouts.append(.recoil(side)) }
+            case .superEffective(let side): callouts.append(.superEffective(side))
+            case .resisted(let side): callouts.append(.resisted(side))
+            case .immune(let side): callouts.append(.immune(side))
+            case .critical(let side): callouts.append(.critical(side))
+            case .miss(let side): callouts.append(.miss(side))
+            case .failed(let side): callouts.append(.failed(side))
+            case .status(let side, let code): state[side]?.status = code; callouts.append(.status(side, code: code))
+            case .cureStatus(let side, let code): state[side]?.status = nil; callouts.append(.cureStatus(side, code: code))
+            case .boost(let side, let stat, let stages): callouts.append(.boost(side, stat: stat, stages: stages))
+            case .cant(let side, let reason): callouts.append(.cant(side, reason: reason))
+            case .faint(let side):
+                state[side]?.fainted = true; state[side]?.hp = 0; state[side]?.status = nil
+                callouts.append(.fainted(side))
+            case .weather(let id): callouts.append(.weather(id))
+            case .abilityRevealed(let side, let id): callouts.append(.abilityRevealed(side, abilityID: id))
+            case .turn, .switchIn, .move, .timedOut, .end: break
+            }
+        }
+        var delta: [PracticeSide: Int] = [:]
+        for (side, now) in state { delta[side] = now.percent - (before[side]?.percent ?? now.percent) }
+        queued = state
+        defer { nextID += 1 }
+        return PracticeBeat(id: nextID, turn: draft.turn, actor: draft.actor, moveID: draft.moveID,
+                            callouts: callouts, hpDelta: delta, after: state)
+    }
+    private func startNext() {
+        guard beat == nil, !queue.isEmpty else { return }
+        let next = queue.removeFirst()
+        beat = next
+        beatEnd = clock() + (next.actor == nil ? Self.residualBeat : Self.actionBeat)
+    }
+    private func commit(_ finished: PracticeBeat) {
+        display = finished.after
+        history.append(finished)
+        recent.insert(finished, at: 0)
+        if recent.count > 5 { recent.removeLast(recent.count - 5) }
+        if beat?.id == finished.id { beat = nil }
+    }
+}
+
+private extension PracticeSide {
+    var foe: PracticeSide { self == .player ? .opponent : .player }
 }

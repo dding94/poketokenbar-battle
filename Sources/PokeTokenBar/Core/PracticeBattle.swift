@@ -111,6 +111,7 @@ final class PracticeBattle {
     private var remainingManual = 0.0
     private var remainingAuto = 0.0
     private var names: [String: String] = [:]
+    private var parser = PracticeEventParser()
     private let engine: BattleEngine
     private let clock: () -> TimeInterval
     init(engine: BattleEngine, clock: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }) {
@@ -119,7 +120,8 @@ final class PracticeBattle {
     func start(player: PracticeCandidate, opponent: PracticeCandidate, mode: Mode,
                seed: [UInt32] = (0..<4).map { _ in UInt32.random(in: 0...65535) }) {
         release()
-        view = nil; result = nil; messages = []; notice = nil; remainingSeconds = 30
+        view = nil; result = nil; messages = []; events = []; parser = PracticeEventParser()
+        notice = nil; remainingSeconds = 30
         request = BattleRequest(kind: "none", moves: []); self.mode = mode
         do {
             guard let p1 = player.snapshot, let p2 = opponent.snapshot else {
@@ -151,11 +153,13 @@ final class PracticeBattle {
             if clock() >= nextAutomaticTurn { advance(slot: nil) }
         } else if clock() >= deadline {
             messages.append("시간 초과 · 이번 턴은 자동으로 선택합니다.")
+            events.append(.timedOut)
             advance(slot: nil)
         }
     }
     func prepareSelection() {
-        release(); phase = .ready; view = nil; result = nil; messages = []; notice = nil
+        release(); phase = .ready; view = nil; result = nil; messages = []; events = []; parser = PracticeEventParser()
+        notice = nil
         request = BattleRequest(kind: "none", moves: []); remainingSeconds = 30
     }
     func cancel() {
@@ -216,10 +220,12 @@ final class PracticeBattle {
         request = try BattleJSON.decode(engine.call(.request, arguments: [id, viewer]))
         let lines: [String] = try BattleJSON.decode(engine.call(.drainLog, arguments: [id, viewer]))
         messages += lines.compactMap { PracticeText.log($0, names: names) }
+        events += parser.parse(lines)
         struct Reveal: Decodable { let kind: String; let side: String; let id: String }
-        let events: [Reveal] = try BattleJSON.decode(engine.call(.drainEvents, arguments: [id, viewer]))
-        for event in events where event.kind == "ability" {
-            messages.append("\(names[event.side] ?? event.side) · 특성 공개: \(event.id)")
+        let reveals: [Reveal] = try BattleJSON.decode(engine.call(.drainEvents, arguments: [id, viewer]))
+        for reveal in reveals where reveal.kind == "ability" {
+            messages.append("\(names[reveal.side] ?? reveal.side) · 특성 공개: \(reveal.id)")
+            if let side = PracticeSide(rawValue: reveal.side) { events.append(.abilityRevealed(side, abilityID: reveal.id)) }
         }
         if view?.ended == true {
             result = try BattleJSON.decode(engine.call(.result, arguments: [id]))
