@@ -767,6 +767,20 @@ read_when:
 
 ## 표시·UI
 
+- **판단 힌트는 기술이 실제로 따르는 규칙으로만 계산하고, 고정 높이 화면은 내용을 따로 재서 넘침을
+  단언한다.** 연습전 판단 힌트(PR 03B-3) 리뷰에서 두 부류가 나왔다. ① 고정 피해·일격필살(나이트헤드·
+  지구던지기·용의분노·분노의앞니·가위자르기 등)은 상성 배수를 받지 않고 면역만 따르는데 ×2·자속을
+  표시했고, 잠재파워·웨더볼처럼 전투 중 타입이 바뀌는 기술도 표기 타입으로 힌트를 냈다. 테스트가 일반
+  기술(피카츄·잉어킹)만 써서 이 분기를 밟지 않았다. 엔진 `describeMoves`의 `fixedDamage`·`variableType`
+  (Dex `damage`·`damageCallback`·`ohko`·`onModifyType`)을 받아 `PracticeTypeChart.effectiveness` 한 곳에서
+  판정한다. ② 본문이 `.frame(height: 520)`이라 화면 `fittingSize`는 항상 610이었고, 영어 최악 상태(상대
+  기술 4개·특성 공개·안내 줄)가 530pt로 넘쳐도 테스트가 통과했다.
+  **부류 스윕:** 매치업·기술 카드의 모든 `info.type` 사용처가 `effectiveness`를 거친다. 고정 높이 화면은
+  선택·전투·결과 모두 같은 구조라 전투 보드 최악 상태를 내용만 호스팅해 잰다.
+  **회귀 가드:** `testFixedDamageMovesNeverCountAsSuperEffectiveInTheMatchup`,
+  `testVariableTypeMoveHintsHaveNeitherMultiplierNorStab`, `testBattleBoardWorstCaseFitsTheBody`(≤ 520),
+  `testWidestEnglishMoveCardFitsItsColumn`.
+
 - **연출 화면의 공개 정보는 엔진 상태가 아니라 이미 재생된 비트에서 가져오고, 엔진의 별도 채널은 로그
   순서에 다시 끼운다.** 연습전 턴 연출(PR 03B-2)에서 두 가지가 리뷰로 드러났다. ① 상대 기술·특성 칩이
   엔진 `state()`를 읽어, 그 기술을 쓰는 비트가 재생되기 전에 먼저 보였다. ② `drainEvents`의 특성 공개를
