@@ -1,12 +1,12 @@
 # 다음 AI를 위한 작업 인계
 
-최종 갱신: 2026-10-29. **PR 00 코드는 작성했지만 테스트를 실행하지 못했고, 배틀 기능은 아직 구현하지 않았다.**
+최종 갱신: 2026-10-29. **PR 00의 최초 CI는 통과했지만 실제 설치 검증에서 캐시·로그 격리 누락을 발견했다. 포크 앱을 즉시 종료했고 저장 경로 회귀 테스트부터 보완 중이다. 설치된 구번들은 재실행하지 않는다. 배틀 기능은 아직 구현하지 않았다.**
 
-## 진행 중인 작업 (2026-10-29 기준, PR 00 원격 검증 준비)
+## 진행 중인 작업 (2026-10-29 기준, PR 00 저장 경로 격리 보완)
 
-- 브랜치: `feat/local-practice-battle` (`main` 5e9af78에서 분기). 인수 시 모든 변경은 미커밋이었다. 사용자가 GitHub Actions 검증과 필요한 커밋·푸시를 승인했으며, 문서·PR 00·프로브를 나누어 올리는 중이다. 설치·배포·공개 전환은 하지 않았다.
+- 브랜치: `feat/local-practice-battle` (`main` 5e9af78에서 분기). 인수 시 모든 변경은 미커밋이었다. 사용자 승인으로 문서(`372eba0`)·PR 00(`c04769a`)·프로브(`0ddc584`)를 나누어 커밋·푸시했고 CI 수정은 `f1dad46`, `cc0b9fe`다. 이후 사용자 승인으로 별도 포크 앱을 설치·실행했으나 아래 격리 누락을 발견해 종료했다. 배포·공개 전환은 하지 않았다.
 - 문서 개정: `docs/BATTLE_PLAN.md`(새 구조, PR 00~13 + PR 03A, 부록 A), `docs/AI_HANDOFF.md`, `AGENTS.md`, `README.md`(고지), `CLAUDE.md`(첫 단락 경고 한 줄).
-- PR 00 코드(작성 완료, 테스트 미실행):
+- PR 00 코드(작성 완료, macOS 15 CI 검증 완료·설치 검증 대기):
   - `Sources/PokeTokenBar/Core/AppIdentity.swift`(신규): 포크 식별값의 단일 출처와 원본 값 목록.
   - `Core/AppStatePaths.swift`: 기본 저장 폴더를 `PokeTokenBarBattle`로 분리, `UpstreamSaveImport`(원본 `companion-state.json`을 포크 세이브가 없을 때만 복사).
   - `PokeTokenBarApp.swift`: 원본 폴더를 옮기던 TokenMac → PokeTokenBar 이관을 제거하고, `PTB_STATE_DIR`가 없을 때만 첫 실행 복사를 호출.
@@ -22,8 +22,15 @@
 검증 상태:
 
 - `swift build`(debug): 성공 (Command Line Tools, Swift 6.3.2).
-- `swift test`: **실행 불가.** 이 맥에는 Xcode가 없고 Command Line Tools만 있어 `no such module 'XCTest'`로 컴파일이 멈춘다. 새 가드 테스트와 기존 전체 테스트 모두 미실행이며, 결함 주입 확인도 하지 않았다.
-- `scripts/*.sh`: `bash -n` 문법 확인만 했다. `build-app.sh`는 실행하지 않았다.
+- 로컬 `swift test`: **실행 불가.** Command Line Tools만 있어 `no such module 'XCTest'`로 컴파일이 멈춘다. 원격 macOS 15 CI에서 아래 검증을 수행했다.
+- [성공한 CI 40801084586](https://github.com/dding94/poketokenbar-battle/actions/runs/40801084586) (`cc0b9fe`, macOS 15, Apple Swift 6.1.2):
+  - `swift test --filter "AppIdentityTests|SupportMailTests|UpdateCheckerTests"`: 종료 0, **31건 통과·실패 0·skip 0**.
+  - `./scripts/test-gate.sh`: 종료 0. `swift test --enable-code-coverage` 보고 1,562건 중 **1,546건 통과·16건 skip·실패 0**, 코어 라인 커버리지 **93.80%**(기준 75%).
+  - skip 16건은 대용량 성능 1·선택적 이미지 생성 3·실제 자격 증명 경계 2·실제 사용량 로그 및 PokéAPI 대조 10건이다. 이 시나리오는 미검증이며 통과로 계산하지 않는다. 실제 사용자 로그·자격 증명을 CI에 제공하지 않았다.
+  - `bash scripts/test-fork-identity-guard.sh`: 종료 0. 원본 bundle ID 주입 후 해당 가드 **1건 실행·1건 assertion 실패, 내부 명령 종료 1** → 원복 후 **1건 통과, 내부 명령 종료 0**. 원복 파일 일치 확인.
+  - Gitleaks: 전체 이력 386개 커밋 검사, 확인된 요금제 라벨 오탐 한 건만 fingerprint 예외, 발견 0. macOS 작업 5분 6초, Linux 작업 14초. 실제 청구 반영액은 별도이며 실행 시간만으로 0원이라고 단정하지 않는다.
+- `PTB_SKIP_INSTALL=1 PTB_NATIVE_ARCH_ONLY=1 ./scripts/build-app.sh`: 종료 0, `build/PokeTokenBar Battle.app` 생성(arm64, ad-hoc 서명, 설치 생략). 기존 `PopoverView.swift:1189`의 `GeometryProxy` Sendable 경고 1건은 남아 있다. 엔진 번들은 아직 없으며 배틀 기능은 미포함이다.
+- 번들 검사: Python `plistlib`로 Info.plist·LaunchAgent를 파싱하고 `lipo -verify_arch arm64`, `codesign -d --entitlements - --xml`, `codesign --verify --deep --strict`를 실행해 종료 0. 번들 ID `io.github.dding94.poketokenbar-battle`, 실행 파일 `PokeTokenBarBattle`, LaunchAgent `io.github.dding94.poketokenbar-battle.login`과 포크 설치 경로, `com.apple.security.cs.allow-jit=true`를 확인했다. 첫 검사 스크립트는 codesign의 기본 텍스트 출력을 XML로 파싱해 종료 1이었고, `--xml`을 명시한 재검사는 통과했다. Intel 슬라이스·안정 서명 인증서·설치 후 동작은 미검증이다.
 - 엔진 프로브: `cd engine && npm run probe` — 5세대 2,500판 Node·JavaScriptCore 불일치 0, 재생·상태 왕복 실패 0(`--keep-names` 빌드). 9세대 규칙은 미검증.
 
 ### PR 00 검증 재시도 (2026-10-29)
@@ -35,18 +42,27 @@
   - 재시도도 종료 코드 **1**: 테스트 모듈 컴파일에서 **`no such module 'XCTest'`**. 테스트 실행 **0건**, 테스트 성공·실패·skip 집계는 생성되지 않았다. 테스트 통과나 기능 RED 증거로 보지 않는다.
 - XCTest 불가 시 멈추라는 사용자 지시에 따라 `./scripts/test-gate.sh`, 식별값 결함 주입, 앱 번들 생성·설치·실행 검증은 미실행이다. PR 01·02·03·03A에는 착수하지 않았고 계획 체크박스도 바꾸지 않았다. 원본 앱·실제 세이브에는 접근하지 않았다.
 - **선택 완료:** 사용자가 무료 분량이 충분하면 Actions로 검증하도록 승인했다(필요한 커밋·푸시 포함). 필요 시 공개 전환도 허용했으나, 2026-10-29 로그인한 GitHub Billing 화면에서 이번 검증에 충분한 무료 잔여량을 확인해 private를 유지한다. 계정별 과금 세부 정보는 대화에서만 보고한다.
-- CI 준비: 기존 `ci.yml`의 수동 실행만 유지하고 macOS 15 작업은 10분, Linux 비밀값 검사는 3분으로 제한했다. `PTB_STATE_DIR`는 러너 임시 폴더다. 대상 테스트 → 전체 커버리지 게이트 → 원본 bundle ID 결함 주입(실제 XCTest assertion 실패 확인) → 원복 후 재검증 순서다. 결과 이미지는 1일만 보관한다. 원격 실행 결과는 아직 없다.
+- CI 설정: 기존 `ci.yml`의 수동 실행만 유지하고 macOS 15 작업은 10분, Linux 비밀값 검사는 3분으로 제한했다. `PTB_STATE_DIR`는 러너 임시 폴더다. 대상 테스트 → 전체 커버리지 게이트 → 원본 bundle ID 결함 주입 → 원복 후 재검증 순서다. 결과 이미지는 1일만 보관한다.
 - 첫 원격 실행: [40800833879](https://github.com/dding94/poketokenbar-battle/actions/runs/40800833879), commit `f1dad46`. 대상 테스트 명령 종료 1, 실행 0건: `AppIdentityTests.testLoginItemUsesForkAgent`의 `@MainActor` 누락으로 CI 도구체인에서 컴파일 실패. 전체 게이트·결함 주입은 skip(미검증)이다. 앱만 빌드했던 이전 검증은 테스트 소스의 컴파일을 확인하지 못했다. 해당 메서드에 격리를 명시하고 다른 `LoginItem` 테스트 접근도 검색했다.
 - 같은 실행의 Gitleaks는 전체 이력 385개 커밋에서 원본 테스트의 공개 요금제 라벨 `default_claude_max_20x`를 비밀값으로 오인했다. 원본 커밋·파일·행을 확인하고 `.gitleaksignore`에는 그 한 건의 fingerprint만 예외로 기록한다. 전체 파일·규칙을 제외하지 않는다.
-- 스크립트 가드 점검: `build-app.sh`의 안전 설명 주석에 원본 설치 경로가 있어 기존 문자열 검사가 오인할 수 있었다. 테스트 helper가 주석 행을 제외한 실행 내용을 검사하도록 보완했으며, 원본 식별값 주입 검증은 유지한다. 위 수정의 원격 재검증은 아직 대기 중이다.
+- 스크립트 가드 점검: `build-app.sh`의 안전 설명 주석에 원본 설치 경로가 있어 기존 문자열 검사가 오인할 수 있었다. 테스트 helper가 주석 행을 제외한 실행 내용을 검사하도록 보완했으며, 원본 식별값 주입 검증은 유지한다. 위 수정은 성공한 CI에서 재검증했다.
 
 이어서 할 일:
 
-1. XCTest를 쓸 수 있게 한다: Xcode 설치 후 `xcode-select`로 선택하거나, GitHub Actions `ci.yml`을 수동 실행한다(private 저장소라 무료 분량을 소모한다).
-2. `swift test --filter "AppIdentityTests|SupportMailTests|UpdateCheckerTests"` → `./scripts/test-gate.sh`. 값 하나를 원본으로 되돌려 가드가 실패하는지 확인한 뒤 원복한다.
-3. `PTB_SKIP_INSTALL=1 PTB_NATIVE_ARCH_ONLY=1 ./scripts/build-app.sh`로 `build/PokeTokenBar Battle.app`을 만든다. Info.plist 번들 ID·실행 파일·LaunchAgent·`codesign -d --entitlements -`를 확인한 뒤 설치하고, 원본 앱이 계속 실행되고 원본 폴더가 바뀌지 않는지와 첫 실행 복사를 확인한다.
-4. PR 00을 마무리하고 PR 01 → 02 → 03 → 03A(로컬 연습전) 순서로 진행한다. 사용자가 연습전을 직접 시험한 뒤 public 전환을 정한다.
-5. 커밋은 사용자 요청이 있을 때 PR 단위로 나눈다(문서 개정 / PR 00 / engine 프로브).
+1. 저장 경로 격리 회귀 테스트(commit `2fb688e`)의 RED를 원격 XCTest로 확인하고 모든 앱 소유 저장 경로를 `AppStatePaths`에 모은다. 수정 전 설치본은 실행하지 않는다.
+2. 관련 테스트·전체 게이트·결함 주입을 다시 통과시킨 뒤 번들을 재생성·검사·교체하고 격리를 재검증한다. 설치·실행 및 계속 진행은 사용자가 승인했다.
+3. PR 00을 마무리하고 PR 01 → 02 → 03 → 03A(로컬 연습전) 순서로 진행한다. 원격 검증은 충분한 무료 잔여량 안에서 표준 러너·수동 실행만 사용한다.
+4. 사용자에게 연습전 시험 방법을 안내하고 멈춘다. 현재 공개 전환은 필요하지 않아 private를 유지한다.
+
+### 설치 검증에서 발견한 격리 누락
+
+- `ditto 'build/PokeTokenBar Battle.app' '/Applications/PokeTokenBar Battle.app'`와 `open '/Applications/PokeTokenBar Battle.app'`: 각 종료 0. 원본 앱 PID가 유지된 채 포크도 실행됐고 최초 복사 성공 로그(`upstream save import: imported`) 및 포크 세이브 생성을 확인했다. 실제 세이브는 fixture로 사용하거나 저장소·CI에 올리지 않았다.
+- 원본 저장 폴더 220개 파일의 설치 전후 해시·mtime 검사에서 `companion-state.json`, `last-snapshot.json`, `usage-cache.json`의 변화를 발견해 검사 종료 1. 원본 앱도 실행 중이므로 세이브 변화의 주체는 이 비교만으로 단정할 수 없다. 코드 점검으로 포크의 사용량 캐시·진단 스냅샷이 원본 폴더를 쓰는 것은 확인했다.
+- 즉시 `pkill -TERM -x PokeTokenBarBattle`(종료 0)로 포크만 종료했고 원본 앱이 계속 실행 중임을 확인했다. 실제 원본 파일을 과거 값으로 되돌리지 않았다.
+- 근본원인: `AppStatePaths`를 사용하는 companion 세이브만 분리하고, 직접 경로를 만드는 다른 저장소를 놓쳤다. 기존 테스트도 식별 상수·companion 복사만 검증해 실제 캐시·로그 쓰기 경로를 검사하지 못했다.
+- 부류 스윕: `LocalUsageCache`·`UsageStore.writeParitySnapshot`·`PokeAPIClient.baseIndexFile`·`SpriteStore`·`SpriteLoader`에 원본 Application Support 경로, `AppLog`·`CrashReporter`에 원본 로그/실행 마커 경로가 남아 있다. `PTB_STATE_DIR`도 이 경로들에는 적용되지 않았다. 진단 메일의 로그 위치 안내도 함께 수정해야 한다.
+- RED: [CI 40802465261](https://github.com/dding94/poketokenbar-battle/actions/runs/40802465261), `2fb688e`. 대상 34건 실행·14 assertion 실패·skip 0, 명령 종료 1. 로그 위치·두 스프라이트 경로 및 분산된 경로 생성이 실제로 검출됐다. 소스 가드가 `AppStatePaths.applicationSupportDirectory()` 호출도 오인한 한 건은 직접 FileManager 조회 패턴만 검사하도록 좁혔다.
+- 수정: 위 모든 저장소를 `AppStatePaths.directory()` 및 그 아래 `Logs/`로 모으고 SpriteLoader와 SpriteStore의 경로를 공유했다. 진단 메일도 실제 `AppLog.logFileURL`을 표시한다. 기존 로그 파일 이름은 포크 전용 폴더 안에서 유지한다. 수정 후 원격 재검증 전이며, 원본 폴더의 변경 없음은 아직 입증하지 못했다.
 
 ## 지금 있는 것
 
@@ -75,8 +91,8 @@
 
 - PR 01의 엔진 어댑터·번들·테스트, `server/`, Cloudflare 리소스·자격 증명·배포 URL.
 - 배틀 화면(로컬 연습전 포함)·락스텝 프로토콜·소유권 이전·스타터 지급·그룹 화면.
-- 이 포크의 Swift 테스트 실행, 앱 번들 빌드·설치·실행 확인.
-- PR 00의 테스트 검증(코드는 위 "진행 중인 작업" 참고).
+- 이 포크 앱의 설치·실행 확인. CI의 skip 16건 및 macOS 15 이외 환경에서의 테스트 검증.
+- PR 00의 실제 설치본 공존·첫 실행 복사 검증(단위 테스트는 위 "진행 중인 작업" 참고).
 - 저장소 public 전환과 앱 안 고지(README 고지와 포크 고유 커밋의 비밀값 패턴 점검은 2026-10-29에 완료).
 - 실제 GitHub 기능 PR. 계획서의 PR 00~13은 앞으로 수행할 작업 단위다.
 

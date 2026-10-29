@@ -13,8 +13,7 @@ actor SpriteStore {
     nonisolated let directory: URL
 
     init(directory: URL? = nil) {
-        let d = directory ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("PokeTokenBar/sprites")
+        let d = directory ?? AppStatePaths.directory().appendingPathComponent("sprites", isDirectory: true)
         self.directory = d
         try? FileManager.default.createDirectory(at: d, withIntermediateDirectories: true)
     }
@@ -97,10 +96,7 @@ actor SpriteStore {
 
 @MainActor
 enum SpriteLoader {
-    static let cacheDir: URL = {
-        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("PokeTokenBar/sprites")
-    }()
+    static let cacheDir: URL = SpriteStore.shared.directory
 
     /// 동기 시드와 async 로드가 NSImage 를 공유해 파일 읽기와 이미지 객체 생성을 반복하지 않는다.
     /// 키는 디렉터리를 포함한 파일 경로다. countLimit 은 퇴출 기준이며 엄격한 메모리 상한은 아니다.

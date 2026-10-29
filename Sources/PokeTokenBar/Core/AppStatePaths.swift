@@ -29,6 +29,13 @@ enum AppStatePaths {
     static func applicationSupportDirectory() -> URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
     }
+
+    /// Diagnostics belong to the same profile as saves and caches, including PTB_STATE_DIR runs.
+    static func logsDirectory() -> URL {
+        let dir = directory().appendingPathComponent("Logs", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
 }
 
 /// 첫 실행에 원본 앱의 세이브를 **복사**해 온다. 원본 파일은 읽기만 하고, 포크 세이브가 이미 있으면

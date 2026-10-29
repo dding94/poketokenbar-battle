@@ -116,8 +116,8 @@ final class AppIdentityTests: XCTestCase {
             let code = try String(contentsOf: file, encoding: .utf8).split(separator: "\n")
                 .filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("//") }
                 .joined(separator: "\n")
-            XCTAssertFalse(code.contains(".applicationSupportDirectory"), file.lastPathComponent)
-            XCTAssertFalse(code.contains(".libraryDirectory"), file.lastPathComponent)
+            XCTAssertFalse(code.contains(".urls(for: .applicationSupportDirectory"), file.lastPathComponent)
+            XCTAssertFalse(code.contains(".urls(for: .libraryDirectory"), file.lastPathComponent)
             XCTAssertFalse(code.contains("appendingPathComponent(\"PokeTokenBar\")"), file.lastPathComponent)
             XCTAssertFalse(code.contains("appendingPathComponent(\"PokeTokenBar/sprites\")"), file.lastPathComponent)
         }

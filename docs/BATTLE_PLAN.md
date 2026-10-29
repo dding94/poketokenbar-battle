@@ -301,7 +301,7 @@
 ### PR 00 — 포크 식별·격리와 공개 준비
 
 - 의존: 없음. 앱을 빌드·실행하는 모든 PR의 선행 조건.
-- [ ] **RED:** 번들 ID·앱 이름·저장 경로·LaunchAgent label·업데이트 저장소·cask 이름이 원본 값과 같으면 실패하는 테스트를 만든다.
+- [x] **RED:** 번들 ID·앱 이름·저장 경로·LaunchAgent label·업데이트 저장소·cask 이름이 원본 값과 같으면 실패하는 테스트를 만든다. (2026-10-29: CI `40801084586`, 대상 31건 통과·skip 0, 원본 bundle ID 주입 시 1건 assertion 실패·원복 후 통과. 다른 값의 결함 주입은 미실행.)
 - [ ] **GREEN:** 위 값을 포크 값으로 바꾸고(단일 출처 `Core/AppIdentity.swift`) 저장 경로를 포크 전용 폴더(`PokeTokenBarBattle`)로 분리한다. `build-app.sh`가 원본 `/Applications/PokeTokenBar.app`·원본 프로세스를 건드리지 않게 하고(실행 파일 이름도 분리), `release.sh`의 `REPO`·`TAP_REPO`·cask, 포크 자체 서명 인증서, `JSContext` JIT entitlement를 정한다.
 - [ ] 원본 폴더를 옮기던 시작 코드(TokenMac → PokeTokenBar 이관)를 포크에서 제거하고, 원본 세이브를 한 번 복사해 가져오는 경로를 추가한다. 원본 앱이 함께 실행 중일 때의 경고는 별도로 정한다.
 - [ ] 문제 리포트 메일이 원본 개발자 개인 메일로 가지 않게 하고(포크 수신처가 정해지기 전에는 리포트 행 숨김), 설정 푸터의 원본 웹사이트·후원 링크를 출처 표기로 바꾼다.
