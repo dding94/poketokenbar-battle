@@ -12,6 +12,12 @@ struct PracticeMoveInfo: Decodable, Equatable, Sendable {
     let accuracy: Int?
     let priority: Int
     let pp: Int
+    /// Damage set by level, a fixed amount, the target's HP, or a one-hit KO: type matchups only
+    /// decide immunity, and STAB does not apply.
+    let fixedDamage: Bool
+    /// The type changes in battle (Hidden Power by IVs, Weather Ball by weather), so the listed type
+    /// cannot back a matchup hint.
+    let variableType: Bool
     var isStatus: Bool { category == "Status" }
 }
 

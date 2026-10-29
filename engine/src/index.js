@@ -73,7 +73,9 @@ function describeSet(input) {
 function describeMoves(ids) {
   if(!Array.isArray(ids)||ids.length<1||ids.length>8||ids.some(m=>!slug(m)||!Dex.moves.get(m).exists))fail('invalid_moves');
   return {moves:ids.map(m=>{const v=Dex.moves.get(m);return {id:v.id,name:v.name,type:v.type,category:v.category,
-    basePower:v.basePower,accuracy:v.accuracy===true?null:v.accuracy,priority:v.priority,pp:v.pp};})};
+    basePower:v.basePower,accuracy:v.accuracy===true?null:v.accuracy,priority:v.priority,pp:v.pp,
+    // Fixed-damage and one-hit KO moves only check immunity; type-changing moves are not their listed type.
+    fixedDamage:!!(v.damage||v.damageCallback||v.ohko),variableType:!!v.onModifyType};})};
 }
 // Stellar exists only for Terastal, which these rules ban.
 const TYPES=Dex.types.all().filter(t=>t.exists&&!t.isNonstandard&&t.name!=='Stellar').map(t=>t.name);
