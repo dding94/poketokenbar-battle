@@ -42,7 +42,7 @@ final class PopoverNavigation {
     var showingRecap = false { didSet { if showingRecap { dexDetailCollectionID = nil } } }
     /// The local practice battle takes over the popover like Settings does. `AppDelegate` sets it
     /// again after `reset()` while `PracticeSession.isActive`, so a battle reopens where it was.
-    var showingPractice = false
+    var showingPractice = false { didSet { if showingPractice { dexDetailCollectionID = nil } } }
     /// The Collection tab's open Pokédex detail page (`DexSpecies.collectionID`); nil = grid or log.
     /// It lives here so Home sprites can open it, but it only lasts while the collection content is
     /// on screen: leaving the tab, switching segment, or covering it with Settings/Recap drops it —
@@ -60,6 +60,7 @@ final class PopoverNavigation {
         showSettings = false
         expandAdvancedOnOpen = false
         showingRecap = false
+        showingPractice = false
         tab = .home
     }
 
@@ -92,6 +93,9 @@ struct PopoverView: View {
     @Environment(CompanionStore.self) private var companion
     @Environment(UpdateChecker.self) private var updater
     @Environment(PopoverNavigation.self) private var nav
+    /// App-lifetime practice battle, injected by `AppDelegate`. Optional: views built without it
+    /// (tests, previews) keep the tabs and hide the practice entry points.
+    @Environment(PracticeSession.self) private var practice: PracticeSession?
 
     private var l: L { companion.l }
     @State private var showingClaudeKeychainHelp = false
@@ -115,6 +119,17 @@ struct PopoverView: View {
                     .environment(updater)
             } else if nav.showingRecap {
                 RecapScreen(store: store, companion: companion) { nav.showingRecap = false }
+            } else if nav.showingPractice, let practice {
+                // Back only leaves the screen; the session keeps the battle (and pauses manual turns).
+                PracticeScreen(session: practice, l: l) { nav.showingPractice = false }
+                    .onAppear {
+                        practice.prepare(state: companion.state, activeName: companion.displayName)
+                        practice.setPaused(false, reason: .screenHidden)
+                    }
+                    .onDisappear {
+                        practice.setPaused(true, reason: .screenHidden)
+                        practice.releaseIfIdle()
+                    }
             } else {
                 mainContent
             }
@@ -173,6 +188,9 @@ struct PopoverView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 12) {
                         CompanionHeader(store: companion) { nav.openDexEntry(collectionID: $0) }
+                        if let practice {
+                            PracticeEntryRow(session: practice, l: l) { nav.showingPractice = true }
+                        }
                         Divider()
                         header
                         Divider()
@@ -1017,13 +1035,15 @@ struct PopoverView: View {
                 }
             }
             Spacer()
-            Button {
-                PracticeWindowController.shared.open(state: companion.state, activeName: companion.displayName)
-            } label: {
-                Label(l.practiceTitle, systemImage: "bolt.shield")
+            if practice != nil {
+                Button {
+                    nav.showingPractice = true
+                } label: {
+                    Label(l.practiceTitle, systemImage: "bolt.shield")
+                }
+                .buttonStyle(.borderless)
+                .help(l.practiceOpenHint)
             }
-            .buttonStyle(.borderless)
-            .help(l.practiceOpenHint)
 
             // 끄기는 펫 우클릭. 켜기는 여기 — 숨기면 우클릭할 대상이 없다(#301).
             // Settings 체크박스와 같은 `floatingPetEnabled`. 홈 탭에만 두면 도감에서 못 켠다.

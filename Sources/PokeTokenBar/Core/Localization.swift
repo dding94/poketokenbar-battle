@@ -1653,7 +1653,7 @@ struct L {
 extension L {
     var practicePlayer: String { lang == .ko ? "내 출전 개체" : "Your Pokémon" }
     var practiceOpponent: String { lang == .ko ? "연습 상대 · 자동 정책" : "Opponent · auto policy" }
-    var practiceNeedsPair: String { lang == .ko ? "출전 가능한 개체 두 마리가 필요합니다. 보유 개체 정보가 준비되면 이 창을 다시 열어 주세요." : "Two eligible Pokémon are needed. Reopen this window after their profiles are ready." }
+    var practiceNeedsPair: String { lang == .ko ? "출전할 수 있는 개체가 두 마리 필요해요. 개체 정보가 준비되면 여기에 바로 나타나요." : "Two eligible Pokémon are needed. They appear here as soon as their profiles are ready." }
     var practiceMissingInfo: String { lang == .ko ? "정보 없음" : "Missing information" }
     var practiceReadOnly: String { lang == .ko ? "세이브 읽기 전용 · 경험치·소유권 변화 없음" : "Read-only save · no growth or ownership changes" }
     var practiceRules: String { lang == .ko ? "9세대 · 테라스탈·도구 없음 · EV 0 · 200턴 무승부" : "Gen 9 · no Tera/items · EV 0 · draw at 200 turns" }
@@ -1691,6 +1691,65 @@ extension L {
     var practiceOpenHint: String { lang == .ko ? "내 개체로 로컬 연습전 열기" : "Open a local practice battle with your Pokémon" }
     var practiceStatusRunning: String { lang == .ko ? "연습전 진행 중" : "Practice battle in progress" }
     var practiceStatusResult: String { lang == .ko ? "연습전 결과가 나왔어요" : "Practice battle result is ready" }
+    // In-popover practice screen (selection → battle → result) and its Home entry row.
+    var practiceNotRecorded: String { lang == .ko ? "기록 안 남음" : "Not recorded" }
+    var practiceAutoBadge: String { lang == .ko ? "자동" : "Auto" }
+    var practiceResultTitle: String { lang == .ko ? "결과" : "Result" }
+    var practiceChange: String { lang == .ko ? "변경" : "Change" }
+    var practiceOpponentCaption: String { lang == .ko ? "상대 고르기 · 공개 정보는 종·레벨·타입·능력치뿐" : "Pick an opponent · only species, level, types and stats are public" }
+    var practiceYou: String { lang == .ko ? "나" : "You" }
+    var practiceFoe: String { lang == .ko ? "상대" : "Foe" }
+    var practiceRevealHint: String { lang == .ko ? "기술·특성은 배틀 중 처음 쓸 때 공개돼요" : "Moves and abilities are revealed the first time they are used" }
+    var practiceManualPerTurn: String { lang == .ko ? "직접 조작 · 턴당 30초" : "Manual · 30s per turn" }
+    var practiceAutoPickHint: String { lang == .ko ? "시간이 지나면 기술이 자동으로 골라져요" : "When time runs out, a move is picked for you" }
+    var practiceAutoModeHint: String { lang == .ko ? "두 개체가 같은 자동 정책으로 겨뤄요" : "Both Pokémon follow the same automatic policy" }
+    var practiceStartBattle: String { lang == .ko ? "배틀 시작" : "Start battle" }
+    var practiceWhatNext: String { lang == .ko ? "무엇을 할까?" : "What will you do?" }
+    var practiceKeyHint: String { lang == .ko ? "1–4 키로 바로 선택" : "Press 1–4 to choose" }
+    var practiceAutoPlaying: String { lang == .ko ? "자동으로 진행 중이에요" : "Playing automatically" }
+    var practicePausedHint: String { lang == .ko ? "잠시 멈춤 · 다시 보면 이어져요" : "Paused · resumes when you look again" }
+    var practiceWaitingTurn: String { lang == .ko ? "턴을 정리하는 중…" : "Resolving the turn…" }
+    var practiceSwitchToAuto: String { lang == .ko ? "자동으로 전환" : "Switch to auto" }
+    var practiceForfeit: String { lang == .ko ? "기권" : "Forfeit" }
+    var practiceBattleFailed: String { lang == .ko ? "배틀을 이어갈 수 없어요" : "The battle cannot continue" }
+    var practiceBackToSelection: String { lang == .ko ? "선택으로 돌아가기" : "Back to selection" }
+    var practiceVictory: String { lang == .ko ? "승리" : "Victory" }
+    var practiceDefeat: String { lang == .ko ? "패배" : "Defeat" }
+    var practiceRemainingHP: String { lang == .ko ? "남은 HP" : "HP left" }
+    var practiceFoeRevealed: String { lang == .ko ? "상대 공개" : "Foe revealed" }
+    var practiceRematch: String { lang == .ko ? "다시 붙기" : "Rematch" }
+    var practiceOtherOpponent: String { lang == .ko ? "다른 상대" : "New opponent" }
+    var practiceAutoAgain: String { lang == .ko ? "자동으로 다시" : "Again on auto" }
+    var practiceCaptionBattle: String { lang == .ko ? "팝오버를 닫아도 배틀은 그대로 남아요" : "Closing the popover keeps the battle" }
+    var practiceCaptionResult: String { lang == .ko ? "연습 결과는 저장되지 않아요 · 200턴이 지나면 무승부" : "Practice results are not saved · draw at 200 turns" }
+    var practiceEntryIdle: String { lang == .ko ? "내 개체끼리 가볍게 겨뤄 보세요" : "Spar between your own Pokémon" }
+    var practiceEntryResult: String { lang == .ko ? "결과가 나왔어요" : "The result is in" }
+    var practiceEntryStart: String { lang == .ko ? "시작" : "Start" }
+    var practiceEntryResume: String { lang == .ko ? "이어하기" : "Resume" }
+    var practiceEntryShowResult: String { lang == .ko ? "결과 보기" : "See result" }
+    func practiceEntryRunning(_ turn: Int) -> String { lang == .ko ? "진행 중 · \(turn)턴" : "In progress · turn \(turn)" }
+    func practiceTurnClock(_ turn: Int, _ seconds: Int) -> String { "\(practiceTurn(turn)) · \(practiceSeconds(seconds))" }
+    func practiceWonLine(turns: Int, foe: String) -> String {
+        lang == .ko ? "\(turns)턴 만에 \(KoreanParticle.object.attach(to: foe)) 쓰러뜨렸어요" : "Beat \(foe) in \(turns) turns"
+    }
+    func practiceLostLine(turns: Int, foe: String) -> String {
+        lang == .ko ? "\(turns)턴 만에 \(foe)에게 졌어요" : "Lost to \(foe) in \(turns) turns"
+    }
+    func practiceDrawLine(turns: Int) -> String { lang == .ko ? "\(turns)턴 동안 승부가 나지 않았어요" : "No winner after \(turns) turns" }
+    func practiceRevealedSummary(moves: Int, ability: Bool) -> String {
+        lang == .ko ? "기술 \(moves)/4 · 특성 \(ability ? "공개" : "미공개")" : "Moves \(moves)/4 · ability \(ability ? "shown" : "hidden")"
+    }
+    /// Six base-stat rows in engine key order (`hp`, `atk`, `def`, `spa`, `spd`, `spe`).
+    func practiceStatName(_ key: String) -> String {
+        let ko = ["hp": "HP", "atk": "공격", "def": "방어", "spa": "특공", "spd": "특방", "spe": "스피드"]
+        let en = ["hp": "HP", "atk": "Atk", "def": "Def", "spa": "SpA", "spd": "SpD", "spe": "Spe"]
+        return (lang == .ko ? ko : en)[key] ?? key.uppercased()
+    }
+    /// Engine status codes (`par`, `brn`, …) as a short chip label.
+    func practiceStatusName(_ code: String) -> String {
+        if lang == .ko { return PracticeText.status(code) }
+        return ["par": "PAR", "brn": "BRN", "psn": "PSN", "tox": "TOX", "slp": "SLP", "frz": "FRZ"][code] ?? code.uppercased()
+    }
     func practiceBlocked(_ count: Int) -> String { lang == .ko ? "출전 보류 · \(count)마리" : "Unavailable · \(count)" }
     func practiceTurn(_ turn: Int) -> String { lang == .ko ? "\(turn)턴" : "Turn \(turn)" }
     func practiceSeconds(_ seconds: Int) -> String { lang == .ko ? "\(seconds)초" : "\(seconds)s" }
