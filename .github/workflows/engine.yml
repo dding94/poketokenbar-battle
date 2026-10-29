@@ -1,0 +1,35 @@
+name: Battle Engine
+on:
+  workflow_dispatch:
+    inputs:
+      contract_only:
+        description: Run only the Swift boundary regression tests
+        type: boolean
+        default: false
+permissions:
+  contents: read
+jobs:
+  determinism:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-14, macos-15]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.14.0'
+      - name: Isolate test state
+        run: echo "PTB_STATE_DIR=$RUNNER_TEMP/ptb-engine-state" >> "$GITHUB_ENV"
+      - name: Swift JavaScriptCore boundary
+        run: swift test --filter BattleEngineTests
+      - name: Install pinned dependencies
+        if: ${{ !inputs.contract_only }}
+        working-directory: engine
+        run: npm ci --ignore-scripts
+      - name: Engine contracts and deterministic corpus
+        if: ${{ !inputs.contract_only }}
+        working-directory: engine
+        run: npm test && npm run corpus
