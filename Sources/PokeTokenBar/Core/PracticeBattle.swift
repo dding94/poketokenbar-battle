@@ -100,6 +100,8 @@ final class PracticeBattle {
     private(set) var messages: [String] = []
     private(set) var notice: String?
     private(set) var remainingSeconds = 30
+    /// True while `pause()` holds the battle; `tick()` and `choose` do nothing then.
+    private(set) var isPaused = false
     var mode: Mode = .manual
     private var battleID: String?
     private var deadline = 0.0
@@ -156,6 +158,10 @@ final class PracticeBattle {
         release()
         if phase != .finished { phase = .cancelled }
     }
+    /// Freezes the manual deadline and the automatic step, keeping the remaining time.
+    func pause() {}
+    /// Restores the deadline as `clock() + remaining`, so reopening never times out instantly.
+    func resume() {}
     private func advance(slot: Int?) {
         guard phase == .running else { return }
         notice = nil

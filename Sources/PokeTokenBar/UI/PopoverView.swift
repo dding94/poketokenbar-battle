@@ -40,6 +40,9 @@ final class PopoverNavigation {
     }
     /// The usage recap takes over the popover like Settings does; closing the popover drops it.
     var showingRecap = false { didSet { if showingRecap { dexDetailCollectionID = nil } } }
+    /// The local practice battle takes over the popover like Settings does. `AppDelegate` sets it
+    /// again after `reset()` while `PracticeSession.isActive`, so a battle reopens where it was.
+    var showingPractice = false
     /// The Collection tab's open Pokédex detail page (`DexSpecies.collectionID`); nil = grid or log.
     /// It lives here so Home sprites can open it, but it only lasts while the collection content is
     /// on screen: leaving the tab, switching segment, or covering it with Settings/Recap drops it —

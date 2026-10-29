@@ -1689,6 +1689,8 @@ extension L {
     var practiceCannotOpen: String { lang == .ko ? "연습전을 열 수 없습니다." : "Unable to open practice." }
     var practiceTitle: String { lang == .ko ? "연습전" : "Practice" }
     var practiceOpenHint: String { lang == .ko ? "내 개체로 로컬 연습전 열기" : "Open a local practice battle with your Pokémon" }
+    var practiceStatusRunning: String { lang == .ko ? "연습전 진행 중" : "Practice battle in progress" }
+    var practiceStatusResult: String { lang == .ko ? "연습전 결과가 나왔어요" : "Practice battle result is ready" }
     func practiceBlocked(_ count: Int) -> String { lang == .ko ? "출전 보류 · \(count)마리" : "Unavailable · \(count)" }
     func practiceTurn(_ turn: Int) -> String { lang == .ko ? "\(turn)턴" : "Turn \(turn)" }
     func practiceSeconds(_ seconds: Int) -> String { lang == .ko ? "\(seconds)초" : "\(seconds)s" }
