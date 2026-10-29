@@ -346,4 +346,150 @@ final class PracticeScreenRenderingTests: XCTestCase {
         assertRendered(result, in: after)
         XCTAssertTrue(session.resultSeen, "the result screen reports it was shown")
     }
+
+    // MARK: Review findings (hint UI)
+
+    /// Hosts any view offscreen at a fixed size, closing the previous window first.
+    private func hostView<V: View>(_ view: V, width: CGFloat, height: CGFloat) -> NSView {
+        window?.close()
+        let host = NSHostingView(rootView: view
+            .frame(width: width, height: height, alignment: .topLeading)
+            .background(Color.white)
+            .environment(\.colorScheme, .light))
+        host.frame = NSRect(x: 0, y: 0, width: width, height: height)
+        let window = NSWindow(contentRect: NSRect(x: -10000, y: -10000, width: width, height: height),
+                              styleMask: .borderless, backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.appearance = NSAppearance(named: .aqua)
+        window.contentView = host
+        window.orderFront(nil)
+        self.window = window
+        return host
+    }
+
+    /// The width of one move card: the board's two flexible columns with 8pt between them.
+    private static var moveCardWidth: CGFloat { (PopoverMetrics.contentWidth - 8) / 2 }
+
+    /// The body under the top bar is `.frame(height: 520)` (`PracticeScreen.bodyHeight`), so the screen's
+    /// `fittingSize` stays 610 whatever the board needs: only the board's own height shows an overflow.
+    private static let boardBodyHeight: CGFloat = 520
+
+    /// Matchup card wording for every reach of the best hit, from the strongest to none at all. Before the
+    /// fix a resisted or immune best fell into "Best hit: …", and a player with no damaging move read
+    /// "No move hits a weak spot", which hides that the battle cannot be won.
+    func testMatchupCardWordsEveryOffenseCase() async throws {
+        let session = makeSession(Self.stagedState())
+        let snapshot = try XCTUnwrap(session.player?.snapshot)
+        func matchup(_ best: Double, _ moves: [String]) -> PracticeMatchup {
+            PracticeMatchup(bestOffense: best, bestMoveIDs: moves, threat: 1, order: .playerFirst,
+                            playerSpeed: 98, opponentSpeed: 88, levelGap: 0)
+        }
+        let cases: [(name: String, matchup: PracticeMatchup, needles: [String], absent: [String])] = [
+            ("strong", matchup(2, ["thunderbolt", "volttackle"]), ["Weak spot", "Thunderbolt", "Volt Tackle"], ["draw"]),
+            ("neutral", matchup(1, []), ["No move hits a weak spot"], ["draw"]),
+            ("resisted", matchup(0.5, ["irontail"]), ["Every attack is resisted", "Iron Tail"], ["Best hit", "draw"]),
+            ("immune", matchup(0, ["thunderbolt", "volttackle"]), ["None of your attacks land", "may end in a draw"],
+             ["Best hit", "Thunderbolt"]),
+            ("no attacks", matchup(0, []), ["No attacking moves", "may end in a draw"], ["weak spot"]),
+        ]
+        for item in cases {
+            let card = PracticeMatchupCard(matchup: item.matchup, playerSnapshot: snapshot, playerLevel: 50,
+                                           opponentLevel: 50, l: L(.en), artwork: false)
+            let host = hostView(card.padding(8), width: PopoverMetrics.contentWidth, height: 120)
+            let (text, bitmap) = try await waitForText(item.needles, in: host)
+            try save(bitmap, as: "practice-matchup-\(item.name.replacingOccurrences(of: " ", with: "-")).png")
+            for needle in item.needles {
+                XCTAssertTrue(Self.normalized(text).contains(Self.normalized(needle)),
+                              "\(item.name): \(needle) not rendered. Seen: \(text)")
+            }
+            for needle in item.absent {
+                XCTAssertFalse(Self.normalized(text).contains(Self.normalized(needle)),
+                               "\(item.name): \(needle) must not render. Seen: \(text)")
+            }
+        }
+    }
+
+    /// Seismic Toss deals damage by level: its card says so instead of a power, keeping accuracy and
+    /// category. Hidden Power's type varies, so it has no matchup badge and a "Varies" marker instead.
+    func testMoveCardsShowFixedDamageAndVariableType() async throws {
+        let toss = PracticeMoveInfo(id: "seismictoss", name: "Seismic Toss", type: "Fighting", category: "Physical",
+                                    basePower: 0, accuracy: 100, priority: 0, pp: 20, fixedDamage: true, variableType: false)
+        let power = PracticeMoveInfo(id: "hiddenpower", name: "Hidden Power", type: "Normal", category: "Special",
+                                     basePower: 60, accuracy: 100, priority: 0, pp: 15, fixedDamage: false, variableType: true)
+        let cards = VStack(spacing: 8) {
+            PracticeMoveCard(move: BattleMove(slot: 1, id: "seismictoss", name: "Seismic Toss", type: "Fighting",
+                                              pp: 20, maxpp: 20, disabled: false),
+                             key: 1, snapshot: nil, hint: PracticeMoveHint(info: toss, multiplier: 1, stab: false),
+                             l: L(.en), artwork: false, locked: false, action: {})
+            PracticeMoveCard(move: BattleMove(slot: 2, id: "hiddenpower", name: "Hidden Power", type: "Normal",
+                                              pp: 15, maxpp: 15, disabled: false),
+                             key: 2, snapshot: nil, hint: PracticeMoveHint(info: power, multiplier: nil, stab: false),
+                             l: L(.en), artwork: false, locked: false, action: {})
+        }
+        let host = hostView(cards.frame(width: Self.moveCardWidth).padding(8),
+                            width: Self.moveCardWidth + 16, height: 150)
+        let needles = ["Fixed damage", "Acc 100", "Varies", "Pow 60"]
+        let (text, bitmap) = try await waitForText(needles, in: host)
+        try save(bitmap, as: "practice-cards-fixed-variable.png")
+        assertRendered(needles, in: text)
+    }
+
+    /// FIGHTING + STAB + Priority + "PP 30/30" (Mach Punch on a Fighting type) is the widest English badge
+    /// row; it overflowed its column by ~7pt because every `ViewThatFits` alternative kept both markers.
+    /// The card must fit the width the grid proposes.
+    func testWidestEnglishMoveCardFitsItsColumn() {
+        let info = PracticeMoveInfo(id: "machpunch", name: "Mach Punch", type: "Fighting", category: "Physical",
+                                    basePower: 40, accuracy: 100, priority: 1, pp: 30, fixedDamage: false, variableType: false)
+        for lang in [AppLanguage.en, .ko] {
+            let card = PracticeMoveCard(move: BattleMove(slot: 1, id: "machpunch", name: "Mach Punch", type: "Fighting",
+                                                         pp: 30, maxpp: 30, disabled: false),
+                                        key: 1, snapshot: nil, hint: PracticeMoveHint(info: info, multiplier: 2, stab: true),
+                                        l: L(lang), artwork: false, locked: false, action: {})
+            let size = NSHostingController(rootView: card)
+                .sizeThatFits(in: CGSize(width: Self.moveCardWidth, height: .greatestFiniteMagnitude))
+            XCTAssertLessThanOrEqual(size.width, Self.moveCardWidth + 0.5,
+                                     "\(lang.rawValue): the card overflows its \(Self.moveCardWidth)pt column")
+        }
+    }
+
+    /// The board's worst case must fit the 520pt body: English, the foe's four moves and ability revealed
+    /// (the chips wrap to two lines), an engine notice, a beat with three callouts, and the bottom bar with
+    /// the speed row in automatic mode. Measured on the board alone, since the screen's frame hides overflow.
+    func testBattleBoardWorstCaseFitsTheBody() throws {
+        // Three moves, so slot 4 is a valid number the engine rejects: that sets the notice.
+        let state = Self.syntheticState(pikachu: ["thunderbolt", "quick-attack", "volt-tackle"],
+                                        magikarp: ["splash", "tackle", "flail", "bounce"])
+        for withBeat in [true, false] {
+            let session = makeSession(state)
+            session.mode = .manual
+            session.start()
+            let battle = try XCTUnwrap(session.battle)
+            let playback = try XCTUnwrap(session.playback)
+            playback.skipToEnd()
+            session.tick()
+            session.choose(slot: 4)
+            XCTAssertNotNil(battle.notice, "an empty slot is rejected with a notice")
+            playback.enqueue([.turn(2), .move(.opponent, moveID: "splash"), .move(.opponent, moveID: "tackle"),
+                              .abilityRevealed(.opponent, abilityID: "swiftswim"),
+                              .move(.opponent, moveID: "flail"), .move(.opponent, moveID: "bounce")])
+            playback.skipToEnd()
+            if withBeat {
+                playback.enqueue([.turn(3), .move(.player, moveID: "thunderbolt"),
+                                  .damage(.opponent, hp: 40, maxHP: 100, cause: nil),
+                                  .superEffective(.opponent), .critical(.opponent), .status(.opponent, code: "par")])
+                XCTAssertEqual(playback.beat?.callouts.count, 3, "the beat on screen carries three callouts")
+            }
+            session.mode = .automatic
+            XCTAssertEqual(battle.phase, .running)
+
+            let board = PracticeBattleBoard(session: session, battle: battle, l: L(.en), artwork: false)
+            let host = hostView(board, width: PopoverMetrics.contentWidth, height: Self.boardBodyHeight)
+            let measured = NSHostingView(rootView: board.frame(width: PopoverMetrics.contentWidth))
+            host.addSubview(measured)
+            let height = measured.fittingSize.height
+            XCTAssertLessThanOrEqual(height, Self.boardBodyHeight,
+                                     "board (beat on screen: \(withBeat)) needs \(height)pt of a \(Self.boardBodyHeight)pt body")
+            if !withBeat, let bitmap = try? capture(host) { try save(bitmap, as: "practice-board-worst-case.png") }
+        }
+    }
 }
