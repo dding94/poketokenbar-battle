@@ -767,6 +767,13 @@ read_when:
 
 ## 표시·UI
 
+- **Vision OCR 단언은 대소문자를 무시한다.** 팝오버 연습전 렌더 테스트가 CI(macOS 15)에서 화면에
+  그려진 작은 "Lv.50"을 "LV.50"으로 읽어 실패했다. 다른 글자는 모두 맞게 읽었다. 테스트 작성 환경에는
+  XCTest가 없어 OCR을 돌려 보지 못했고, 스텁 타입체크는 런타임 인식 결과를 검사하지 않는다.
+  **부류 스윕:** 같은 PR의 `PracticeScreenRenderingTests`와 `PopoverNavigationTests`의 연습 화면 OCR 비교를
+  공백·대소문자 무시로 바꿨다. 기존 OCR 테스트(도감·컬렉션·스냅샷)는 CI에서 안정적으로 통과해 그대로 둔다.
+  새 OCR 단언도 대소문자를 구분하지 않는다.
+
 - **초기 설정 이동은 애니메이션 완료에 의존하지 않는다.** 세션 키 만료·등록 안내에서
   `startExpanded`로 연 고급 섹션의 animated `scrollTo`가 비활성·non-key native 호스트에서
   반영되지 않았다. 원래 500ms 검사 시 clip Y는 0, 입력란의 host Y는 1483이었고, 입력 포커스만

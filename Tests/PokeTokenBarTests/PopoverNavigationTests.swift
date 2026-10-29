@@ -233,10 +233,11 @@ final class PopoverPracticeRoutingTests: XCTestCase {
             request.recognitionLanguages = ["en-US"]
             try VNImageRequestHandler(cgImage: XCTUnwrap(bitmap.cgImage)).perform([request])
             text = (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }.joined(separator: " ")
-        } while !text.contains("Start battle") && ContinuousClock.now < deadline
+        } while !text.localizedCaseInsensitiveContains("Start battle") && ContinuousClock.now < deadline
 
-        XCTAssertTrue(text.contains("Start battle"), "practice selection not shown: \(text)")
-        XCTAssertFalse(text.contains(L(.en).todayTokens), "Home must be covered: \(text)")
+        // Case-insensitive: Vision misreads letter case in small UI text (defect-log, 표시·UI).
+        XCTAssertTrue(text.localizedCaseInsensitiveContains("Start battle"), "practice selection not shown: \(text)")
+        XCTAssertFalse(text.localizedCaseInsensitiveContains(L(.en).todayTokens), "Home must be covered: \(text)")
         XCTAssertNotNil(practice.roster, "appearing prepares the session from the companion save")
         XCTAssertFalse(practice.pauseReasons.contains(.screenHidden), "the visible screen resumes the battle")
     }

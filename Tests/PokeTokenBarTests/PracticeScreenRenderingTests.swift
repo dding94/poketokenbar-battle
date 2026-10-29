@@ -90,7 +90,8 @@ final class PracticeScreenRenderingTests: XCTestCase {
         return (text, bitmap)
     }
 
-    private static func normalized(_ text: String) -> String { text.replacingOccurrences(of: " ", with: "") }
+    /// Spaces and letter case are ignored: Vision reads small "Lv.50" as "LV.50" on CI.
+    private static func normalized(_ text: String) -> String { text.replacingOccurrences(of: " ", with: "").lowercased() }
 
     private func assertRendered(_ needles: [String], in text: String,
                                 file: StaticString = #filePath, line: UInt = #line) {
@@ -163,7 +164,7 @@ final class PracticeScreenRenderingTests: XCTestCase {
         let needles = ["Rematch", "New opponent"]
         let (text, bitmap) = try await waitForText(needles, in: host)
         assertRendered(needles, in: text)
-        XCTAssertTrue(["Victory", "Defeat", "Draw"].contains { Self.normalized(text).contains($0) },
+        XCTAssertTrue(["Victory", "Defeat", "Draw"].contains { Self.normalized(text).contains(Self.normalized($0)) },
                       "outcome not rendered: \(text)")
         XCTAssertTrue(session.resultSeen, "the result screen reports it was shown")
         assertPopoverSized(host)
