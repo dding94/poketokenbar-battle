@@ -3,6 +3,7 @@ import SwiftUI
 
 @MainActor
 struct PracticeBattleView: View {
+    private let l = L(.ko)
     let roster: PracticeRoster
     @Bindable var model: PracticeBattle
     var artwork = true
@@ -22,34 +23,36 @@ struct PracticeBattleView: View {
         VStack(alignment: .leading, spacing: 18) {
             header
             HStack(alignment: .top, spacing: 16) {
-                contender(player, selection: $playerID, otherID: opponentID, title: "내 출전 개체", side: model.view?.p1, own: true)
-                contender(opponent, selection: $opponentID, otherID: playerID, title: "연습 상대 · 자동 정책", side: model.view?.p2, own: false)
+                contender(player, selection: $playerID, otherID: opponentID, title: l.practicePlayer, side: model.view?.p1, own: true)
+                contender(opponent, selection: $opponentID, otherID: playerID, title: l.practiceOpponent, side: model.view?.p2, own: false)
             }
             controls
             if let notice = model.notice {
                 Label(notice, systemImage: "exclamationmark.circle").font(.callout).foregroundStyle(.orange)
             }
             if roster.eligible.count < 2 {
-                Text("출전 가능한 개체 두 마리가 필요합니다. 보유 개체 정보가 준비되면 이 창을 다시 열어 주세요.")
+                Text(l.practiceNeedsPair)
                     .font(.callout).foregroundStyle(.secondary)
             }
             if !running, roster.candidates.contains(where: { $0.snapshot == nil }) {
-                DisclosureGroup("출전 보류 · \(roster.candidates.filter { $0.snapshot == nil }.count)마리") {
+                DisclosureGroup(l.practiceBlocked(roster.candidates.filter { $0.snapshot == nil }.count)) {
                     ForEach(roster.candidates.filter { $0.snapshot == nil }) { row in
-                        Text("\(row.name) — \(row.blockedReason ?? "정보 없음")").frame(maxWidth: .infinity, alignment: .leading)
+                        Text("\(row.name) — \(row.blockedReason ?? l.practiceMissingInfo)").frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }.font(.caption).foregroundStyle(.secondary)
             }
             battleLog
             HStack {
-                Label("세이브 읽기 전용 · 경험치·소유권 변화 없음", systemImage: "lock.shield")
+                Label(l.practiceReadOnly, systemImage: "lock.shield")
                 Spacer()
-                Text("9세대 · 테라스탈·도구 없음 · EV 0 · 200턴 무승부")
+                Text(l.practiceRules)
             }.font(.system(size: 11)).foregroundStyle(.secondary)
         }
         .padding(24)
         .frame(minWidth: 820, minHeight: 690)
         .background(Color(nsColor: .windowBackgroundColor))
+        .onChange(of: playerID) { _, _ in model.prepareSelection() }
+        .onChange(of: opponentID) { _, _ in model.prepareSelection() }
         .task {
             guard liveUpdates else { return }
             while !Task.isCancelled {
@@ -61,13 +64,13 @@ struct PracticeBattleView: View {
     private var header: some View {
         HStack {
             VStack(alignment: .leading, spacing: 5) {
-                Text("PRACTICE / 연습전").font(.system(size: 12, weight: .bold, design: .rounded)).tracking(2).foregroundStyle(.indigo)
-                Text("함께 자란 개체, 첫 번째 대결").font(.system(size: 23, weight: .bold))
-                Text("내 다른 개체를 상대로 가볍게 연습하세요. 상대는 같은 자동 정책으로 움직입니다.")
+                Text(l.practiceHeading).font(.system(size: 12, weight: .bold, design: .rounded)).tracking(2).foregroundStyle(.indigo)
+                Text(l.practiceHero).font(.system(size: 23, weight: .bold))
+                Text(l.practiceDescription)
                     .font(.callout).foregroundStyle(.secondary)
             }
             Spacer()
-            Label("로컬", systemImage: "desktopcomputer").font(.caption.weight(.semibold))
+            Label(l.practiceLocal, systemImage: "desktopcomputer").font(.caption.weight(.semibold))
                 .padding(.horizontal, 12).padding(.vertical, 7).background(.indigo.opacity(0.08), in: Capsule())
         }
     }
@@ -76,7 +79,7 @@ struct PracticeBattleView: View {
         VStack(alignment: .leading, spacing: 12) {
             Text(title).font(.caption.weight(.bold)).foregroundStyle(own ? .indigo : .teal)
             Picker(title, selection: selection) {
-                if candidate == nil { Text("개체를 골라 주세요").tag("") }
+                if candidate == nil { Text(l.practiceChoose).tag("") }
                 ForEach(Array(roster.eligible.enumerated()), id: \.element.id) { index, row in
                     Text("\(row.name) · Lv.\(row.snapshot?.set.level ?? 0) · #\(index + 1)")
                         .tag(row.id).disabled(row.id == otherID)
@@ -107,25 +110,25 @@ struct PracticeBattleView: View {
                 health(side, snapshot: snapshot, own: own)
                 if side == nil {
                     let stats = snapshot.publicInfo.stats
-                    Text("공격 \(stats["atk", default: 0]) · 방어 \(stats["def", default: 0]) · 특공 \(stats["spa", default: 0])\n특방 \(stats["spd", default: 0]) · 스피드 \(stats["spe", default: 0])")
+                    Text(l.practiceStats(stats))
                         .font(.caption.monospacedDigit()).foregroundStyle(.secondary).lineSpacing(3)
-                    Text("기술·특성은 전투 중 공개됩니다.").font(.caption).foregroundStyle(.tertiary)
+                    Text(l.practiceSecrets).font(.caption).foregroundStyle(.tertiary)
                 } else {
                     HStack(spacing: 5) {
-                        Text("특성").foregroundStyle(.secondary)
+                        Text(l.practiceAbility).foregroundStyle(.secondary)
                         if let ability = side?.ability { metadata(.ability, ability, snapshot: snapshot) }
-                        else { Text("아직 공개되지 않음").foregroundStyle(.tertiary) }
+                        else { Text(l.practiceUnrevealed).foregroundStyle(.tertiary) }
                     }.font(.caption)
                     if !own {
                         HStack(spacing: 5) {
-                            Text("기술").foregroundStyle(.secondary)
-                            if side?.moves.isEmpty == true { Text("첫 사용 후 공개").foregroundStyle(.tertiary) }
+                            Text(l.practiceMoves).foregroundStyle(.secondary)
+                            if side?.moves.isEmpty == true { Text(l.practiceFirstUse).foregroundStyle(.tertiary) }
                             ForEach(side?.moves ?? [], id: \.self) { metadata(.move, $0, snapshot: snapshot) }
                         }.font(.caption).lineLimit(2)
                     }
                 }
             } else {
-                ContentUnavailableView("출전 대기", systemImage: "leaf", description: Text("개체 정보가 준비되면 선택할 수 있습니다."))
+                ContentUnavailableView(l.practiceWaiting, systemImage: "leaf", description: Text(l.practiceWaitingInfo))
                     .frame(height: 180)
             }
         }
@@ -155,23 +158,23 @@ struct PracticeBattleView: View {
     private var controls: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Picker("진행 방식", selection: $model.mode) {
-                    Text("직접 조작").tag(PracticeBattle.Mode.manual)
-                    Text("자동 진행").tag(PracticeBattle.Mode.automatic)
+                Picker(l.practiceMode, selection: $model.mode) {
+                    Text(l.practiceManual).tag(PracticeBattle.Mode.manual)
+                    Text(l.practiceAuto).tag(PracticeBattle.Mode.automatic)
                 }.pickerStyle(.segmented).frame(width: 210)
                 Spacer()
                 if running {
-                    Text("\(model.view?.turn ?? 1)턴").font(.headline)
+                    Text(l.practiceTurn(model.view?.turn ?? 1)).font(.headline)
                     if model.mode == .manual {
-                        Label("\(model.remainingSeconds)초", systemImage: "timer").monospacedDigit().foregroundStyle(.indigo)
-                    } else { Text("자동으로 진행 중").foregroundStyle(.secondary) }
-                    Button("연습 중단") { model.cancel() }.buttonStyle(.bordered)
+                        Label(l.practiceSeconds(model.remainingSeconds), systemImage: "timer").monospacedDigit().foregroundStyle(.indigo)
+                    } else { Text(l.practiceAutoRunning).foregroundStyle(.secondary) }
+                    Button(l.practiceStop) { model.cancel() }.buttonStyle(.bordered)
                 } else {
                     if let result = model.result {
-                        Text(result.winner == nil ? "무승부" : result.winner == "p1" ? "내 개체 승리!" : "상대 승리")
+                        Text(result.winner == nil ? l.practiceDraw : result.winner == "p1" ? l.practiceWon : l.practiceLost)
                             .font(.headline).foregroundStyle(.indigo)
-                    } else if model.phase == .cancelled { Text("연습을 중단했습니다.").foregroundStyle(.secondary) }
-                    Button(model.phase == .ready ? "연습 시작" : "다시 연습") {
+                    } else if model.phase == .cancelled { Text(l.practiceCancelled).foregroundStyle(.secondary) }
+                    Button(model.phase == .ready ? l.practiceStart : l.practiceAgain) {
                         if let player, let opponent { model.start(player: player, opponent: opponent, mode: model.mode) }
                     }.buttonStyle(.borderedProminent).tint(.indigo)
                         .disabled(player == nil || opponent == nil || playerID == opponentID)
@@ -183,8 +186,8 @@ struct PracticeBattleView: View {
                     ForEach(model.request.moves) { move in
                         Button { model.choose(slot: move.slot) } label: {
                             VStack(alignment: .leading, spacing: 5) {
-                                if move.id == "recharge" { Text("재충전") }
-                                else if move.id == "struggle" { Text("발버둥") }
+                                if move.id == "recharge" { Text(l.practiceRecharge) }
+                                else if move.id == "struggle" { Text(l.practiceStruggle) }
                                 else if let snapshot = player?.snapshot { metadata(.move, move.id, snapshot: snapshot) }
                                 HStack {
                                     Text(move.type).font(.caption)
@@ -193,27 +196,27 @@ struct PracticeBattleView: View {
                                 }.foregroundStyle(.secondary)
                             }.frame(maxWidth: .infinity, alignment: .leading).padding(7)
                         }.buttonStyle(.bordered).disabled(move.disabled || move.pp == 0 || model.mode == .automatic)
-                            .accessibilityLabel("기술 \(move.slot): \(move.name)")
+                            .accessibilityLabel(l.practiceMoveLabel(move.slot, move.name))
                     }
                 }
             } else {
-                Text("직접 조작은 매 턴 30초. 시간이 지나면 자동으로 선택합니다.").font(.caption).foregroundStyle(.secondary)
+                Text(l.practiceTimerHint).font(.caption).foregroundStyle(.secondary)
             }
         }
     }
     private var battleLog: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Label("전투 기록", systemImage: "text.alignleft").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+            Label(l.practiceLog, systemImage: "text.alignleft").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 6) {
                         if model.messages.isEmpty {
-                            Text("출전 개체와 진행 방식을 고른 뒤 시작하세요.").foregroundStyle(.secondary)
+                            Text(l.practiceStartHint).foregroundStyle(.secondary)
                         }
                         ForEach(Array(model.messages.enumerated()), id: \.offset) { index, message in
                             Text(message).frame(maxWidth: .infinity, alignment: .leading).id(index)
                         }
-                    }.font(.system(size: 12)).textSelection(.enabled).padding(12)
+                    }.font(.system(size: 12)).textSelection(.enabled).padding(12).reservesScrollerLane()
                 }
                 .onChange(of: model.messages.count) { _, count in proxy.scrollTo(count - 1, anchor: .bottom) }
             }
@@ -226,6 +229,7 @@ struct PracticeBattleView: View {
 @MainActor
 final class PracticeWindowController: NSObject, NSWindowDelegate {
     static let shared = PracticeWindowController()
+    private let l = L(.ko)
     private var window: NSWindow?
     private var model: PracticeBattle?
     func open(state: CompanionState, activeName: String?) {
@@ -236,14 +240,14 @@ final class PracticeWindowController: NSObject, NSWindowDelegate {
             let model = PracticeBattle(engine: engine)
             let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 760),
                                   styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
-            window.title = "PokeTokenBar Battle · 연습전"
+            window.title = l.practiceWindowTitle
             window.isReleasedWhenClosed = false; window.delegate = self
             window.contentView = NSHostingView(rootView: PracticeBattleView(roster: roster, model: model))
             window.minSize = NSSize(width: 850, height: 730)
             self.window = window; self.model = model
             window.center(); window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true)
         } catch {
-            let alert = NSAlert(); alert.messageText = "연습전을 열 수 없습니다."
+            let alert = NSAlert(); alert.messageText = l.practiceCannotOpen
             alert.informativeText = PracticeText.failure(error); alert.runModal()
         }
     }

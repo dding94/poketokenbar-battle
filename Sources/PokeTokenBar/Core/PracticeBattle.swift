@@ -148,7 +148,10 @@ final class PracticeBattle {
             advance(slot: nil)
         }
     }
-    func prepareSelection() {}
+    func prepareSelection() {
+        release(); phase = .ready; view = nil; result = nil; messages = []; notice = nil
+        request = BattleRequest(kind: "none", moves: []); remainingSeconds = 30
+    }
     func cancel() {
         release()
         if phase != .finished { phase = .cancelled }
