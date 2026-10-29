@@ -53,6 +53,15 @@
 2. PR 02 → PR 03 → PR 03A(로컬 연습전) 순서로 진행한다. 설치·실행 및 계속 진행은 사용자가 승인했다.
 3. 사용자에게 연습전 시험 방법을 안내하고 멈춘다. 공개 전환은 필요하지 않아 private를 유지한다.
 
+- 능력치 잘림 RED [CI 40813391351](https://github.com/dding94/poketokenbar-battle/actions/runs/40813391351), `7fbd7b4`: 28건 중 27 통과·렌더 1 실패·skip 0, 종료 1. 선택 초기화/문자열/스크롤 가드는 GREEN이다. 캡처에서도 첫 줄 말줄임과 두 번째 줄 누락을 확인했다. 본문은 두 줄 고유 높이를 보장하고 카드 높이를 늘렸다. Vision의 한국어 인식이 불안정해 스피드의 공통 약어 `(Spe)`를 함께 표시하고 OCR은 `Spe`로 검사한다(기존 RED 이미지/인식 결과에도 해당 약어가 없었음).
+
+### PR 03A 전체 검사·화면 보완
+
+- [CI 40812394660](https://github.com/dding94/poketokenbar-battle/actions/runs/40812394660), `4cf965f`: 대상 58건 통과·실패/skip 0. 전체 `./scripts/test-gate.sh` 종료 1, 1,589건 중 1,571 통과·16 skip·2 실패. 실패는 `LocalizedUILiteralTests`(UI의 직접 한국어 리터럴)와 `ScrollerLaneTests`(새 기록 ScrollView의 여백)다. 전체 게이트 이후 격리 주입은 skip이다. Gitleaks는 성공했다.
+- 근본원인: 새 UI를 기존 문자열/스크롤 규칙에 연결하지 않았고 좁은 대상 필터에는 규칙 검사가 없었다. UI 전수 소스 가드는 문제를 정확히 잡았다. 두 규칙 검사를 빠른 CI 필터에도 포함하고, 문자열은 Localization.swift의 L 속성(한국어 기본·그 외 영어 대체), 기록은 reservesScrollerLane을 사용하도록 수정했다.
+- 합성 개체/도형의 실제 SwiftUI 렌더 이미지에서 출전 능력치 두 번째 줄이 잘리는 문제를 발견했다. OCR 검사에 스피드 표시를 추가해 RED를 확인한 뒤 높이를 고친다.
+- 선택 변경 시 이전 전투 HP/결과가 남을 수 있어 초기화 경로를 추가했다. [CI 40813121803](https://github.com/dding94/poketokenbar-battle/actions/runs/40813121803), `02631c4`: 28건 실행·6 assertion 실패(선택 초기화 4 + 기존 UI 규칙 2), 종료 1·skip 0. 이후 prepareSelection이 엔진을 해제하고 화면 상태를 초기화하도록 구현했다.
+
 ### PR 03A 화면 진행
 
 - 세션 GREEN [CI 40811804200](https://github.com/dding94/poketokenbar-battle/actions/runs/40811804200), `5d1b726`: 대상 명령 종료 0, 20건 통과·실패/skip 0. `llvm-cov show --show-regions` 확인 후 늦은 클릭/종료 후 클릭, 200턴 무승부, 봉인으로 인한 자동 재선택, 정보 누락 거절 테스트를 추가했다. 내부 battleID 부재(세션 불변식), 반복 거절 5회 실패, 모든 로그 표현은 아직 전수 검증하지 않았다.

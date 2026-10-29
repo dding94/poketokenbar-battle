@@ -1,6 +1,6 @@
 # PokeTokenBar Battle — AI 작업 지침
 
-이 저장소는 `dding94/poketokenbar-battle` 개인 프로젝트다. 기준은 upstream PokeTokenBar `v2.5.6`이며, 현재 배틀 기능은 미구현이다.
+이 저장소는 `dding94/poketokenbar-battle` 개인 프로젝트다. 기준은 upstream PokeTokenBar `v2.5.6`이며, 로컬 연습전은 구현했으며 온라인 배틀은 아직 미구현이다.
 
 ## 읽는 순서와 기준
 

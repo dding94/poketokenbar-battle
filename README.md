@@ -2,7 +2,7 @@
 
 회사 동료끼리 기존에 키운 포켓몬으로 1:1 배틀을 하고, 쟁탈전에서는 승자가 패자의 출전 개체를 획득하는 macOS 앱 확장 프로젝트입니다.
 
-**현재 상태: 원본 앱 소스와 승인된 작업계획서, 엔진 사전 실측 결과가 있습니다. 배틀 기능과 Cloudflare 서버는 아직 구현하지 않았습니다.**
+**현재 상태: 포크 격리와 전투 엔진, 자동 정책, 서버 없는 로컬 연습전을 구현했습니다. 연습전 최종 검증 상태는 AI_HANDOFF를 확인하세요. 온라인 대전·Cloudflare 서버는 아직 없습니다.**
 
 ## 다른 AI가 작업을 시작할 때
 
@@ -44,15 +44,26 @@
 - `scripts/`: 기존 빌드·테스트·릴리스 도구
 - `docs/BATTLE_PLAN.md`: 제품·설계·작업 순서의 기준
 - `docs/AI_HANDOFF.md`: 진행 상황과 다음 AI를 위한 인계
-- `engine/`, `server/`: **아직 없음**. PR 01과 PR 04에서 추가할 예정
+- `engine/`: 고정 버전 시뮬레이터, JSON 계약·결정성 테스트, 제품 번들
+- `server/`: 아직 없음. PR 04 이후 범위
 
 ## 검증과 배포 상태
 
-전투 엔진의 결정성은 사전 실측으로만 확인했습니다(2,700판, Node와 JavaScriptCore 불일치 0건). 저장소 테스트·CI로 재현하는 작업, Swift 빌드·테스트, Cloudflare 배포, 앱 설치·릴리스는 아직 수행하지 않았습니다.
+`npm test --prefix engine`과 `cd engine && npm run corpus && npm run compatibility`로 엔진을 검증합니다. Node와 JavaScriptCore의 같은 2,200판을 로컬 macOS 26.5 및 CI macOS 14·15에서 실행했습니다. 정책 v1은 불일치·재생·상태 복원 실패 0건입니다. BW2 541개 기술 호출 검사는 모든 조건별 효과 조합을 증명하지 않습니다.
 
-기존 앱 검증 명령은 `swift build`, `swift test`, `./scripts/test-gate.sh`입니다. 세부 범위와 새 엔진·서버용 예정 명령은 계획서를 따릅니다.
+앱 검증은 `swift build`, `swift test`, `./scripts/test-gate.sh`입니다. 로컬 Command Line Tools에는 XCTest가 없어 테스트는 Xcode가 있는 수동 GitHub Actions로 실행합니다. 실제 명령·개수·skip·미검증 범위는 [AI_HANDOFF](docs/AI_HANDOFF.md)에 기록합니다.
 
-GitHub Actions는 public 전환 전까지 **수동 실행**만 허용합니다. `scripts/build-app.sh`, `scripts/release.sh`, `UpdateChecker.swift`는 아직 원본 앱 식별값과 upstream 주소를 사용합니다. 포크 대상·앱 식별·저장 경로를 분리하기 전(PR 00)에는 빌드 설치나 릴리스를 하지 않습니다. 특히 `build-app.sh`는 설치된 원본 `/Applications/PokeTokenBar.app`을 지우고 덮어씁니다.
+GitHub Actions는 private 동안 **수동 실행**만 사용합니다. 앱 이름·번들 ID·실행 파일·저장 폴더·로그인 항목·업데이트는 포크 전용으로 분리했습니다. 기본 세이브 위치는 `~/Library/Application Support/PokeTokenBarBattle`이며 최초 실행 시 원본 세이브가 있으면 읽어서 한 번 복사합니다. 개발 실행은 `PTB_STATE_DIR`로 별도 상태 폴더를 지정할 수 있습니다.
+
+## 로컬 연습전 시험
+
+1. `PTB_SKIP_INSTALL=1 PTB_NATIVE_ARCH_ONLY=1 ./scripts/build-app.sh`로 현재 맥용 번들을 만듭니다. `build/PokeTokenBar Battle.app`에 엔진과 라이선스가 들어갑니다.
+2. 검증한 번들을 `/Applications/PokeTokenBar Battle.app`으로 복사해 실행합니다. 자동 설치는 별도 사용자 승인 후에만 수행합니다.
+3. 메뉴바 팝오버 아래 **연습전**을 누르고 내 개체와 다른 보유 개체를 선택합니다. 출전 가능한 개체가 두 마리 필요합니다. 누락된 정보는 출전 보류 이유로 표시합니다.
+4. **직접 조작**은 기술을 클릭합니다. 30초가 지나면 해당 턴을 자동 선택합니다. **자동 진행**은 양쪽을 정책 v1로 조종합니다. 전투 피해·결과는 육성 세이브에 기록하지 않습니다.
+5. 실행 시 바로 창을 열려면 `open -a 'PokeTokenBar Battle' --args --practice`를 사용할 수 있습니다(앱이 이미 실행 중이면 메뉴바에서 여세요).
+
+스프라이트와 이름 번역은 실행 중 내려받습니다. 오프라인이면 대체 그림/식별자를 표시합니다. 원본 앱 설치본·세이브를 덮어쓰지 않으며, 릴리스·공개 전환·서버 배포는 별도 작업입니다.
 
 ## 라이선스와 고지
 

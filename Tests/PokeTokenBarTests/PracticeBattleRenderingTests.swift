@@ -40,7 +40,7 @@ final class PracticeBattleRenderingTests: XCTestCase {
             XCTAssertTrue(text.contains("PRACTICE"), text)
             XCTAssertTrue(text.contains("200"), text)
             if stage == "battle" { XCTAssertTrue(text.contains("30"), text) }
-            else { XCTAssertTrue(text.contains("스피드"), text) }
+            else { XCTAssertTrue(text.contains("Spe"), text) }
             if let path = ProcessInfo.processInfo.environment["PTB_SNAPSHOT_SCREENSHOT_DIR"] {
                 let directory = URL(fileURLWithPath: path)
                 try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

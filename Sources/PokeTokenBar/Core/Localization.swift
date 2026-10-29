@@ -1694,7 +1694,7 @@ extension L {
     func practiceSeconds(_ seconds: Int) -> String { lang == .ko ? "\(seconds)초" : "\(seconds)s" }
     func practiceMoveLabel(_ slot: Int, _ name: String) -> String { "\(practiceMoves) \(slot): \(name)" }
     func practiceStats(_ stats: [String: Int]) -> String {
-        let labels = lang == .ko ? ["공격", "방어", "특공", "특방", "스피드"] : ["Atk", "Def", "SpA", "SpD", "Spe"]
+        let labels = lang == .ko ? ["공격", "방어", "특공", "특방", "스피드 (Spe)"] : ["Atk", "Def", "SpA", "SpD", "Spe"]
         let values = zip(labels, ["atk", "def", "spa", "spd", "spe"]).map { "\($0) \(stats[$1, default: 0])" }
         return values.prefix(3).joined(separator: " · ") + "\n" + values.suffix(2).joined(separator: " · ")
     }

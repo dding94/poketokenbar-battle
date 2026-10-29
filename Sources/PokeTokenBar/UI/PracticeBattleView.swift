@@ -111,7 +111,8 @@ struct PracticeBattleView: View {
                 if side == nil {
                     let stats = snapshot.publicInfo.stats
                     Text(l.practiceStats(stats))
-                        .font(.caption.monospacedDigit()).foregroundStyle(.secondary).lineSpacing(3)
+                        .font(.system(size: 12).monospacedDigit()).foregroundStyle(.secondary).lineSpacing(3)
+                        .fixedSize(horizontal: false, vertical: true)
                     Text(l.practiceSecrets).font(.caption).foregroundStyle(.tertiary)
                 } else {
                     HStack(spacing: 5) {
@@ -132,7 +133,7 @@ struct PracticeBattleView: View {
                     .frame(height: 180)
             }
         }
-        .padding(16).frame(maxWidth: .infinity, minHeight: 258, alignment: .topLeading)
+        .padding(16).frame(maxWidth: .infinity, minHeight: 290, alignment: .topLeading)
         .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 18))
         .overlay(RoundedRectangle(cornerRadius: 18).stroke((own ? Color.indigo : .teal).opacity(0.18)))
     }
