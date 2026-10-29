@@ -145,7 +145,7 @@ final class SnapshotHistoryRenderingTests: XCTestCase {
     }
 
     private func descendants(_ view: NSView) -> [NSView] {
-        [view] + view.subviews.flatMap(descendants)
+        [view] + view.subviews.flatMap { descendants($0) }
     }
 
     private struct Word {

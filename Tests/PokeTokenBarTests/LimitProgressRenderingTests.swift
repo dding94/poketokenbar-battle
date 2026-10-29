@@ -18,7 +18,7 @@ final class LimitProgressRenderingTests: XCTestCase {
             host.view.frame = NSRect(x: 0, y: 0, width: 240, height: 20)
             host.view.layoutSubtreeIfNeeded()
             func descendants(_ view: NSView) -> [NSView] {
-                [view] + view.subviews.flatMap(descendants)
+                [view] + view.subviews.flatMap { descendants($0) }
             }
             let views = descendants(host.view)
             let bar = try XCTUnwrap(views.compactMap { $0 as? NSProgressIndicator }.first,

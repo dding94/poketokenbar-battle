@@ -209,7 +209,7 @@ final class DexBackNavigationTests: XCTestCase {
         navigation.showingCollectionLog = true
         let root = host(store, navigation)
         try await waitForText("Mon20", in: root)
-        func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
+        func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap { descendants($0) } }
         let log = try XCTUnwrap(descendants(root).compactMap { $0 as? NSScrollView }
             .max { ($0.documentView?.frame.height ?? 0) < ($1.documentView?.frame.height ?? 0) })
         // LazyVStack grows the document as rows are realized, so keep scrolling to the end.

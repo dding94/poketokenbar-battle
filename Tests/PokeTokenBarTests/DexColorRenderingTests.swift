@@ -146,7 +146,7 @@ final class DexColorRenderingTests: XCTestCase {
         window.contentView = host
         window.orderFront(nil)
         defer { window.close() }
-        func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
+        func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap { descendants($0) } }
         for (step, shiny) in [false, true, false].enumerated() {
             host.layoutSubtreeIfNeeded()
             let segmented = try XCTUnwrap(descendants(host).compactMap { $0 as? NSSegmentedControl }.first)

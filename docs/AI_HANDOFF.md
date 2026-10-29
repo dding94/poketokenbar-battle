@@ -68,7 +68,7 @@
 - Swift 래퍼 RED: [CI 40805519751](https://github.com/dding94/poketokenbar-battle/actions/runs/40805519751), `7a47674`. macOS 15에서 `swift test --filter BattleEngineTests` 종료 1, 4건 실행·4실패·skip 0(2건 예상하지 않은 stub 오류 포함). macOS 14는 기본 Swift 5.10이라 컴파일 종료 1·실행 0건이며 RED 증거가 아니다. macOS 14에 설치된 Xcode 16.2를 선택하도록 수정했다.
 - 새로운 `engine.yml`은 기본 브랜치에 없어 수동 실행이 404로 거절됐다(러너 미실행). 기존 `ci.yml`의 `scope=app|engine|engine-contract`로 통합했다. 기본 브랜치·공개 상태를 바꾸지 않았다.
 - 공식 PokéAPI commit `2bf639e5572812a67d2b94903fdcb9d095f5aeb2`를 캐시에만 받아 대조: 649종 타입·종족값·특성 차이 0, 앱 폼 106개 매핑. 기본 종만 세던 539개 기술에서 폼별 BW2 데이터까지 포함한 **541개**로 수정했다. 9세대에서 모든 기술을 실제 1턴 호출하며 조건 불충족 실패 54건은 효과 발동 성공으로 세지 않는다. 전체 조건별 효과 조합을 증명한 것은 아니다.
-- `keepNames: true`로 학습/합법성 데이터를 제거한 번들 2,811,602바이트를 만들었다. 학습 데이터만 제거한 첫 시도는 legality 병합 초기화가 실패해, 둘을 함께 제거했다. 제거 후 Node/JSC 2,200판 불일치 0, 재생/상태 실패 0, 200턴 무승부 200건, 제거 전/후 2,200판 결과 동일을 확인했다(각 비교 종료 0). 원격 GREEN은 진행 중이다. CI `40806393060`의 macOS 14에서는 Xcode 16.2 선택 후 기존 `store.onRefresh` 클로저의 Sendable 추론 차이로 앱 컴파일이 실패(테스트 0건)했다. 클로저에 기존 요구 타입인 `@MainActor @Sendable`을 명시해 보완한다.
+- `keepNames: true`로 학습/합법성 데이터를 제거한 번들 2,811,602바이트를 만들었다. 학습 데이터만 제거한 첫 시도는 legality 병합 초기화가 실패해, 둘을 함께 제거했다. 제거 후 Node/JSC 2,200판 불일치 0, 재생/상태 실패 0, 200턴 무승부 200건, 제거 전/후 2,200판 결과 동일을 확인했다(각 비교 종료 0). 원격 GREEN은 진행 중이다. CI `40806393060`의 macOS 14에서는 Xcode 16.2 선택 후 기존 `store.onRefresh` 클로저의 Sendable 추론 차이로 앱 컴파일이 실패(테스트 0건)했다. 클로저에 기존 요구 타입인 `@MainActor @Sendable`을 명시해 보완했다. 재시도 `40806895199`는 기존 렌더 테스트 5곳의 `flatMap(descendants)`를 Swift 6.0이 throwing 함수 참조로 추론해 컴파일 실패(실행 0건)했다. 동일한 호출을 명시적 클로저 `flatMap { descendants($0) }`로 바꾸며 테스트를 제외하지 않는다.
 
 ### PR 00 최종 재검증 (2026-10-29)
 
