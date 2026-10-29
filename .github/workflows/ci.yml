@@ -1,7 +1,12 @@
 name: CI
 
-# Private project bootstrap: enable automatic runs only after reviewing Actions usage.
+# Public since 2026-10-29, so standard runners are free. Pushes to feat/** and pull requests run the
+# app jobs, plus determinism when the engine boundary changed (see `changes`); a dispatch picks the
+# scope. Push and PR events have no inputs, hence the `inputs.<name> || <default>` fallbacks.
 on:
+  push:
+    branches: ['feat/**']
+  pull_request:
   workflow_dispatch:
     inputs:
       scope:
@@ -25,7 +30,7 @@ concurrency:
 
 jobs:
   build-test:
-    if: ${{ inputs.scope == 'app' }}
+    if: ${{ (inputs.scope || 'app') == 'app' }}
     name: build-test
     # macos-15 ships Xcode 16 / Swift 6, which Package.swift requires
     # (swift-tools-version: 6.0, platform macOS 14).
@@ -76,7 +81,7 @@ jobs:
           retention-days: 1
 
   secret-scan:
-    if: ${{ inputs.scope == 'app' }}
+    if: ${{ (inputs.scope || 'app') == 'app' }}
     name: secret-scan
     runs-on: ubuntu-latest
     timeout-minutes: 3
@@ -91,12 +96,45 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  # Push and PR runs start determinism only when the engine boundary changed: a PR against its base,
+  # a push against the newest green push run it builds on (scripts/changed-since-green.sh says why).
+  changes:
+    if: ${{ github.event_name != 'workflow_dispatch' }}
+    name: changes
+    runs-on: ubuntu-latest
+    # Seconds of work (a full-history checkout, one API call, one diff); 3 minutes like secret-scan.
+    timeout-minutes: 3
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      engine: ${{ steps.engine.outputs.changed }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      # Quoted so the shell does not expand the globs against the checkout: git matches them, which
+      # also catches a deleted or renamed file.
+      - name: Engine boundary changed
+        id: engine
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          ./scripts/changed-since-green.sh engine Package.swift \
+            'Sources/PokeTokenBar/Core/Battle*.swift' 'Sources/PokeTokenBar/Core/Practice*.swift'
+
   determinism:
-    if: ${{ inputs.scope != 'app' }}
+    needs: changes
+    # A dispatch skips `changes` and picks the scope itself; !cancelled() keeps that skipped need from
+    # skipping this job too.
+    if: ${{ !cancelled() && ((github.event_name == 'workflow_dispatch' && inputs.scope != 'app') || needs.changes.outputs.engine == 'true') }}
     strategy:
       fail-fast: false
       matrix:
-        os: ${{ inputs.macos == 'both' && fromJSON('["macos-14","macos-15"]') || fromJSON(format('["{0}"]', inputs.macos)) }}
+        os: ${{ (inputs.macos || 'both') == 'both' && fromJSON('["macos-14","macos-15"]') || fromJSON(format('["{0}"]', inputs.macos)) }}
     runs-on: ${{ matrix.os }}
     # About 1.5x the slowest run: the Swift boundary took 215 s and the corpus over 170 s on 2026-10-29.
     timeout-minutes: 12
@@ -119,10 +157,10 @@ jobs:
           ./scripts/check-test-filter.sh "$FILTER" "$RUNNER_TEMP/jsc-boundary.log"
           ./scripts/battle-coverage.sh
       - name: Install pinned dependencies
-        if: ${{ inputs.scope == 'engine' }}
+        if: ${{ (inputs.scope || 'engine') == 'engine' }}
         working-directory: engine
         run: npm ci --ignore-scripts
       - name: Engine contracts and deterministic corpus
-        if: ${{ inputs.scope == 'engine' }}
+        if: ${{ (inputs.scope || 'engine') == 'engine' }}
         working-directory: engine
         run: npm test && npm run corpus && npm run compatibility
