@@ -91,7 +91,8 @@ struct PracticeWildGenerator {
         guard let baseID = HatchRule.pickBase(from: index, isCollected: { _ in false }, roll: rng.next()) else { return nil }
         let level = PracticeWildRules.level(around: playerLevel, roll: rng.next())
         // Offline the evolution line is gone (memory-only cache): the base species still works, so fall back to it.
-        let line = try await loaded { try await source.provider.line(baseSpeciesID: baseID) }
+        let line: EvoLine?
+        do { line = try await source.provider.line(baseSpeciesID: baseID) } catch { try Self.rethrowIfCancelled(error); line = nil }
         var path = [baseID]
         if let line {
             var node = line.tree
@@ -109,7 +110,8 @@ struct PracticeWildGenerator {
         let nature = PokemonNature.allCases[Int(rng.next() % UInt64(PokemonNature.allCases.count))]
         let profileSeed = rng.next()
         guard !taken.contains(speciesID) else { return nil }
-        guard let details = try await loaded({ try await source.details.pokemonDetails(speciesID: speciesID) }) else { return nil }
+        let details: PokemonDetails
+        do { details = try await source.details.pokemonDetails(speciesID: speciesID) } catch { try Self.rethrowIfCancelled(error); return nil }
         var profile = PokemonProfile.generate(seed: profileSeed, instanceID: id)
         profile.level = level
         profile.enrich(with: details)
@@ -123,15 +125,13 @@ struct PracticeWildGenerator {
 }
 
 extension PracticeWildGenerator {
-    /// A request's result, or nil when it failed (offline, timeout): the attempt then falls back or is skipped.
-    /// A cancellation is not a failure — it stops the whole search.
-    fileprivate func loaded<T>(_ request: () async throws -> T) async throws -> T? {
-        do { return try await request() }
-        catch is CancellationError { throw CancellationError() }
-        catch {
-            try Task.checkCancellation()   // URLSession reports a cancelled task as URLError.cancelled
-            return nil
-        }
+    /// A failed request (offline, timeout) only makes the attempt fall back or skip; a cancellation stops the
+    /// whole search. URLSession reports a cancelled task as `URLError.cancelled`, so the task decides. The
+    /// requests stay inline in `attempt`: a generic closure helper sent its result across isolation, which
+    /// Swift 6.1 (CI) rejects for a non-Sendable `T` even though 6.3 accepts it.
+    fileprivate static func rethrowIfCancelled(_ error: Error) throws {
+        if error is CancellationError { throw CancellationError() }
+        try Task.checkCancellation()
     }
 }
 
