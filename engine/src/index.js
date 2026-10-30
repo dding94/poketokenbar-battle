@@ -13,6 +13,13 @@ function createBattle(config) {
   const battle=new Battle({formatid:'gen9customgame@@@Terastal Clause',seed:config.seed});
   battle.reportExactHP=false;
   battle.setPlayer('p1',{name:'p1',team:[sets[0]]});battle.setPlayer('p2',{name:'p2',team:[sets[1]]});
+  // A starting HP goes in during team preview, before the switch-in, so the |switch| line, every view and
+  // Showdown's own request carry it like any other HP. Above the set's max HP it is refused, never clamped.
+  for(const side of battle.sides) {
+    const hp=config[side.id].hp,mon=side.pokemon[0];if(hp===undefined)continue;
+    if(hp>mon.maxhp){battle.destroy();fail('invalid_hp');}
+    mon.sethp(hp);
+  }
   if(battle.sides[0].activeRequest?.teamPreview){battle.choose('p1','team 1');battle.choose('p2','team 1');}
   const id=`b${++serial}`;battles.set(id,{battle,config,choices:[],cursors:{p1:0,p2:0,spectator:0},eventCursors:{p1:0,p2:0,spectator:0}});
   return {ok:true,id};

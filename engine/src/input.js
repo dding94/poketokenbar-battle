@@ -52,9 +52,11 @@ export function validateConfig(c) {
   if(!Array.isArray(c.seed)||c.seed.length!==4||c.seed.some(n=>!Number.isInteger(n)||n<0||n>65535))fail('invalid_seed');
   if(!Number.isInteger(c.policySeed)||c.policySeed<0||c.policySeed>0xffffffff)fail('invalid_policy_seed');
   for(const side of ['p1','p2']) {
-    if(!keys(c[side],['name','set','policy'])||typeof c[side].name!=='string'||c[side].name.length>80)fail('invalid_player');
+    if(!keys(c[side],['name','set','policy','hp'])||typeof c[side].name!=='string'||c[side].name.length>80)fail('invalid_player');
     // An omitted policy is standard. The config is kept as given, so the input log names the policy that picked.
     if('policy' in c[side]&&!POLICIES.includes(c[side].policy))fail('invalid_policy');
+    // An omitted hp is full. createBattle checks the upper bound, the set's max HP, once the Pokemon exists.
+    if('hp' in c[side]&&!(Number.isInteger(c[side].hp)&&c[side].hp>=1))fail('invalid_hp');
   }
   return [makeSet(c.p1.set),makeSet(c.p2.set)];
 }

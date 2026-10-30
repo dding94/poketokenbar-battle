@@ -713,7 +713,7 @@ npm run test:acceptance
 | `describeSet(set)` | 검증한 SET의 공개 정보 `{speciesNum,species,level,types,stats}`. 9세대 폼/EV 0 능력치를 계산하며 기술·특성은 반환하지 않음(PR 02 추가) |
 | `describeMoves(ids)` | 기술 slug/id 1~8개 → `{"moves":[{id,name,type,category,basePower,accuracy(항상 명중이면 null),priority,pp,fixedDamage,variableType}]}`. `fixedDamage`는 레벨·고정량·HP 기반 피해와 일격필살(상성은 면역만 판단, 자속 없음), `variableType`은 전투 중 타입이 바뀌는 기술(잠재파워·웨더볼 등)이다. 9세대 데이터의 순수 조회이며 전투 상태·난수를 쓰지 않는다. 알 수 없는 기술은 `invalid_moves`(PR 03B-3 추가) |
 | `typeChart()` | `{"types":[18종],"damage":{공격:{방어:배수}}}`. 타입만으로 계산하고(부유·볼트흡수 같은 특성 면역은 공개 전 정보라 제외) 테라스탈 전용 Stellar는 뺀다(PR 03B-3 추가) |
-| `createBattle(config)` | config = `{"seed","policySeed","p1":{"name","set":SET,"policy"},"p2":{...}}` → `{"ok":true,"id"}`. `policy`는 선택 항목으로, 그 진영의 자동 선택 정책 `standard`·`aggressive`·`tactical`·`erratic` 중 하나다(생략 = `standard`, PR 03B-5 추가). 그 밖의 값은 `invalid_policy`, 그 밖의 키는 `invalid_player`. 알 수 없는 종·폼·기술·특성은 오류 코드로 거절 |
+| `createBattle(config)` | config = `{"seed","policySeed","p1":{"name","set":SET,"policy","hp"},"p2":{...}}` → `{"ok":true,"id"}`. `policy`는 선택 항목으로, 그 진영의 자동 선택 정책 `standard`·`aggressive`·`tactical`·`erratic` 중 하나다(생략 = `standard`, PR 03B-5 추가). 그 밖의 값은 `invalid_policy`. `hp`는 선택 항목으로, 그 진영의 시작 체력이다(PR 03C 추가). 1 이상 그 SET의 최대 체력(`describeSet`의 `stats.hp`) 이하 정수이며 생략하면 가득 찬 채 시작한다. 그 밖의 값과 최대 체력 초과는 맞춰 주지 않고 `invalid_hp`로 거절한다. 시작 체력은 등장(`|switch|`) 전에 넣으므로 등장 줄과 `state`에 다른 체력처럼 보이고(`request`에는 체력이 없다), 상대와 관전자에게는 체력 막대 비율만 보인다. 그 밖의 키는 `invalid_player`. 알 수 없는 종·폼·기술·특성은 오류 코드로 거절 |
 | `request(id, side)` | `{"kind":"move"·"wait"·"forced"·"none","moves":[{"slot","id","name","type","pp","maxpp","disabled"}]}` |
 | `choose(id, side, choice)` | choice = `{"type":"move","slot":1~4}` 또는 `{"type":"auto"}` → `{"ok":true,"resolved":bool}`. Showdown 거절은 `{"ok":false,"error":"rejected"}`(결정적). 그 밖의 입력은 거절 |
 | `autoChoice(id, side)` | `{"slot":n}`, 적용하지 않음 |
@@ -721,12 +721,12 @@ npm run test:acceptance
 | `drainEvents(id, viewer)` | viewer별 최초 기술·특성 공개 이벤트 `{kind,side,id,turn}` 배열(PR 03 추가). 중복 없이 별도 커서로 읽음 |
 | `drainLog(id, viewer)` | 그 viewer가 볼 새 프로토콜 줄. 상대의 정확한 HP를 노출하지 않고 `|t:|` 줄을 뺀다 |
 | `result(id)` | `{"ended","winner","turns","logHash","inputLog"}`. logHash = `|t:|`를 뺀 전체 로그의 SHA-256 |
-| `replay(inputLog)` | 입력 기록으로 다시 실행해 `{"winner","logHash"}`. 검증한 선택 토큰으로 다시 구성하며 `>eval` 같은 스트림 명령을 통과시키지 않는다. 정책 버전이 `auto-v2`가 아니면 `invalid_replay`, 기록 속 config의 정책도 `createBattle`처럼 검증한다 |
+| `replay(inputLog)` | 입력 기록으로 다시 실행해 `{"winner","logHash"}`. 검증한 선택 토큰으로 다시 구성하며 `>eval` 같은 스트림 명령을 통과시키지 않는다. 정책 버전이 `auto-v2`가 아니면 `invalid_replay`, 기록 속 config의 정책·시작 체력도 `createBattle`처럼 검증한다 |
 | `destroy(id)` | 정리 |
 
 SET = `{"speciesNum","form"(앱 PokemonForm 원시값 또는 null),"level","gender":"male"·"female"·"genderless","nature"(소문자),"ability"(PokéAPI slug),"moves"(PokéAPI slug 1~4개),"ivs":{"hp","attack","defense","special-attack","special-defense","speed"},"shiny"}`. slug에서 Showdown id로의 변환은 영숫자만 남기는 것이 기본이며, 실제 데이터에서 어긋나는 것은 별칭 표로 고정한다.
 
-inputLog v2 = `{version:2,policyVersion:"auto-v2",config,choices:[{side,choice}]}`. config는 받은 그대로(정책 포함, 생략한 정책은 생략한 채) 남는다. 자동 선택도 실제로 고른 슬롯 토큰으로 기록하므로 재생은 같은 선택을 그대로 다시 넣는다. 이전 버전/정책 기록(`auto-v1` 포함)은 명시적 오류로 거절하며 조용히 새 정책으로 해석하지 않는다.
+inputLog v2 = `{version:2,policyVersion:"auto-v2",config,choices:[{side,choice}]}`. config는 받은 그대로(정책·시작 체력 포함, 생략한 항목은 생략한 채) 남으므로 재생도 같은 시작 체력으로 시작한다. 시작 체력을 생략한 전투는 `hp` 추가 전(번들 `ed6bffd4`)과 로그 해시까지 같다. 자동 선택도 실제로 고른 슬롯 토큰으로 기록하므로 재생은 같은 선택을 그대로 다시 넣는다. 이전 버전/정책 기록(`auto-v1` 포함)은 명시적 오류로 거절하며 조용히 새 정책으로 해석하지 않는다.
 
 규칙: 9세대, 테라스탈 금지, 도구 없음, EV 0, 200턴 무승부(어댑터가 강제), 팀 미리보기와 강제 행동(재충전·발버둥)은 어댑터가 처리한다.
 
