@@ -64,6 +64,11 @@ struct PracticeSelectionView: View {
         .onChange(of: wildSearchDue, initial: true) { _, due in
             if due { session.findWildOpponents() }
         }
+        // Today's opponent can go missing or stale with the wild batch still on screen (a battle stopped its search,
+        // or midnight passed), so no wild search brings it back. The view is recreated on the way back from a result.
+        .onChange(of: session.player != nil && session.dailyRefreshDue, initial: true) { _, due in
+            if due { session.refreshDailyIfStale() }
+        }
     }
 
     private var wildSearchDue: Bool { session.wildState == .idle && session.player != nil }

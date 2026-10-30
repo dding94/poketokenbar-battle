@@ -158,8 +158,24 @@ final class PracticeSession {
     }
     private func defaultOpponentID() -> String? { roster?.eligible.first { $0.id != playerID }?.id }
 
-    var dailyRefreshDue: Bool { false }   // RED stub
-    func refreshDailyIfStale() {}         // RED stub
+    /// Today's opponent is missing or another day's, so the selection screen should make it (`refreshDailyIfStale`).
+    /// A battle stops its search, and the wild batch outlives the popover and midnight, so no wild search may come
+    /// to bring it back. A search in flight and a failure are not due: an offline screen cannot loop, and the next
+    /// wild search retries a failure.
+    var dailyRefreshDue: Bool {
+        switch dailyState {
+        case .idle: return true
+        case .ready: return dailyCandidate?.id != PracticeDaily.idPrefix + today
+        case .searching, .unavailable: return false
+        }
+    }
+    /// Makes today's opponent when it is due, without touching the wild batch: another day's goes at once (with a
+    /// selection of it), then a search for today's alone. Only with the selection on screen (no battle: a result's
+    /// rematch needs its opponent, and a selection change would drop the result), a player and a prepared engine.
+    func refreshDailyIfStale() {
+        guard battle == nil, dailyRefreshDue, let engine, let level = player?.snapshot?.set.level else { return }
+        searchDaily(engine: engine, level: level, day: today)
+    }
 
     /// The local day from the injected wall clock and calendar.
     private var today: String { PracticeDaily.dayKey(now(), calendar: calendar) }
@@ -201,7 +217,7 @@ final class PracticeSession {
         dailySearchDay = nil
     }
     /// `stopWildSearch` for today's opponent. Nothing is shown while it is made (`searchDaily` dropped any older
-    /// one), so the section goes back to `.idle`, and `prepare` makes it again (`refreshDaily`).
+    /// one), so the section goes back to `.idle`, which makes the refresh due on the selection screen.
     private func stopDailySearch() {
         guard dailyState == .searching else { return }
         dailyTask?.cancel(); dailyGeneration &+= 1; dailySearchDay = nil
@@ -214,18 +230,6 @@ final class PracticeSession {
         let opponentWasDaily = dailyCandidate != nil && dailyCandidate?.id == opponentID
         dailyCandidate = nil; dailyState = .idle
         if opponentWasDaily { opponentID = defaultOpponentID() }
-    }
-    /// Today's opponent goes with the wild section, but the wild batch outlives the popover and the app runs for
-    /// days, so no search is due when the practice screen opens on a new day, or after `start()` or a release
-    /// stopped the search for today's. Once the section has been searched for this player, `prepare` makes a
-    /// missing or another day's opponent here. A failed one waits for the next search (no retry on every opening
-    /// while offline), and a battle on screen keeps the old one: its rematch needs it, and a selection change
-    /// would drop its result.
-    private func refreshDaily() {
-        guard battle == nil, wildState != .idle, dailyState != .unavailable, let engine,
-              let level = player?.snapshot?.set.level else { return }
-        let day = today
-        if !dailyIsCurrent(for: day) { searchDaily(engine: engine, level: level, day: day) }
     }
 
     var player: PracticeCandidate? { candidate(playerID) }
@@ -290,8 +294,8 @@ final class PracticeSession {
 
     /// Creates the engine once and rebuilds the roster from `state`. Keeps a still-eligible selection,
     /// otherwise defaults to the first eligible candidate (player) and the next one (opponent). Leaves a
-    /// running battle untouched. Failures land in `loadError`. Today's opponent is made when it is missing or
-    /// another day's (`refreshDaily`).
+    /// running battle untouched. Failures land in `loadError`. It makes no opponent itself: the selection screen asks
+    /// for the wild ones and today's when they are due (`findWildOpponents`, `refreshDailyIfStale`).
     func prepare(state: CompanionState, activeName: String?) {
         guard battle?.phase != .running else { return }
         let engine: BattleEngine
@@ -310,7 +314,6 @@ final class PracticeSession {
                 || (wildKept && (wildCandidates.contains { $0.id == id } || dailyCandidate?.id == id)) ? id : nil
         } ?? ids.first { $0 != player }
         playerID = player; opponentID = opponent
-        refreshDaily()
     }
     /// Starts a battle with the current selection and mode; a rematch is the same call. A running battle it
     /// replaces is cancelled, which is not counted (`forfeit` is the way to give up).
