@@ -83,10 +83,10 @@ struct PracticeScreen: View {
         return l.practiceTitle
     }
 
-    /// Selection and result: the result is not recorded. Manual battle: turn and seconds left.
-    /// Automatic battle: "Auto".
+    /// Selection and result: practice keeps its own record and never touches the save. Manual battle: turn and
+    /// seconds left. Automatic battle: "Auto".
     private var statusCapsule: some View {
-        var text = l.practiceNotRecorded
+        var text = l.practiceSaveUntouched
         var urgent = false
         if case .battle(let battle) = stage, battle.phase == .running {
             if session.mode == .automatic {
@@ -107,8 +107,9 @@ struct PracticeScreen: View {
             .background((urgent ? Color.orange : Color.secondary).opacity(0.12), in: Capsule())
     }
 
-    /// The turn clock turns orange near the end of a manual turn.
-    static func clockIsUrgent(remaining: Int, paused: Bool) -> Bool { remaining <= 10 && !paused }   // RED stub
+    /// The turn clock turns orange for the last 5 s of a manual turn; a held clock is not running out. (At the
+    /// old 10 s mark a 15 s practice turn would be orange for two thirds of it.)
+    static func clockIsUrgent(remaining: Int, paused: Bool) -> Bool { remaining <= 5 && !paused }
 
     private var caption: some View {
         let text: String

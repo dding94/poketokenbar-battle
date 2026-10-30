@@ -129,6 +129,9 @@ final class PracticeWordingTests: XCTestCase {
         XCTAssertEqual(en.practiceManualPerTurn(15), "Manual · 15s per turn")
         XCTAssertEqual(ko.practiceAutoModeHint, "내 개체는 기본형, 상대는 성향대로 기술을 골라요")
         XCTAssertEqual(en.practiceAutoModeHint, "Yours plays Standard; the foe follows its temperament")
+        // The temperament tag shows before battle, so the caption lists it with the other public facts.
+        XCTAssertEqual(ko.practiceOpponentCaption, "상대 고르기 · 공개 정보는 종·레벨·타입·능력치·성향뿐")
+        XCTAssertEqual(en.practiceOpponentCaption, "Pick a foe · public: species, level, types, stats, temperament")
     }
 
     /// Practice is Korean first with an English fallback: every other language reads the English words.

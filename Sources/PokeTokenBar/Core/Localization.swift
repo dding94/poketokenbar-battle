@@ -1670,17 +1670,24 @@ extension L {
     var practiceStatusRunning: String { lang == .ko ? "연습전 진행 중" : "Practice battle in progress" }
     var practiceStatusResult: String { lang == .ko ? "연습전 결과가 나왔어요" : "Practice battle result is ready" }
     // In-popover practice screen (selection → battle → result) and its Home entry row.
-    var practiceNotRecorded: String { lang == .ko ? "기록 안 남음" : "Not recorded" }
     var practiceAutoBadge: String { lang == .ko ? "자동" : "Auto" }
     var practiceResultTitle: String { lang == .ko ? "결과" : "Result" }
     var practiceChange: String { lang == .ko ? "변경" : "Change" }
-    var practiceOpponentCaption: String { lang == .ko ? "상대 고르기 · 공개 정보는 종·레벨·타입·능력치뿐" : "Pick an opponent · only species, level, types and stats are public" }
+    /// What an opponent shows before battle: moves and ability stay hidden, its temperament tag does not.
+    var practiceOpponentCaption: String {
+        lang == .ko ? "상대 고르기 · 공개 정보는 종·레벨·타입·능력치·성향뿐" : "Pick a foe · public: species, level, types, stats, temperament"
+    }
     var practiceYou: String { lang == .ko ? "나" : "You" }
     var practiceFoe: String { lang == .ko ? "상대" : "Foe" }
     var practiceRevealHint: String { lang == .ko ? "기술·특성은 배틀 중 처음 쓸 때 공개돼요" : "Moves and abilities are revealed the first time they are used" }
-    func practiceManualPerTurn(_ seconds: Int) -> String { lang == .ko ? "직접 조작 · 턴당 30초" : "Manual · 30s per turn" }   // RED stub
+    func practiceManualPerTurn(_ seconds: Int) -> String {
+        lang == .ko ? "직접 조작 · 턴당 \(seconds)초" : "Manual · \(seconds)s per turn"
+    }
     var practiceAutoPickHint: String { lang == .ko ? "시간이 지나면 기술이 자동으로 골라져요" : "When time runs out, a move is picked for you" }
-    var practiceAutoModeHint: String { lang == .ko ? "두 개체가 같은 자동 정책으로 겨뤄요" : "Both Pokémon follow the same automatic policy" }
+    /// My automatic turns keep the standard policy; the practice foe plays its temperament (`PracticeTemperament`).
+    var practiceAutoModeHint: String {
+        lang == .ko ? "내 개체는 기본형, 상대는 성향대로 기술을 골라요" : "Yours plays Standard; the foe follows its temperament"
+    }
     var practiceStartBattle: String { lang == .ko ? "배틀 시작" : "Start battle" }
     var practiceWhatNext: String { lang == .ko ? "무엇을 할까?" : "What will you do?" }
     var practiceKeyHint: String { lang == .ko ? "1–4 키로 바로 선택" : "Press 1–4 to choose" }
@@ -1699,7 +1706,7 @@ extension L {
     var practiceOtherOpponent: String { lang == .ko ? "다른 상대" : "New opponent" }
     var practiceAutoAgain: String { lang == .ko ? "자동으로 다시" : "Again on auto" }
     var practiceCaptionBattle: String { lang == .ko ? "팝오버를 닫아도 배틀은 그대로 남아요" : "Closing the popover keeps the battle" }
-    var practiceCaptionResult: String { lang == .ko ? "연습 결과는 저장되지 않아요 · 200턴이 지나면 무승부" : "Practice results are not saved · draw at 200 turns" }
+    var practiceCaptionResult: String { lang == .ko ? "세이브는 그대로예요 · 200턴이 지나면 무승부" : "Your save stays untouched · draw at 200 turns" }
     var practiceEntryIdle: String { lang == .ko ? "레벨을 맞춘 야생 상대와 겨뤄 보세요" : "Spar with level-matched wild Pokémon" }
     var practiceEntryResult: String { lang == .ko ? "결과가 나왔어요" : "The result is in" }
     var practiceEntryStart: String { lang == .ko ? "시작" : "Start" }
@@ -1902,22 +1909,82 @@ extension L {
     }
     var practiceWildTag: String { lang == .ko ? "야생" : "Wild" }
     var practiceOwnedHeader: String { lang == .ko ? "내 개체" : "Your collection" }
-    // Practice records, today's opponent and opponent temperaments (03B-5). RED stubs.
-    var practiceSaveUntouched: String { "" }
-    func practiceRecordTotals(wins: Int, losses: Int, draws: Int) -> String { "" }
-    func practiceRecordStreak(streak: Int, best: Int) -> String? { nil }
-    var practiceRecordEmpty: String { "" }
-    var practiceDailyTitle: String { "" }
-    func practiceDailyStarsSpoken(earned: Int, total: Int) -> String { "" }
-    func practiceDailyGoal(_ goal: PracticeDailyGoal) -> String { "" }
-    func practiceDailyGoalShort(_ goal: PracticeDailyGoal) -> String { "" }
-    var practiceDailySearching: String { "" }
-    var practiceDailyUnavailable: String { "" }
-    var practiceTodayStars: String { "" }
-    func practiceTemperament(_ temperament: PracticeTemperament) -> String { "" }
-    func practiceTemperamentHint(_ temperament: PracticeTemperament) -> String { "" }
-    var practiceStreakStarted: String { "" }
-    func practiceStreakContinued(_ streak: Int) -> String { "" }
-    func practiceStreakEnded(_ streak: Int) -> String { "" }
-    var practiceBestStreak: String { "" }
+    // Practice records, today's opponent and opponent temperaments (03B-5).
+    /// Top bar capsule on the selection and result screens: practice keeps its own record, never the save.
+    var practiceSaveUntouched: String { lang == .ko ? "세이브 영향 없음" : "Save untouched" }
+    /// The record's totals: "12승 5패 1무", "12W 5L 1D". Draws show once there is one.
+    func practiceRecordTotals(wins: Int, losses: Int, draws: Int) -> String {
+        if lang == .ko { return "\(wins)승 \(losses)패" + (draws > 0 ? " \(draws)무" : "") }
+        return "\(wins)W \(losses)L" + (draws > 0 ? " \(draws)D" : "")
+    }
+    /// The streak after the totals: "3연승 (최고 7)", "3-win streak (best 7)"; between streaks only the best
+    /// ("최고 7연승", "best streak 7"); nil before the first win.
+    func practiceRecordStreak(streak: Int, best: Int) -> String? {
+        if streak > 0 { return lang == .ko ? "\(streak)연승 (최고 \(best))" : "\(streak)-win streak (best \(best))" }
+        if best > 0 { return lang == .ko ? "최고 \(best)연승" : "best streak \(best)" }
+        return nil
+    }
+    var practiceRecordEmpty: String { lang == .ko ? "아직 전적이 없어요 · 이기면 연승이 시작돼요" : "No record yet · a win starts your streak" }
+    var practiceDailyTitle: String { lang == .ko ? "오늘의 상대" : "Today's opponent" }
+    /// VoiceOver for the star count next to the title ("★ 1/3").
+    func practiceDailyStarsSpoken(earned: Int, total: Int) -> String {
+        lang == .ko ? "오늘의 별 \(total)개 중 \(earned)개" : "\(earned) of \(total) stars today"
+    }
+    /// Today's goals, worded from the calibrated numbers (`PracticeDailyGoal.quickTurns`, `healthyShare`).
+    func practiceDailyGoal(_ goal: PracticeDailyGoal) -> String {
+        switch goal {
+        case .win: return lang == .ko ? "이기기" : "Win"
+        case .quickWin:
+            let turns = PracticeDailyGoal.quickTurns
+            return lang == .ko ? "\(turns)턴 안에 이기기" : "Win within \(turns) turn\(turns == 1 ? "" : "s")"
+        case .healthyWin:
+            let percent = practiceHealthyPercent
+            return lang == .ko ? "HP \(percent)% 이상 남기고 이기기" : "Win with \(percent)%+ HP left"
+        }
+    }
+    /// The goals as short star chips on the result: "이기기 · 3턴 안에 · HP 50% 이상", "Win · ≤3 turns · HP ≥50%".
+    func practiceDailyGoalShort(_ goal: PracticeDailyGoal) -> String {
+        switch goal {
+        case .win: return practiceDailyGoal(.win)
+        case .quickWin:
+            let turns = PracticeDailyGoal.quickTurns
+            return lang == .ko ? "\(turns)턴 안에" : "≤\(turns) turn\(turns == 1 ? "" : "s")"
+        case .healthyWin:
+            return lang == .ko ? "HP \(practiceHealthyPercent)% 이상" : "HP ≥\(practiceHealthyPercent)%"
+        }
+    }
+    private var practiceHealthyPercent: Int { Int((PracticeDailyGoal.healthyShare * 100).rounded()) }
+    // Worded like the wild section's notice below it (`practiceWildSearching`, `practiceWildUnavailable`).
+    var practiceDailySearching: String { lang == .ko ? "오늘의 상대를 찾는 중…" : "Finding today's opponent…" }
+    var practiceDailyUnavailable: String {
+        lang == .ko ? "오늘의 상대를 찾지 못했습니다. 인터넷 연결을 확인한 뒤 다시 찾아 주세요."
+            : "Couldn't find today's opponent. Check your internet connection and try again."
+    }
+    var practiceTodayStars: String { lang == .ko ? "오늘의 별" : "Today's stars" }
+    /// The opponent's engine policy as a short tag word.
+    func practiceTemperament(_ temperament: PracticeTemperament) -> String {
+        switch temperament {
+        case .standard: return lang == .ko ? "기본형" : "Standard"
+        case .aggressive: return lang == .ko ? "공격형" : "Aggressive"
+        case .tactical: return lang == .ko ? "신중형" : "Cautious"
+        case .erratic: return lang == .ko ? "변덕형" : "Erratic"
+        }
+    }
+    /// What the tag means, as its tooltip: the engine policy's behaviour (auto-v2) in a sentence.
+    func practiceTemperamentHint(_ temperament: PracticeTemperament) -> String {
+        switch temperament {
+        case .standard: return lang == .ko ? "기대 피해가 가장 큰 기술을 골라요" : "Picks the move with the most expected damage"
+        case .aggressive:
+            return lang == .ko ? "가장 센 기술을 골라요 · 무효가 아니면 상성도 명중도 거의 안 따져요"
+                : "Picks its strongest move · ignores matchups short of immunity, and mostly accuracy"
+        case .tactical:
+            return lang == .ko ? "체력이 절반 이상이면 상태이상·능력 상승을 먼저 써요(한 판에 2번까지) · 절반 아래면 회복해요"
+                : "At half HP or more, opens with status or boosts (twice a battle at most) · below half, heals"
+        case .erratic: return lang == .ko ? "좋은 기술일수록 자주, 하지만 무작위로 골라요" : "Picks at random, favoring better moves"
+        }
+    }
+    var practiceStreakStarted: String { lang == .ko ? "연승 시작!" : "Streak started!" }
+    func practiceStreakContinued(_ streak: Int) -> String { lang == .ko ? "\(streak)연승!" : "\(streak)-win streak!" }
+    func practiceStreakEnded(_ streak: Int) -> String { lang == .ko ? "연승 \(streak)에서 멈췄어요" : "Streak ended at \(streak)" }
+    var practiceBestStreak: String { lang == .ko ? "최고 기록" : "Personal best" }
 }

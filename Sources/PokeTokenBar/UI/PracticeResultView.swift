@@ -1,8 +1,9 @@
 import SwiftUI
 
-/// A finished practice battle: outcome, the staged totals (turns, damage, finishing move, big hits),
-/// the full beat log, and the ways back in. Without a playback it shows the engine's view and log.
-/// Appearing reports the result as seen, which clears the menu bar badge and the Home entry hint.
+/// A finished practice battle: outcome, what it did to the record (streak and today's stars), the staged
+/// totals (turns, damage, finishing move, big hits), the full beat log, and the ways back in. Without a
+/// playback it shows the engine's view and log. Appearing reports the result as seen, which clears the menu
+/// bar badge and the Home entry hint.
 @MainActor
 struct PracticeResultView: View {
     @Bindable var session: PracticeSession
@@ -33,6 +34,10 @@ struct PracticeResultView: View {
     var body: some View {
         VStack(spacing: 10) {
             hero
+            // The card takes its room from the log below, which scrolls.
+            if let record, !PracticeResultRecord.isEmpty(record) {
+                PracticeResultRecord(update: record, l: l)
+            }
             if let playback {
                 tiles(playback.summary)
                 stagedSummary(playback.summary)

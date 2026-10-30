@@ -1,9 +1,9 @@
 import SwiftUI
 
-/// Practice selection: my entry (changeable inline), then the opponents — level-matched wild ones first,
-/// my own below — as one radio list with a paired stat comparison on the selected row, unavailable
-/// Pokémon, the mode, and the start button. The list scrolls; the mode and the start button stay pinned
-/// at the bottom of the 520pt body.
+/// Practice selection: the record line, my entry (changeable inline), then the opponents — today's opponent
+/// with its goals, level-matched wild ones, my own below — as one radio list with a paired stat comparison on
+/// the selected row, unavailable Pokémon, the mode, and the start button. The list scrolls; the mode and the
+/// start button stay pinned at the bottom of the 520pt body.
 @MainActor
 struct PracticeSelectionView: View {
     @Bindable var session: PracticeSession
@@ -23,6 +23,7 @@ struct PracticeSelectionView: View {
         VStack(alignment: .leading, spacing: 10) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 10) {
+                    PracticeRecordsLine(records: progress.records, l: l)
                     playerCard
                     if let error = session.loadError {
                         Label(error, systemImage: "exclamationmark.triangle")
@@ -42,6 +43,7 @@ struct PracticeSelectionView: View {
                         Text(l.practiceOpponentCaption)
                             .font(.caption).foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
+                        dailySection
                         wildSection
                         ownedSection
                     }
@@ -133,6 +135,15 @@ struct PracticeSelectionView: View {
     static func wildLevels(around level: Int) -> ClosedRange<Int> {
         let low = min(100, max(5, level - 3)), high = max(5, min(100, level + 3))
         return low...high
+    }
+
+    /// Today's opponent with today's stars (the session keeps only today's). It comes from the same search as the
+    /// wild opponents, so its retry is that search.
+    private var dailySection: some View {
+        PracticeDailyCard(candidate: progress.daily, state: progress.dailyState, stars: progress.records.dailyStars,
+                          l: l, onRetry: { session.findWildOpponents() }) { candidate in
+            opponentRow(candidate, number: nil)
+        }
     }
 
     /// Level-matched wild opponents, made in memory by the hatch rule: a header with the level band and a
@@ -285,9 +296,9 @@ struct PracticeSelectionView: View {
     }
 }
 
-/// One opponent in the selection list: a radio, the sprite, and the name and level over the types. A wild one adds
-/// its shininess, rarity and the wild tag, the way Home's companion header shows them. Selected, `detail` opens
-/// under it.
+/// One opponent in the selection list (owned, wild and today's): a radio, the sprite, then the name and level over
+/// the types and the temperament. A wild one adds its shininess and rarity to the name and the wild tag to the
+/// types, the way Home's companion header shows them. Selected, `detail` opens under it.
 @MainActor
 struct PracticeOpponentRow<Detail: View>: View {
     let candidate: PracticeCandidate
@@ -314,21 +325,20 @@ struct PracticeOpponentRow<Detail: View>: View {
                     Image(systemName: selected ? "largecircle.fill.circle" : "circle")
                         .foregroundStyle(selected ? Color.accentColor : Color.secondary)
                     PracticeSpriteTile(set: candidate.snapshot?.set, size: 32, artwork: artwork)
-                    if let wild = candidate.origin.wildTraits {
-                        VStack(alignment: .leading, spacing: 3) {
-                            HStack(spacing: 5) {
-                                PracticeNameLevel(name: candidate.name, level: candidate.snapshot?.set.level ?? 0, font: font)
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack(spacing: 5) {
+                            PracticeNameLevel(name: candidate.name, level: candidate.snapshot?.set.level ?? 0, font: font)
+                            if let wild = candidate.origin.wildTraits {
                                 if wild.shiny { Text("✨").font(.system(size: 11)) }
                                 Badge(l.rarityLabel(wild.rarity).uppercased(), tint: .rarity(wild.rarity)).fixedSize()
                             }
-                            HStack(spacing: 5) {
-                                PracticeTypeBadges(types: candidate.snapshot?.publicInfo.types ?? [], l: l, artwork: artwork)
-                                PracticeWildTag(l: l)
-                            }
                         }
-                    } else {
-                        PracticeNameLevel(name: candidate.name, level: candidate.snapshot?.set.level ?? 0, font: font)
-                        PracticeTypeBadges(types: candidate.snapshot?.publicInfo.types ?? [], l: l, artwork: artwork)
+                        // The name truncates first; on this line the temperament drops to its symbol before a type
+                        // badge would be cut.
+                        ViewThatFits(in: .horizontal) {
+                            tags(compact: false)
+                            tags(compact: true)
+                        }
                     }
                     Spacer(minLength: 4)
                     if let number {
@@ -345,6 +355,14 @@ struct PracticeOpponentRow<Detail: View>: View {
         .clipShape(RoundedRectangle(cornerRadius: 10))
         .overlay(RoundedRectangle(cornerRadius: 10)
             .strokeBorder(selected ? Color.accentColor.opacity(0.35) : Color.clear))
+    }
+
+    private func tags(compact: Bool) -> some View {
+        HStack(spacing: 5) {
+            PracticeTypeBadges(types: candidate.snapshot?.publicInfo.types ?? [], l: l, artwork: artwork).fixedSize()
+            if candidate.origin.wildTraits != nil { PracticeWildTag(l: l) }
+            PracticeTemperamentTag(temperament: temperament, l: l, compact: compact)
+        }
     }
 }
 

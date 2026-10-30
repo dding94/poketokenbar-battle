@@ -66,7 +66,8 @@ struct PracticeBattleBoard: View {
                                 l: l, artwork: artwork, display: shown(side),
                                 beatID: beat?.id, delta: beat?.hpDelta[side], hitTrigger: lastHit(side),
                                 reveal: own ? nil : stagedReveal,
-                                wild: !own && battle.opponent?.origin.wildTraits != nil)
+                                wild: !own && battle.opponent?.origin.wildTraits != nil,
+                                temperament: own ? nil : battle.opponent?.temperament)
     }
 
     /// What the staged beats have shown of the opponent so far (history plus the beat on screen). The
@@ -433,17 +434,20 @@ struct PracticeSideCard: View {
         }
     }
 
-    /// Revealed moves plus "?" up to four, then the ability or "?". Wraps to two lines when the
-    /// localized names do not fit one.
+    /// Revealed moves plus "?" up to four, then the ability or "?", and the temperament at the far end: what is
+    /// known about how it fights. Wraps to two lines when the localized names do not fit one; the temperament
+    /// stays on the ability's line, so the wrap never adds a third.
     private var revealed: some View {
         ViewThatFits(in: .horizontal) {
-            HStack(spacing: 5) { movesRow; abilityRow; Spacer(minLength: 0) }
+            HStack(spacing: 5) { movesRow; abilityRow; Spacer(minLength: 0); temperamentTag }
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 5) { movesRow; Spacer(minLength: 0) }
-                HStack(spacing: 5) { abilityRow; Spacer(minLength: 0) }
+                HStack(spacing: 5) { abilityRow; Spacer(minLength: 0); temperamentTag }
             }
         }
     }
+
+    private var temperamentTag: some View { PracticeTemperamentTag(temperament: temperament, l: l) }
 
     private var movesRow: some View {
         HStack(spacing: 4) {

@@ -320,7 +320,8 @@ final class PracticeScreenRenderingTests: XCTestCase {
     // MARK: Decision hints
 
     /// Selection: the matchup card under the selected opponent names the super-effective hit (Thunderbolt and
-    /// Volt Tackle are ×2 on Magikarp) and who moves first, with both public Speed stats.
+    /// Volt Tackle are ×2 on Magikarp) and who moves first, with both public Speed stats. The record line and
+    /// today's opponent sit above the list, so the card is read off the list at full height (`hostFullList`).
     func testSelectionShowsMatchupHints() async throws {
         let session = makeSession(Self.stagedState())
         XCTAssertEqual(session.player?.snapshot?.set.speciesNum, 25, "Pikachu is the default entry")
@@ -328,13 +329,25 @@ final class PracticeScreenRenderingTests: XCTestCase {
         let mine = try XCTUnwrap(session.player?.snapshot?.publicInfo.stats["spe"])
         let theirs = try XCTUnwrap(session.opponent?.snapshot?.publicInfo.stats["spe"])
         let host = host(session)
+        let (_, popover) = try await waitForText(["Start battle"], in: host)
+        try save(popover, as: "practice-popover-matchup.png")
+        assertPopoverSized(host)
         // The stat bars show both numbers too, but never joined by "vs": only the speed line reads "98 vs 88".
         let needles = ["\(mine) vs \(theirs)", "Start battle"]
-        let (text, bitmap) = try await waitForText(needles, in: host)
-        try save(bitmap, as: "practice-popover-matchup.png")
+        let (text, bitmap) = try await waitForText(needles, in: hostFullList(session))
+        try save(bitmap, as: "practice-selection-matchup-full.png")
         assertRendered(needles, in: text)
         assertMultiplier("2", in: text)
-        assertPopoverSized(host)
+    }
+
+    /// Height that shows the whole selection list without scrolling, with a selected row's stats and matchup open.
+    private static let fullListHeight: CGFloat = 1100
+
+    /// The selection list with the session's own progress, as `PracticeScreen` builds it, at full height. The
+    /// popover's 520pt body scrolls to a selected row below the fold; here every row is on screen.
+    private func hostFullList(_ session: PracticeSession) -> NSView {
+        hostView(PracticeSelectionView(session: session, progress: PracticeSelectionProgress(session), l: L(.en), artwork: false),
+                 width: PopoverMetrics.contentWidth, height: Self.fullListHeight)
     }
 
     /// A multiplier ("×2", often read as "x2") as a word of its own. A substring check would also pass on the
@@ -580,12 +593,16 @@ final class PracticeScreenRenderingTests: XCTestCase {
         let theirs = try XCTUnwrap(wild.snapshot?.publicInfo.stats["spe"])
 
         let host = host(session)
-        // The header carries the range; the selected wild row's matchup card carries the speed line.
-        let needles = ["Wild opponents", "Lv.47–53", "Reroll", "\(mine) vs \(theirs)", "Start battle"]
+        // The header carries the range; the selected wild row's matchup card carries the speed line, which today's
+        // opponent above can push below the fold, so it is read off the full list.
+        let needles = ["Wild opponents", "Lv.47–53", "Reroll", "Start battle"]
         let (text, bitmap) = try await waitForText(needles, in: host)
         try save(bitmap, as: "practice-popover-wild.png")
         assertRendered(needles, in: text)
         assertPopoverSized(host)
+        let speed = ["\(mine) vs \(theirs)"]
+        let (listText, _) = try await waitForText(speed, in: hostFullList(session))
+        assertRendered(speed, in: listText)
     }
 
     /// Searching: a compact progress row under the wild header while the search is in flight.
@@ -800,8 +817,9 @@ final class PracticeScreenRenderingTests: XCTestCase {
                 XCTAssertLessThan(compact.width, full.width, "\(lang.rawValue) \(temperament): the compact tag keeps its word")
             }
         }
-        XCTAssertEqual(NSHostingView(rootView: PracticeTemperamentTag(temperament: nil, l: L(.en))).fittingSize.width, empty,
-                       "no temperament, no tag")
+        // A nil body measures 0, below the empty view's 10.
+        XCTAssertLessThanOrEqual(NSHostingView(rootView: PracticeTemperamentTag(temperament: nil, l: L(.en))).fittingSize.width,
+                                 empty, "no temperament, no tag")
     }
 
     /// Owned, wild and today's rows are one row view, and it draws the temperament next to the types. The widest
@@ -830,6 +848,14 @@ final class PracticeScreenRenderingTests: XCTestCase {
                 }
             }
         }
+        // The widest English row with the full word sits within a few points of the column (without the fallback it
+        // measured 322pt of 320), and localized type names (artwork on) can be wider still: the temperament drops to
+        // its symbol before the badges overflow, so the row also fits a column 24pt narrower.
+        let narrow = width - 24
+        let tight = NSHostingController(rootView: PracticeOpponentRow(candidate: wild, temperament: .aggressive, selected: false,
+                                                                      l: L(.en), artwork: false, onSelect: {}) { EmptyView() })
+            .sizeThatFits(in: CGSize(width: narrow, height: .greatestFiniteMagnitude))
+        XCTAssertLessThanOrEqual(tight.width, narrow + 0.5, "the temperament must give way before the row overflows: \(tight)")
     }
 
     /// Today's opponent: the title, the three goals worded from their numbers with today's stars, and the
