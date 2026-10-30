@@ -18,7 +18,7 @@ Node 24.14.0, from the repository root:
 ```sh
 npm ci --prefix server
 npm run typecheck --prefix server
-npm test --prefix server   # vitest inside workerd via @cloudflare/vitest-pool-workers
+npm test --prefix server   # vitest inside workerd via @cloudflare/vitest-plugin
 ```
 
 Tests use obviously fake secret bindings defined in `vitest.config.ts`.
