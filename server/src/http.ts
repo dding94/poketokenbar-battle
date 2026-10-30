@@ -89,30 +89,35 @@ export function optionalInteger(body: Body, field: string, min: number, max: num
   return value;
 }
 
-const WHITESPACE_OR_CONTROL = /[\s\p{Cc}]/u;
-const CONTROL = /\p{Cc}/u;
+// Cc: control characters. Cf: format characters such as zero-width and bidi controls,
+// which would let look-alike emails or names pass as distinct.
+const FORBIDDEN_IN_EMAIL = /[\s\p{Cc}\p{Cf}]/u;
+const FORBIDDEN_IN_NAME = /[\p{Cc}\p{Cf}]/u;
 
 export interface DisplayEmail {
   display: string;
   norm: string;
 }
 
-/** Trimmed, 3-254 characters, exactly one `@` with text on both sides, no whitespace or control characters. */
+/**
+ * Trimmed and NFKC-normalised; 3-254 characters, exactly one `@` with text on both sides,
+ * no whitespace, control or format characters. Duplicates compare by lowercase NFKC form.
+ */
 export function parseDisplayEmail(value: unknown): DisplayEmail {
   if (typeof value !== "string") throw new ApiError("bad_request");
-  const display = value.trim();
+  const display = value.trim().normalize("NFKC");
   const length = [...display].length;
-  if (length < 3 || length > 254 || WHITESPACE_OR_CONTROL.test(display)) throw new ApiError("bad_request");
+  if (length < 3 || length > 254 || FORBIDDEN_IN_EMAIL.test(display)) throw new ApiError("bad_request");
   const parts = display.split("@");
   if (parts.length !== 2 || parts[0] === "" || parts[1] === "") throw new ApiError("bad_request");
   return { display, norm: display.toLowerCase() };
 }
 
-/** Trimmed, 1-40 characters, no control characters. */
+/** Trimmed and NFKC-normalised; 1-40 characters, no control or format characters. */
 export function parseGroupName(value: unknown): string {
   if (typeof value !== "string") throw new ApiError("bad_request");
-  const name = value.trim();
+  const name = value.trim().normalize("NFKC");
   const length = [...name].length;
-  if (length < 1 || length > 40 || CONTROL.test(name)) throw new ApiError("bad_request");
+  if (length < 1 || length > 40 || FORBIDDEN_IN_NAME.test(name)) throw new ApiError("bad_request");
   return name;
 }
