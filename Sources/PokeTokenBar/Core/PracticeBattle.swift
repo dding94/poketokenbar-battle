@@ -146,8 +146,10 @@ final class PracticeBattle {
             }
             try p1.validate(using: engine); try p2.validate(using: engine)
             names = ["p1": player.name, "p2": opponent.name]
+            // The opponent plays its temperament (`PracticeTemperament`); the player's automatic turns stay standard.
             let config = BattleConfig(seed: seed, policySeed: seed.reduce(0x505442) { ($0 &* 31) ^ $1 },
-                                      p1: .init(name: "p1", set: p1.set), p2: .init(name: "p2", set: p2.set))
+                                      p1: .init(name: "p1", set: p1.set),
+                                      p2: .init(name: "p2", set: p2.set, policy: opponent.temperament?.policyID))
             struct Created: Decodable { let id: String }
             let created: Created = try BattleJSON.decode(engine.call(.createBattle, arguments: [BattleJSON.encode(config)]))
             battleID = created.id; phase = .running

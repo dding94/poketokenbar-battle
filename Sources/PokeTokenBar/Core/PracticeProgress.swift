@@ -5,11 +5,12 @@ import Foundation
 enum PracticeTemperament: String, CaseIterable, Sendable {
     /// auto-v1: the highest expected damage (power × STAB × type × accuracy).
     case standard
-    /// Power first, accuracy barely counted.
+    /// Power × STAB first: type counts only as an immunity, and accuracy weighs a quarter (a 70% move keeps 92.5%).
     case aggressive
-    /// Status and stat-raising moves while healthy, healing when low, then damage.
+    /// At half HP or more, a status or stat-raising move that still works (twice a battle); below half, a heal;
+    /// otherwise standard.
     case tactical
-    /// A random move weighted by its score.
+    /// A random move weighted by its standard score, never one scoring 0.
     case erratic
 
     /// From the individual's nature, so an opponent keeps one temperament: attack-raising natures are aggressive,
