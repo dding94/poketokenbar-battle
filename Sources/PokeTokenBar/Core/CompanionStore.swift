@@ -2166,10 +2166,39 @@ extension CompanionStore: PracticeBattleEffects {
     /// Uses a Potion, Hyper Potion or Revive on one individual. False (nothing spent) when it can't be used:
     /// none in the bag, a Revive on a Pokémon that isn't fainted, a Potion on a fainted or full one.
     @discardableResult
-    func useHealingItem(_ kind: ItemKind, on instanceID: String) -> Bool { false }   // contract stub
+    func useHealingItem(_ kind: ItemKind, on instanceID: String) -> Bool {
+        guard itemCount(kind) > 0, let healed = Self.healedShare(healthShare(of: instanceID), by: kind) else { return false }
+        state.inventory[kind.rawValue] = itemCount(kind) - 1
+        _ = writeHealthShare(healed, of: instanceID)
+        save()
+        return true
+    }
     /// Re-rolls the current Pokémon's six IVs with one IV reroll; the new IVs, or nil (nothing spent) without one.
+    /// The new values apply even when lower. Species, level, growth, nature, shiny and the Ditto state stay; the HP
+    /// share keeps its meaning because it is a share of whatever the max HP becomes.
     @discardableResult
-    func useIVReroll() -> PokemonIVs? { nil }                         // contract stub
+    func useIVReroll() -> PokemonIVs? {
+        guard itemCount(.ivReroll) > 0, state.active?.profile != nil else { return nil }
+        // Same draw as a hatch (`PokemonProfile.generate`): 0…31 per stat, in stat order, from the store's generator.
+        let ivs = PokemonIVs(hp: rollIV(), attack: rollIV(), defense: rollIV(),
+                             specialAttack: rollIV(), specialDefense: rollIV(), speed: rollIV())
+        state.active?.profile?.ivs = ivs
+        state.inventory[ItemKind.ivReroll.rawValue] = itemCount(.ivReroll) - 1
+        save()
+        return ivs
+    }
+
+    /// The HP share a healing item leaves, or nil when it can't be used on `share`: a Potion or Hyper Potion on a
+    /// living Pokémon that isn't full, a Revive only on a fainted one.
+    private static func healedShare(_ share: Double, by kind: ItemKind) -> Double? {
+        switch kind {
+        case .potion: return share > 0 && share < 1 ? min(1, share + BattleItem.potionHeal) : nil
+        case .hyperPotion: return share > 0 && share < 1 ? 1 : nil
+        case .revive: return share == 0 ? BattleItem.reviveShare : nil
+        case .rareCandy, .mint, .shinyCharm, .ivReroll: return nil
+        }
+    }
+    private func rollIV() -> Int { Int(rng.next() % 32) }
 
     /// Sets the entry without saving; false when nothing changed.
     private func writeHealthShare(_ share: Double, of instanceID: String) -> Bool {
