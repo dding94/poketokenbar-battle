@@ -264,6 +264,8 @@ final class PracticeWordingTests: XCTestCase {
         XCTAssertEqual(en.battleItemNeedsRevive, "Fainted · needs a Revive")
         XCTAssertEqual(ko.battleItemOnlyFainted, "기절했을 때만 쓸 수 있어요")
         XCTAssertEqual(en.battleItemOnlyFainted, "Only for a fainted Pokémon")
+        XCTAssertEqual(ko.battleItemInBattle, "배틀 중이라 쓸 수 없어요")
+        XCTAssertEqual(en.battleItemInBattle, "In a battle")
         XCTAssertEqual(ko.battleFainted, "기절")
         XCTAssertEqual(en.battleFainted, "Fainted")
         XCTAssertEqual(ko.ivRerollMayDrop, "더 낮아질 수 있어요")
@@ -271,7 +273,7 @@ final class PracticeWordingTests: XCTestCase {
         for language in AppLanguage.allCases {
             let l = L(language)
             for text in Self.battleItems.map(l.battleItemEffectHint) + [l.battleItemFullHealth, l.battleItemNeedsRevive,
-                    l.battleItemOnlyFainted, l.battleHP, l.battleFainted, l.ivRerollCurrent, l.ivRerollMayDrop,
+                    l.battleItemOnlyFainted, l.battleItemInBattle, l.battleHP, l.battleFainted, l.ivRerollCurrent, l.ivRerollMayDrop,
                     l.ivRerollAction, l.ivRerollNew, l.menuFaintedLine("Pikachu")] {
                 XCTAssertFalse(text.isEmpty, "\(language): an empty battle item string")
             }
@@ -322,15 +324,52 @@ final class PracticeWordingTests: XCTestCase {
         XCTAssertNil(IVGrid.change("speed", from: nil, to: new), "no arrows before a reroll")
     }
 
-    /// The Heal control lists only the items I own that would work on the entry, cheapest first.
+    /// The bag's line for each of the store's verdicts (`HealingItemVerdict`): none when the item works, nor when there
+    /// is nothing to say (not a healing item; none left, which the bag never lists).
+    func testHealingVerdictReasons() {
+        for l in [L(.ko), L(.en)] {
+            XCTAssertNil(HealingItemVerdict.usable.reason(l))
+            XCTAssertNil(HealingItemVerdict.notHealing.reason(l))
+            XCTAssertNil(HealingItemVerdict.noneLeft.reason(l))
+            XCTAssertEqual(HealingItemVerdict.inBattle.reason(l), l.battleItemInBattle)
+            XCTAssertEqual(HealingItemVerdict.hpFull.reason(l), l.battleItemFullHealth)
+            XCTAssertEqual(HealingItemVerdict.needsRevive.reason(l), l.battleItemNeedsRevive)
+            XCTAssertEqual(HealingItemVerdict.notFainted.reason(l), l.battleItemOnlyFainted)
+        }
+        XCTAssertEqual(HealingItemVerdict.inBattle.reason(L(.en)), "In a battle")
+        XCTAssertEqual(HealingItemVerdict.inBattle.reason(L(.ko)), "배틀 중이라 쓸 수 없어요")
+    }
+
+    /// The Heal control lists only the items the store says work on the entry, in the order given (shop order).
     func testHealOptionsListOnlyItemsThatWork() {
-        let counts: [ItemKind: Int] = [.potion: 2, .hyperPotion: 1, .revive: 3, .ivReroll: 1]
-        XCTAssertEqual(PracticeHealControl.options(share: 0.5, counts: counts).map(\.kind), [.potion, .hyperPotion])
-        XCTAssertEqual(PracticeHealControl.options(share: 0.5, counts: counts).map(\.count), [2, 1])
-        XCTAssertEqual(PracticeHealControl.options(share: 0, counts: counts).map(\.kind), [.revive])
-        XCTAssertTrue(PracticeHealControl.options(share: 1, counts: counts).isEmpty, "nothing to heal at full HP")
-        XCTAssertEqual(PracticeHealControl.options(share: 0.5, counts: [.potion: 0, .hyperPotion: 1]).map(\.kind), [.hyperPotion])
-        XCTAssertTrue(PracticeHealControl.options(share: 0, counts: [.potion: 4]).isEmpty, "a Potion cannot wake a fainted one")
+        let items = [PracticeHealItem(kind: .potion, count: 2, verdict: .usable),
+                     PracticeHealItem(kind: .hyperPotion, count: 1, verdict: .usable),
+                     PracticeHealItem(kind: .revive, count: 3, verdict: .notFainted)]
+        XCTAssertEqual(PracticeHealControl.options(items).map(\.kind), [.potion, .hyperPotion])
+        XCTAssertEqual(PracticeHealControl.options(items).map(\.count), [2, 1])
+        for verdict in [HealingItemVerdict.notHealing, .noneLeft, .inBattle, .needsRevive, .hpFull, .notFainted] {
+            XCTAssertTrue(PracticeHealControl.options([PracticeHealItem(kind: .potion, count: 1, verdict: verdict)]).isEmpty,
+                          "\(verdict) is not offered")
+        }
+        XCTAssertTrue(PracticeHealControl.options([]).isEmpty)
+    }
+
+    /// The Heal control's items come from the bag: each healing item's count and the store's verdict on my entry's
+    /// individual (`BattleSnapshot.instanceID`), never on the current Pokémon. Nothing without a bag or an entry.
+    func testHealItemsAskTheBagAboutTheEntry() throws {
+        let bag = RecordingItemBag([.potion: 2, .revive: 1], verdicts: [.revive: .notFainted])
+        let entry = PracticeScreenRenderingTests.syntheticCandidate(id: "entry-7", name: "Pikachu", species: 25, level: 30,
+                                                                    types: ["Electric"])
+        let id = try XCTUnwrap(entry.snapshot?.instanceID)
+        XCTAssertEqual(PracticeSelectionView.healItems(entry: entry, bag: bag),
+                       [PracticeHealItem(kind: .potion, count: 2, verdict: .usable),
+                        PracticeHealItem(kind: .hyperPotion, count: 0, verdict: .noneLeft),
+                        PracticeHealItem(kind: .revive, count: 1, verdict: .notFainted)])
+        XCTAssertEqual(bag.asked.map(\.kind), [.potion, .hyperPotion, .revive])
+        XCTAssertEqual(bag.asked.map(\.instanceID), [id, id, id])
+        XCTAssertTrue(PracticeSelectionView.healItems(entry: nil, bag: bag).isEmpty, "no entry, nothing to heal")
+        XCTAssertTrue(PracticeSelectionView.healItems(entry: entry, bag: nil).isEmpty, "no bag, nothing to heal")
+        XCTAssertEqual(bag.asked.count, 3)
     }
 
     /// Start needs both sides and no fainted block. The block itself is Core's (`PracticeSession.startBlock`); the

@@ -42,6 +42,11 @@ struct BagView: View {
 
     private static let feedbackID = "battle-item-feedback"
 
+    /// 배틀 아이템을 지금 현재 포켓몬에게 못 쓰는 이유. 쓸 수 있으면 nil.
+    /// 회복약은 스토어의 판정(`healingItemVerdict`, `useHealingItem` 과 같은 규칙) 그대로 — 배틀 중·체력 가득·기절 여부.
+    /// 재추첨은 부화한 포켓몬만 있으면 된다. 현재 포켓몬이 없으면(알·프로필 전) 그 사실을 말한다.
+    static func battleItemReason(_ kind: ItemKind, store: CompanionStore) -> String? { nil }   // RED stub
+
     /// 빈 가방 — 움직이는 잠만보(143) + 안내(특정 아이템명 미언급, 확장 대비).
     private var emptyState: some View {
         VStack(spacing: 10) {

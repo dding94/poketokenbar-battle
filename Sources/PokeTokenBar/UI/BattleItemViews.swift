@@ -4,12 +4,20 @@ import SwiftUI
 // works right now, HP as a bar or "Fainted", and the IV reroll's two steps. Everything but the store glue at the
 // top takes plain values. Practice files use these views but never name the store (practice read-only guard).
 
-/// What the practice screens may do with the bag: count battle items and use a healing item on one individual.
-/// `CompanionStore` conforms below, outside the practice files.
+/// What the practice screens may do with the bag: count battle items, ask the store whether a healing item works on
+/// one individual (`HealingItemVerdict`, the store's one rule) and use it. `CompanionStore` conforms below, outside the
+/// practice files.
 @MainActor
 protocol PracticeItemBag: AnyObject {
     func itemCount(_ kind: ItemKind) -> Int
+    func healingItemVerdict(_ kind: ItemKind, on instanceID: String) -> HealingItemVerdict
     @discardableResult func useHealingItem(_ kind: ItemKind, on instanceID: String) -> Bool
+}
+
+extension HealingItemVerdict {
+    /// The line in place of Use when the item does not work now; nil when it does, or when there is nothing to say
+    /// (not a healing item, none left: the bag lists only what it holds).
+    func reason(_ l: L) -> String? { nil }   // RED stub
 }
 
 extension CompanionStore: PracticeItemBag {

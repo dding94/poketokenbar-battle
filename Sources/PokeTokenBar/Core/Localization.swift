@@ -1602,6 +1602,7 @@ struct L {
     var battleItemFullHealth: String { t("체력이 가득해요", "HP is full", "HPは満タンです", "Tiene los PS al máximo", "Ses PV sont au max", "O HP já está cheio", "Die KP sind voll", "ОЗ полные") }
     var battleItemNeedsRevive: String { t("기절했어요 · 기력의조각이 필요해요", "Fainted · needs a Revive", "ひんし · げんきのかけらが必要です", "Debilitado · necesita un Revivir", "K.O. · il faut un Rappel", "Desmaiado · precisa de um Reviver", "Besiegt · braucht einen Beleber", "Без сознания · нужен Оживитель") }
     var battleItemOnlyFainted: String { t("기절했을 때만 쓸 수 있어요", "Only for a fainted Pokémon", "ひんしのときだけ使えます", "Solo para un Pokémon debilitado", "Seulement pour un Pokémon K.O.", "Só para um Pokémon desmaiado", "Nur für ein besiegtes Pokémon", "Только для покемона без сознания") }
+    var battleItemInBattle: String { "" }   // RED stub
     /// 체력 막대 앞의 짧은 이름과 체력 0 표시(원작의 "기절").
     var battleHP: String { t("체력", "HP", "HP", "PS", "PV", "HP", "KP", "ОЗ") }
     var battleFainted: String { t("기절", "Fainted", "ひんし", "Debilitado", "K.O.", "Desmaiado", "Besiegt", "Без сознания") }

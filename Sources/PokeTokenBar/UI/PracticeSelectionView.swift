@@ -94,11 +94,9 @@ struct PracticeSelectionView: View {
     /// My entry's HP share between battles; nil without stakes (no HP to show).
     private var entryHealth: Double? { session.player.flatMap { progress.health[$0.id] } }
 
-    /// How many of each healing item the bag holds, for the Heal control.
-    private var healingCounts: [ItemKind: Int] {
-        guard let bag else { return [:] }
-        return Dictionary(uniqueKeysWithValues: [ItemKind.potion, .hyperPotion, .revive].map { ($0, bag.itemCount($0)) })
-    }
+    /// The healing items for the Heal control, in shop order: how many the bag holds and the store's verdict on my
+    /// entry's individual (`HealingItemVerdict`). None without a bag or an entry.
+    static func healItems(entry: PracticeCandidate?, bag: (any PracticeItemBag)?) -> [PracticeHealItem] { [] }   // RED stub
 
     // MARK: My entry
 
@@ -128,7 +126,7 @@ struct PracticeSelectionView: View {
                 }
             }
             if let health, health < 1, bag != nil {
-                PracticeHealControl(share: health, counts: healingCounts, isOpen: healing, l: l,
+                PracticeHealControl(items: Self.healItems(entry: session.player, bag: bag), isOpen: healing, l: l,
                                     onToggle: { healing.toggle() },
                                     onUse: { kind in
                                         if Self.heal(kind, entry: session.player, bag: bag) { healing = false }

@@ -1,14 +1,21 @@
 import SwiftUI
 
-// PR 03C on the practice screens: healing my entry from the selection screen. Plain values: the item counts come
-// from the bag (`PracticeItemBag`), the HP share from the session.
+// PR 03C on the practice screens: healing my entry from the selection screen. Plain values: the items, their counts
+// and the store's verdicts come from the bag (`PracticeItemBag`).
 
-/// The "Heal" control on my entry card below full HP: it opens the healing items I own that would work on the entry
-/// and uses the one I pick. Without any, it says where to get one.
+/// One healing item for the Heal control: how many I own and the store's verdict on my entry.
+struct PracticeHealItem: Equatable {
+    let kind: ItemKind
+    let count: Int
+    let verdict: HealingItemVerdict
+}
+
+/// The "Heal" control on my entry card below full HP: it opens the healing items the store says work on the entry and
+/// uses the one I pick. Without any, it says where to get one. (The selection shows only without a battle, so the
+/// store never holds the entry for one here.)
 @MainActor
 struct PracticeHealControl: View {
-    let share: Double
-    let counts: [ItemKind: Int]
+    let items: [PracticeHealItem]
     let isOpen: Bool
     let l: L
     let onToggle: () -> Void
@@ -16,13 +23,8 @@ struct PracticeHealControl: View {
     /// false keeps tests offline: the item emoji instead of a downloaded sprite.
     var artwork = false
 
-    /// The healing items that would work at `share`, in shop order (cheapest first), with how many I own.
-    static func options(share: Double, counts: [ItemKind: Int]) -> [(kind: ItemKind, count: Int)] {
-        [ItemKind.potion, .hyperPotion, .revive].compactMap { kind in
-            let count = counts[kind] ?? 0
-            return BattleItemUse(kind, count: count, healthShare: share) == .usable ? (kind: kind, count: count) : nil
-        }
-    }
+    /// The items the store says work on the entry, in the order given (shop order, cheapest first).
+    static func options(_ items: [PracticeHealItem]) -> [PracticeHealItem] { [] }   // RED stub
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -33,7 +35,7 @@ struct PracticeHealControl: View {
             .buttonStyle(.bordered)
             .controlSize(.small)
             if isOpen {
-                let options = Self.options(share: share, counts: counts)
+                let options = Self.options(items)
                 if options.isEmpty {
                     Text(l.practiceHealNone)
                         .font(.caption).foregroundStyle(.secondary)

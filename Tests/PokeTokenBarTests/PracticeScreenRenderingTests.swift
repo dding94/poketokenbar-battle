@@ -51,15 +51,21 @@ final class PracticeScreenRenderingTests: XCTestCase {
 
     static var engineURL: URL { root.appendingPathComponent("engine/dist/battle-engine.js") }
 
+    /// The engine seed of every battle these tests start (`PracticeSession.battleSeed`): each battle plays the same
+    /// course every run, so a test that needs a win or a loss (`finishedBattle(won:)`, `faintingLoss`) always gets it.
+    nonisolated static let pinnedSeed: [UInt32] = [1, 2, 3, 4]
+
     /// The selection screen searches wild opponents on appear. Tests never reach PokéAPI: by default the search
     /// fails as if offline, which keeps the owned-opponent tests on their own data with a compact wild section.
     /// `effects` gives battles with stakes HP and XP (PR 03C); without it nothing changes outside the session.
+    /// Battles start from `pinnedSeed`.
     private func makeSession(_ state: CompanionState = syntheticState(),
                              wildSource: PracticeWildSource = PracticeWildSource(provider: OfflineWildProvider(),
                                                                                  details: OfflineWildProvider()),
                              effects: (any PracticeBattleEffects)? = nil) -> PracticeSession {
         let session = PracticeSession(engineURL: Self.engineURL, clock: { self.now }, drivesAutomatically: false,
-                                      wildSource: wildSource, wildSeed: { 0x5EED }, effects: effects)
+                                      wildSource: wildSource, wildSeed: { 0x5EED },
+                                      battleSeed: { PracticeScreenRenderingTests.pinnedSeed }, effects: effects)
         session.prepare(state: state, activeName: nil)
         return session
     }
@@ -1043,7 +1049,8 @@ final class PracticeScreenRenderingTests: XCTestCase {
     // feed the views plain values (`PracticeSelectionProgress.health`, `PracticeStakesUpdate`, a recording bag). The
     // fainted tag, star-like marks and arrows are small, so they are checked by size and pixels, never by OCR.
 
-    /// A finished staged battle: my Pikachu's Volt Tackle wins in one turn, or my Magikarp loses to Pikachu.
+    /// A finished staged battle from `pinnedSeed`: my Pikachu's Volt Tackle wins in one turn, or my Magikarp loses to
+    /// Pikachu.
     private func finishedBattle(won: Bool) throws -> (PracticeSession, PracticeBattle) {
         let session = makeSession(Self.stagedState())
         if won {
@@ -1068,7 +1075,8 @@ final class PracticeScreenRenderingTests: XCTestCase {
 
     /// A companion store on a temp file: Pikachu is the current Pokémon with known IVs, and the four battle items
     /// are in the bag. `health` is Pikachu's HP share in the save (`CompanionState.battleHealth`); full keeps no entry.
-    private func battleItemStore(language: AppLanguage, health: Double = 1) throws -> CompanionStore {
+    /// Not `hatched`, the save holds an egg instead (no current Pokémon), with the same bag.
+    private func battleItemStore(language: AppLanguage, health: Double = 1, hatched: Bool = true) throws -> CompanionStore {
         let suite = "PracticeBag-\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         let file = FileManager.default.temporaryDirectory.appendingPathComponent("\(suite).json")
@@ -1086,6 +1094,7 @@ final class PracticeScreenRenderingTests: XCTestCase {
         state.inventory = [ItemKind.potion.rawValue: 2, ItemKind.hyperPotion.rawValue: 1, ItemKind.revive.rawValue: 1,
                            ItemKind.ivReroll.rawValue: 1]
         if health < 1 { state.battleHealth = [profile.instanceID: health] }
+        if !hatched { state.active = nil }
         state.language = language
         try JSONEncoder().encode(state).write(to: file)
         return CompanionStore(provider: OfflineWildProvider(), fileURL: file, defaults: defaults)
@@ -1108,6 +1117,55 @@ final class PracticeScreenRenderingTests: XCTestCase {
         let offered = BattleItemUse(.ivReroll, count: store.itemCount(.ivReroll), healthShare: store.currentHealthShare) == .usable
         XCTAssertTrue(offered)
         XCTAssertEqual(store.useIVReroll() != nil, offered)
+    }
+
+    /// The bag says why a battle item does not work on the current Pokémon from the store's own verdict
+    /// (`healingItemVerdict`): HP full, fainted or standing, and in a battle while a running battle with stakes holds
+    /// it. The reroll needs only a hatched Pokémon; an egg can use neither.
+    func testBagReasonsComeFromTheStoreVerdict() throws {
+        let hurt = try battleItemStore(language: .en, health: 0.4)
+        let id = try XCTUnwrap(hurt.currentInstanceID)
+        XCTAssertNil(BagView.battleItemReason(.potion, store: hurt), "a hurt Pokémon takes a Potion")
+        XCTAssertNil(BagView.battleItemReason(.hyperPotion, store: hurt))
+        XCTAssertEqual(BagView.battleItemReason(.revive, store: hurt), "Only for a fainted Pokémon")
+        XCTAssertNil(BagView.battleItemReason(.ivReroll, store: hurt), "the reroll is ready for a hatched Pokémon")
+        hurt.setInBattle(id)
+        for kind in [ItemKind.potion, .hyperPotion, .revive] {
+            XCTAssertEqual(BagView.battleItemReason(kind, store: hurt), "In a battle", "\(kind) while the battle holds it")
+        }
+        hurt.setInBattle(nil)
+        XCTAssertNil(BagView.battleItemReason(.potion, store: hurt), "let go, the HP decides again")
+
+        let full = try battleItemStore(language: .en)
+        XCTAssertEqual(BagView.battleItemReason(.potion, store: full), "HP is full")
+        let fainted = try battleItemStore(language: .en, health: 0)
+        XCTAssertEqual(BagView.battleItemReason(.hyperPotion, store: fainted), "Fainted · needs a Revive")
+        XCTAssertNil(BagView.battleItemReason(.revive, store: fainted))
+        XCTAssertNil(BagView.battleItemReason(.ivReroll, store: fainted), "a fainted Pokémon keeps its IVs")
+        let egg = try battleItemStore(language: .en, hatched: false)
+        for kind in [ItemKind.potion, .revive, .ivReroll] {
+            XCTAssertEqual(BagView.battleItemReason(kind, store: egg), "Usable after hatching", "\(kind)")
+        }
+
+        let ko = try battleItemStore(language: .ko, health: 0.4)
+        ko.setInBattle(try XCTUnwrap(ko.currentInstanceID))
+        XCTAssertEqual(BagView.battleItemReason(.potion, store: ko), "배틀 중이라 쓸 수 없어요")
+    }
+
+    /// The bag draws what the store says now: a hurt Pokémon's healing cards change while a running battle with stakes
+    /// holds it (its Use buttons give way to "In a battle", read on CI by `testBagShowsBattleItemsWithWhatTheyDoNow`).
+    func testBagDrawsTheBattleHold() throws {
+        func render(held: Bool) throws -> NSBitmapImageRep {
+            let store = try battleItemStore(language: .en, health: 0.4)
+            if held { store.setInBattle(store.currentInstanceID) }
+            return try Self.capture2x(hostView(BagView(store: store, nav: PopoverNavigation(), artwork: false),
+                                               width: PopoverMetrics.contentWidth, height: 520))
+        }
+        let free = try render(held: false)
+        XCTAssertEqual(Self.pixels(free), Self.pixels(try render(held: false)), "the same bag draws the same")
+        let held = try render(held: true)
+        try save(held, as: "practice-03c-bag-in-battle-layout.png")
+        XCTAssertNotEqual(Self.pixels(free), Self.pixels(held), "the bag ignores the battle's hold")
     }
 
     /// The selection reads HP and the start block off the session (Core's `healthShare(of:)` and `startBlock`): my own
@@ -1143,8 +1201,8 @@ final class PracticeScreenRenderingTests: XCTestCase {
         XCTAssertFalse(PracticeSelectionProgress(session).faintedBlock, "sparring stays open while fainted")
     }
 
-    /// A real result after a fainting loss: my Magikarp, at 5% HP, loses to a wild opponent in a battle with stakes,
-    /// so Core settles it at 0 HP and `startBlock` turns `.fainted` for the same pair.
+    /// A real result after a fainting loss from `pinnedSeed`: my Magikarp, at 5% HP, loses to a wild opponent in a
+    /// battle with stakes, so Core settles it at 0 HP and `startBlock` turns `.fainted` for the same pair.
     private func faintingLoss(effects: RecordingBattleEffects) async throws -> (PracticeSession, PracticeBattle) {
         let session = makeSession(Self.stagedState(),
                                   wildSource: PracticeWildSource(provider: WildLineProvider(), details: WildLineProvider()),
@@ -1167,6 +1225,18 @@ final class PracticeScreenRenderingTests: XCTestCase {
         XCTAssertEqual(session.lastStakes?.healthShare, 0)
         XCTAssertEqual(session.startBlock, .fainted, "the same pair cannot start again")
         return (session, battle)
+    }
+
+    /// The battles the result tests stand on play from `pinnedSeed`, so they end the way those tests need on every
+    /// run: the staged win and loss, and the fainting loss (each helper asserts its outcome). The OCR tests that use
+    /// them run on CI only; this one runs the battles everywhere.
+    func testPinnedBattlesEndAsTheScreenTestsNeed() async throws {
+        for won in [true, false] {
+            let (_, battle) = try finishedBattle(won: won)
+            XCTAssertEqual(battle.result?.inputLog.config.seed, Self.pinnedSeed, "won \(won)")
+        }
+        let (_, battle) = try await faintingLoss(effects: RecordingBattleEffects())
+        XCTAssertEqual(battle.result?.inputLog.config.seed, Self.pinnedSeed, "the fainting loss")
     }
 
     /// After a fainting loss to a wild opponent, Rematch and Again on auto would start what Core refuses: both are off
@@ -1287,7 +1357,7 @@ final class PracticeScreenRenderingTests: XCTestCase {
 
     /// The bag lists the four battle items with their effect, and says why a healing item cannot be used on the
     /// current Pokémon: a fresh save is at full HP, so Potions say so and the Revive waits for a faint. The reroll
-    /// is ready to use.
+    /// is ready to use. While a running battle with stakes holds the Pokémon, the healing items say so instead.
     func testBagShowsBattleItemsWithWhatTheyDoNow() async throws {
         for lang in [AppLanguage.en, .ko] {
             let store = try battleItemStore(language: lang)
@@ -1308,33 +1378,76 @@ final class PracticeScreenRenderingTests: XCTestCase {
             let (text, bitmap) = try await waitForText(needles, in: host)
             try save(bitmap, as: "practice-03c-bag-en.png")
             assertRendered(needles, in: text)
-            XCTAssertEqual(BattleItemUse(.ivReroll, count: store.itemCount(.ivReroll), healthShare: store.currentHealthShare),
-                           .usable, "the reroll is ready for a hatched Pokémon")
+            XCTAssertNil(BagView.battleItemReason(.ivReroll, store: store), "the reroll is ready for a hatched Pokémon")
+        }
+        for lang in [AppLanguage.en, .ko] {
+            let store = try battleItemStore(language: lang, health: 0.4)
+            store.setInBattle(store.currentInstanceID)
+            let host = hostView(BagView(store: store, nav: PopoverNavigation(), artwork: false),
+                                width: PopoverMetrics.contentWidth, height: 520)
+            guard lang == .en else {
+                let (_, bitmap) = try await waitForText(["IV"], in: host)
+                try save(bitmap, as: "practice-03c-bag-in-battle-ko.png")
+                continue
+            }
+            let (text, bitmap) = try await waitForText(["In a battle", "IV Reroll"], in: host)
+            try save(bitmap, as: "practice-03c-bag-in-battle-en.png")
+            assertRendered(["In a battle", "IV Reroll"], in: text)
+            XCTAssertFalse(Self.normalized(text).contains(Self.normalized("Only for a fainted")),
+                           "the battle's hold comes before the HP: \(text)")
         }
     }
 
-    /// The Heal control lists only the items that would work on the entry, and says where to get one when none do.
+    /// The open Heal control draws a row per item the store says works on the entry, and its one line when none does.
+    /// Sizes and pixels; `testHealControlListsWhatWorksOnTheEntry` reads the words on CI.
+    func testHealControlDrawsARowPerWorkingItem() throws {
+        let width = PopoverMetrics.scrollContentWidth
+        func control(_ verdicts: [HealingItemVerdict]) -> some View {
+            let items = zip([ItemKind.potion, .hyperPotion, .revive], verdicts).map {
+                PracticeHealItem(kind: $0, count: 1, verdict: $1)
+            }
+            return PracticeHealControl(items: items, isOpen: true, l: L(.en), onToggle: {}, onUse: { _ in })
+                .frame(width: width)
+        }
+        func height(_ verdicts: [HealingItemVerdict]) -> CGFloat {
+            NSHostingController(rootView: control(verdicts))
+                .sizeThatFits(in: CGSize(width: width, height: .greatestFiniteMagnitude)).height
+        }
+        let hurt: [HealingItemVerdict] = [.usable, .usable, .notFainted]
+        let fainted: [HealingItemVerdict] = [.needsRevive, .needsRevive, .usable]
+        let full: [HealingItemVerdict] = [.hpFull, .hpFull, .notFainted]
+        XCTAssertGreaterThan(height(hurt), height(fainted) + 10, "two rows for two working items")
+        let one = try Self.capture2x(hostView(control(fainted), width: width, height: 100))
+        let none = try Self.capture2x(hostView(control(full), width: width, height: 100))
+        XCTAssertNotEqual(Self.pixels(one), Self.pixels(none), "the Revive's row, not the empty line")
+    }
+
+    /// The Heal control lists only the items the store says work on the entry, and says where to get one when none do.
     func testHealControlListsWhatWorksOnTheEntry() async throws {
         let width = PopoverMetrics.scrollContentWidth
-        let counts: [ItemKind: Int] = [.potion: 2, .hyperPotion: 1, .revive: 1]
-        func host(_ share: Double, _ counts: [ItemKind: Int], open: Bool = true) -> NSView {
-            hostView(PracticeHealControl(share: share, counts: counts, isOpen: open, l: L(.en), onToggle: {}, onUse: { _ in })
+        func items(_ potion: HealingItemVerdict, _ revive: HealingItemVerdict) -> [PracticeHealItem] {
+            [PracticeHealItem(kind: .potion, count: 2, verdict: potion),
+             PracticeHealItem(kind: .hyperPotion, count: 1, verdict: potion),
+             PracticeHealItem(kind: .revive, count: 1, verdict: revive)]
+        }
+        func host(_ items: [PracticeHealItem], open: Bool = true) -> NSView {
+            hostView(PracticeHealControl(items: items, isOpen: open, l: L(.en), onToggle: {}, onUse: { _ in })
                 .padding(8), width: width, height: 130)
         }
         let hurt = ["Heal", "Potion", "Hyper Potion"]
-        let (text, bitmap) = try await waitForText(hurt, in: host(0.63, counts))
+        let (text, bitmap) = try await waitForText(hurt, in: host(items(.usable, .notFainted)))
         try save(bitmap, as: "practice-03c-heal-open.png")
         assertRendered(hurt, in: text)
         XCTAssertFalse(Self.normalized(text).contains("revive"), "a Revive does nothing for a hurt entry: \(text)")
 
-        let (faintedText, _) = try await waitForText(["Revive"], in: host(0, counts))
+        let (faintedText, _) = try await waitForText(["Revive"], in: host(items(.needsRevive, .usable)))
         assertRendered(["Revive"], in: faintedText)
         XCTAssertFalse(Self.normalized(faintedText).contains("potion"), "a Potion cannot wake a fainted entry: \(faintedText)")
 
-        let (noneText, _) = try await waitForText(["No healing item"], in: host(0.63, [:]))
+        let (noneText, _) = try await waitForText(["No healing item"], in: host(items(.noneLeft, .noneLeft)))
         assertRendered(["No healing item"], in: noneText)
 
-        let (closedText, _) = try await waitForText(["Heal"], in: host(0.63, counts, open: false))
+        let (closedText, _) = try await waitForText(["Heal"], in: host(items(.usable, .notFainted), open: false))
         assertRendered(["Heal"], in: closedText)
         XCTAssertFalse(Self.normalized(closedText).contains("potion"), "closed, it lists nothing: \(closedText)")
     }
@@ -1529,21 +1642,37 @@ final class RecordingBattleEffects: PracticeBattleEffects {
     func companionState() -> (state: CompanionState, activeName: String?)? { nil }
 }
 
-/// A bag that holds counts and records each healing use, standing in for the companion store.
+/// A bag that holds counts, gives set verdicts and records each question and healing use, standing in for the
+/// companion store. Without a set verdict an item works while one is left (`.usable`, else `.noneLeft`); a use goes
+/// through only on `.usable`, as the store's does.
 @MainActor
 final class RecordingItemBag: PracticeItemBag {
     private(set) var counts: [ItemKind: Int]
+    var verdicts: [ItemKind: HealingItemVerdict]
+    /// Who each verdict was asked about, in order.
+    private(set) var asked: [(kind: ItemKind, instanceID: String)] = []
     private(set) var uses: [(kind: ItemKind, instanceID: String)] = []
 
-    init(_ counts: [ItemKind: Int]) { self.counts = counts }
+    init(_ counts: [ItemKind: Int], verdicts: [ItemKind: HealingItemVerdict] = [:]) {
+        self.counts = counts; self.verdicts = verdicts
+    }
 
     func itemCount(_ kind: ItemKind) -> Int { counts[kind] ?? 0 }
 
+    func healingItemVerdict(_ kind: ItemKind, on instanceID: String) -> HealingItemVerdict {
+        asked.append((kind, instanceID))
+        return verdict(kind)
+    }
+
     func useHealingItem(_ kind: ItemKind, on instanceID: String) -> Bool {
-        guard itemCount(kind) > 0 else { return false }
+        guard verdict(kind) == .usable else { return false }
         counts[kind, default: 0] -= 1
         uses.append((kind, instanceID))
         return true
+    }
+
+    private func verdict(_ kind: ItemKind) -> HealingItemVerdict {
+        verdicts[kind] ?? (itemCount(kind) > 0 ? .usable : .noneLeft)
     }
 }
 
