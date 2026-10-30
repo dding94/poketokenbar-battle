@@ -2146,3 +2146,37 @@ final class CompanionStore {
         try? data.write(to: fileURL, options: .atomic)   // 부분 쓰기 손상 방지(펫 상태)
     }
 }
+
+// MARK: 배틀 체력·회복약·개체값 재추첨 (PR 03C)
+
+extension CompanionStore: PracticeBattleEffects {
+    /// Share of max HP the individual has left (`CompanionState.battleHealth`), read within 0…1: a hand-edited value
+    /// outside it never reaches the engine's starting HP.
+    func healthShare(of instanceID: String) -> Double {
+        min(max(state.battleHealth[instanceID] ?? 1, 0), 1)
+    }
+    /// Keeps the HP share within 0…1 and saves it; full HP keeps no entry, so the save stays small.
+    func setHealthShare(_ share: Double, of instanceID: String) {
+        guard writeHealthShare(share, of: instanceID) else { return }
+        save()
+    }
+    @discardableResult
+    func grantBattleXP(_ xp: Int) -> Bool { false }                    // contract stub
+
+    /// Uses a Potion, Hyper Potion or Revive on one individual. False (nothing spent) when it can't be used:
+    /// none in the bag, a Revive on a Pokémon that isn't fainted, a Potion on a fainted or full one.
+    @discardableResult
+    func useHealingItem(_ kind: ItemKind, on instanceID: String) -> Bool { false }   // contract stub
+    /// Re-rolls the current Pokémon's six IVs with one IV reroll; the new IVs, or nil (nothing spent) without one.
+    @discardableResult
+    func useIVReroll() -> PokemonIVs? { nil }                         // contract stub
+
+    /// Sets the entry without saving; false when nothing changed.
+    private func writeHealthShare(_ share: Double, of instanceID: String) -> Bool {
+        let clamped = min(max(share, 0), 1)
+        let entry: Double? = clamped < 1 ? clamped : nil
+        guard state.battleHealth[instanceID] != entry else { return false }
+        state.battleHealth[instanceID] = entry
+        return true
+    }
+}

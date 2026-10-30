@@ -705,7 +705,8 @@ struct CompanionState: Codable, Sendable {
     // 사탕 지급 첫 실행 시드 완료 — 업데이트 직후 이미 100%였던 창의 소급 지급 차단.
     var candyFeatureSeeded = false
     /// PR 03C: HP share each individual has left between battles with stakes, keyed by `PokemonProfile.instanceID`
-    /// (0 = fainted). RED stub: not decoded yet.
+    /// (0 = fainted). An absent key is full HP, so an old save or an upstream import loads at full HP, and an
+    /// individual healed back to full drops its entry (`CompanionStore.setHealthShare`).
     var battleHealth: [String: Double] = [:]
 
     init() {}
@@ -747,6 +748,7 @@ struct CompanionState: Codable, Sendable {
         candyGrantTier     = c.lenient([String: Int].self, forKey: .candyGrantTier, default: [:])
         candyWindowEpoch   = c.lenient([String: String].self, forKey: .candyWindowEpoch, default: [:])
         candyFeatureSeeded = c.lenient(Bool.self, forKey: .candyFeatureSeeded, default: false)
+        battleHealth       = c.lenient([String: Double].self, forKey: .battleHealth, default: [:])
     }
 
     /// 졸업 기록 또는 현재 개체가 실제로 도달한 단계에 이 종이 포함되는가.
