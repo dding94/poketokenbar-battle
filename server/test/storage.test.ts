@@ -13,8 +13,28 @@ import {
   operatorSecret,
   secretForms,
 } from "./helpers";
+import { sha256Hex } from "../src/secrets";
 
 describe("League storage", () => {
+  it("stores codes as peppered hashes, not plain SHA-256", async () => {
+    const host = await createGroup();
+    const { inviteCode, inviteId } = await issueInvite(host.accessKey);
+    const tables = await dumpTables();
+    const recoveryHash = tables.trainers!.find((r) => r.id === host.trainerId)!.recovery_hash as string;
+    const inviteHash = tables.invites!.find((r) => r.id === inviteId)!.code_hash as string;
+
+    for (const [stored, raw, domain] of [
+      [recoveryHash, host.recoveryCode, "recovery"],
+      [inviteHash, inviteCode, "invite"],
+    ] as const) {
+      expect(stored).toMatch(/^[0-9a-f]{64}$/);
+      const compact = raw.replaceAll("-", "");
+      for (const plain of [compact, raw, compact.toLowerCase(), `${domain}:${compact}`]) {
+        expect(stored, "unpeppered hash").not.toBe(await sha256Hex(plain));
+      }
+    }
+  });
+
   it("keeps a schema version", async () => {
     await createGroup();
     const tables = await dumpTables();

@@ -146,6 +146,15 @@ describe("POST /v1/reconnect", () => {
     expectError(await reconnect(code, freshEmail()), 410, "code_expired");
   });
 
+  it("voids unused codes when the host removes the account", async () => {
+    const { host, members } = await setupGroup(1);
+    const member = members[0]!;
+    const code = await issueReconnect(host.accessKey, member.trainerId);
+    const removed = await call("POST", "/v1/members/remove", { key: host.accessKey, body: { trainerId: member.trainerId } });
+    expect(removed.status, removed.text).toBe(200);
+    expectError(await reconnect(code, freshEmail()), 410, "code_expired");
+  });
+
   it("rejects unknown and malformed codes with invalid_code", async () => {
     expectError(await reconnect("ZZZZ-ZZZZ-ZZZZ-ZZZZ"), 404, "invalid_code");
     expectError(await reconnect("??"), 404, "invalid_code");

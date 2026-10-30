@@ -29,6 +29,24 @@ describe("health and routing", () => {
   });
 });
 
+describe("missing CODE_PEPPER", () => {
+  it("fails hashing routes with internal and keeps health working", async () => {
+    const recover = await call("POST", "/v1/recover", {
+      body: { recoveryCode: "ZZZZ-ZZZZ-ZZZZ-ZZZZ" },
+      envOverride: { CODE_PEPPER: undefined },
+    });
+    expectError(recover, 500, "internal");
+    const join = await call("POST", "/v1/join", {
+      body: { inviteCode: "ZZZZ-ZZZZ-ZZZZ", displayEmail: "a@b.c" },
+      envOverride: { CODE_PEPPER: "" },
+    });
+    expectError(join, 500, "internal");
+    const health = await call("GET", "/v1/health", { envOverride: { CODE_PEPPER: undefined } });
+    expect(health.status).toBe(200);
+    expect(health.body).toEqual({ ok: true, api: 1 });
+  });
+});
+
 describe("wrangler config", () => {
   const config = parseJsonc(wranglerConfig);
 
