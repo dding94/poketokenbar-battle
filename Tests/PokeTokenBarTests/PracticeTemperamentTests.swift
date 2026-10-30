@@ -58,6 +58,34 @@ final class PracticeTemperamentTests: XCTestCase {
         XCTAssertEqual(PracticeTemperament.allCases.map(\.policyID), ["standard", "aggressive", "tactical", "erratic"])
     }
 
+    /// The opponent (p2) runs its temperament's engine policy; the player's automatic turns stay standard (p1 nil).
+    /// The input log is the engine's own copy of the config, and replaying it gives the same battle.
+    func testTheOpponentRunsItsTemperamentAndThePlayerStaysStandard() throws {
+        let engine = try BattleEngine(url: engineURL)
+        func candidate(_ id: String, species: Int, move: String, nature: PokemonNature) throws -> PracticeCandidate {
+            var profile = PokemonProfile.generate(seed: 42, instanceID: id)
+            profile.level = 50; profile.gender = .male; profile.abilityName = "static"
+            profile.moves = [PokemonKnownMove(name: move, learnedAtLevel: 1)]
+            let snapshot = try BattleSnapshot.make(speciesID: species, nature: nature, profile: profile, using: engine)
+            return PracticeCandidate(id: id, name: id, snapshot: snapshot, blockedReason: nil)
+        }
+        // An adamant player would be aggressive as an opponent; as the player it stays standard.
+        let player = try candidate("player", species: 25, move: "thunderbolt", nature: .adamant)
+        for nature in [PokemonNature.adamant, .careful, .jolly, .quirky] {
+            let opponent = try candidate("opponent-\(nature)", species: 129, move: "splash", nature: nature)
+            let battle = PracticeBattle(engine: engine, clock: { 0 })
+            battle.start(player: player, opponent: opponent, mode: .automatic, seed: [1, 2, 3, 4])
+            battle.runToEnd()
+            let log = try XCTUnwrap(battle.result?.inputLog, "\(nature)")
+            XCTAssertEqual(log.policyVersion, BattleSnapshot.policy)
+            XCTAssertEqual(log.config.p2.policy, PracticeTemperament(nature: nature).policyID, "\(nature)")
+            XCTAssertNil(log.config.p1.policy, "the player's automatic turns stay standard")
+            struct Replay: Decodable { let logHash: String }
+            let replay: Replay = try BattleJSON.decode(engine.call(.replay, arguments: [BattleJSON.encode(log)]))
+            XCTAssertEqual(replay.logHash, battle.result?.logHash, "\(nature)")
+        }
+    }
+
     func testACandidateTakesTheTemperamentOfItsNature() throws {
         let engine = try BattleEngine(url: engineURL)
         func candidate(_ nature: PokemonNature) throws -> PracticeCandidate {

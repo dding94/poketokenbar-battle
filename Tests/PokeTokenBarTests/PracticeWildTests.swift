@@ -1432,6 +1432,49 @@ final class PracticeDailySessionTests: XCTestCase {
     }
 }
 
+// MARK: Opponent temperament
+
+/// A wild opponent's temperament reaches the engine through the whole chain: the generator rolls a nature, the
+/// candidate maps it, and the battle hands it to the engine as `config.p2.policy`.
+@MainActor
+final class PracticeTemperamentWildTests: XCTestCase {
+    private static let attackRaising: Set<String> = ["lonely", "brave", "adamant", "naughty", "modest", "mild", "quiet", "rash"]
+
+    func testAWildOpponentWithAnAttackRaisingNatureRunsAggressive() async throws {
+        let stub = SplashStub(speciesID: 129)
+        // The first seed whose wild Magikarp has an attack-raising nature (8 of 25 natures).
+        let generator = PracticeWildGenerator(source: PracticeWildSource(provider: stub, details: stub),
+                                              engine: try BattleEngine(url: engineURL))
+        var found: UInt64?
+        for seed in UInt64(1)...64 {
+            let made = try await generator.make(count: 1, around: 50, seed: seed)
+            if let nature = made.first?.snapshot?.set.nature, Self.attackRaising.contains(nature) { found = seed; break }
+        }
+        let seed = try XCTUnwrap(found)
+        var profile = PokemonProfile.generate(seed: 42, instanceID: "p")
+        profile.level = 50; profile.gender = .male; profile.abilityName = "static"
+        profile.moves = [PokemonKnownMove(name: "thunderbolt", learnedAtLevel: 1)]
+        var state = CompanionState()
+        state.dex = [DexEntry(baseID: 25, finalID: 25, chainOrder: [25], rarity: .common, caughtAt: nil,
+                              nature: .adamant, profile: profile)]
+        let session = PracticeSession(engineURL: engineURL, clock: { 0 }, drivesAutomatically: false,
+                                      wildSource: PracticeWildSource(provider: stub, details: stub), wildSeed: { seed })
+        session.prepare(state: state, activeName: nil)
+        session.findWildOpponents()
+        let tasks = [session.wildTask, session.dailyTask]
+        for task in tasks { await task?.value }
+        let wild = try XCTUnwrap(session.wildCandidates.first)
+        XCTAssertTrue(Self.attackRaising.contains(try XCTUnwrap(wild.snapshot?.set.nature)))
+        XCTAssertEqual(wild.temperament, .aggressive)
+        session.opponentID = wild.id
+        session.mode = .automatic
+        session.start(); session.skipToResult()
+        let log = try XCTUnwrap(session.battle?.result?.inputLog)
+        XCTAssertEqual(log.config.p2.policy, "aggressive")
+        XCTAssertNil(log.config.p1.policy, "the player's automatic turns stay standard, whatever its own nature")
+    }
+}
+
 // MARK: Wording and the read-only guard
 
 final class PracticeWildWordingTests: XCTestCase {
