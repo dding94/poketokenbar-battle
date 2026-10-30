@@ -61,6 +61,24 @@ final class PracticeSessionTests: XCTestCase {
         XCTAssertEqual(session.playerID, "solo"); XCTAssertNil(session.opponentID); XCTAssertNil(session.opponent)
     }
 
+    /// Every battle takes its engine seed from `battleSeed`, drawn once per start, so a pinned seed plays the same
+    /// battle again; the input log keeps the seed.
+    func testAPinnedBattleSeedPlaysTheSameBattle() throws {
+        var drawn = 0
+        let session = PracticeSession(engineURL: engineURL, clock: { 0 }, drivesAutomatically: false,
+                                      battleSeed: { drawn += 1; return [1, 2, 3, 4] })
+        session.prepare(state: fastState(), activeName: nil)
+        session.mode = .automatic
+        session.start(); session.skipToResult()
+        let first = try XCTUnwrap(session.battle?.result)
+        session.start(); session.skipToResult()
+        let second = try XCTUnwrap(session.battle?.result)
+        XCTAssertEqual(first.inputLog.config.seed, [1, 2, 3, 4])
+        XCTAssertEqual(second.inputLog.config.seed, [1, 2, 3, 4])
+        XCTAssertEqual(second.logHash, first.logHash, "the same seed, the same battle")
+        XCTAssertEqual(drawn, 2, "one seed per battle")
+    }
+
     func testPrepareWithoutUsableEngineReportsLoadErrorAndNoRoster() throws {
         let broken = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).js")
         try Data("not an engine".utf8).write(to: broken); defer { try? FileManager.default.removeItem(at: broken) }

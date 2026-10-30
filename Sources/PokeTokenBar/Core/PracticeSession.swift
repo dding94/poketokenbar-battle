@@ -58,6 +58,8 @@ final class PracticeSession {
     private var stagedEvents = 0
     private let wildSource: PracticeWildSource
     private let wildSeed: () -> UInt64
+    /// Each battle's engine seed, drawn once per `start()`.
+    private let battleSeed: () -> [UInt32]
 
     /// Level-matched wild opponents for the current player (`findWildOpponents`); never saved.
     private(set) var wildCandidates: [PracticeCandidate] = []
@@ -110,15 +112,17 @@ final class PracticeSession {
 
     /// `drivesAutomatically: false` leaves `tick()` to the caller (tests with an injected clock). Tests also
     /// inject `wildSource` stubs and a fixed `wildSeed`, so wild opponents never reach the network there, and keep
-    /// the default in-memory `recordStore`; the app passes the file next to its save.
+    /// the default in-memory `recordStore`; the app passes the file next to its save. A fixed `battleSeed` plays a
+    /// battle's exact course again (the app keeps the random one).
     init(engineURL: URL?, clock: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
          drivesAutomatically: Bool = true, wildSource: PracticeWildSource = .live,
          wildSeed: @escaping () -> UInt64 = { UInt64.random(in: .min ... .max) },
+         battleSeed: @escaping () -> [UInt32] = PracticeBattle.randomSeed,
          recordStore: PracticeRecordStore = PracticeRecordStore(fileURL: nil),
          now: @escaping () -> Date = Date.init, calendar: Calendar = .autoupdatingCurrent,
          effects: (any PracticeBattleEffects)? = nil) {
         self.engineURL = engineURL; self.clock = clock; self.drivesAutomatically = drivesAutomatically
-        self.wildSource = wildSource; self.wildSeed = wildSeed
+        self.wildSource = wildSource; self.wildSeed = wildSeed; self.battleSeed = battleSeed
         self.recordStore = recordStore; self.now = now; self.calendar = calendar; self.effects = effects
         records = recordStore.load()
     }
@@ -348,7 +352,8 @@ final class PracticeSession {
         battle = next
         // A battle with stakes starts the player at the HP it has left; sparring starts full.
         next.start(player: player, opponent: opponent, mode: mode,
-                   playerHealth: PracticeStakes.hold(against: opponent) ? healthShare(of: player) : nil)
+                   playerHealth: PracticeStakes.hold(against: opponent) ? healthShare(of: player) : nil,
+                   seed: battleSeed())
         syncInBattle()
         let staging = PracticePlayback(clock: clock)
         staging.timeScale = playbackSpeed.timeScale

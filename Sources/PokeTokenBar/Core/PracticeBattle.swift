@@ -132,10 +132,12 @@ final class PracticeBattle {
     init(engine: BattleEngine, clock: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }) {
         self.engine = engine; self.clock = clock
     }
+    /// A fresh battle seed: four values within the engine's 0…65535.
+    nonisolated static func randomSeed() -> [UInt32] { (0..<4).map { _ in UInt32.random(in: 0...65535) } }
     /// `playerHealth` is the player's HP share in a battle with stakes (`PracticeStakes`), which the player starts
     /// with (`startingHP`). nil is a battle without stakes, which starts full. The opponent always starts full.
     func start(player: PracticeCandidate, opponent: PracticeCandidate, mode: Mode, playerHealth: Double? = nil,
-               seed: [UInt32] = (0..<4).map { _ in UInt32.random(in: 0...65535) }) {
+               seed: [UInt32] = PracticeBattle.randomSeed()) {
         release()
         self.player = player; self.opponent = opponent
         view = nil; result = nil; messages = []; events = []; parser = PracticeEventParser()
