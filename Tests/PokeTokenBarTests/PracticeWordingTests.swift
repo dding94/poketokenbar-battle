@@ -280,27 +280,6 @@ final class PracticeWordingTests: XCTestCase {
         }
     }
 
-    /// Mirrors `CompanionStore.useHealingItem`: Potions need a hurt Pokémon that is standing, a Revive a fainted
-    /// one, the reroll any hatched one. Nothing works without the item or a Pokémon.
-    func testBattleItemUseFollowsTheHealthShare() {
-        for kind in [ItemKind.potion, .hyperPotion] {
-            XCTAssertEqual(BattleItemUse(kind, count: 0, healthShare: 0.5), .notOwned)
-            XCTAssertEqual(BattleItemUse(kind, count: 1, healthShare: nil), .noPokemon)
-            XCTAssertEqual(BattleItemUse(kind, count: 1, healthShare: 1), .fullHealth)
-            XCTAssertEqual(BattleItemUse(kind, count: 1, healthShare: 0), .fainted)
-            XCTAssertEqual(BattleItemUse(kind, count: 1, healthShare: 0.5), .usable)
-            XCTAssertEqual(BattleItemUse(kind, count: 2, healthShare: 0.999), .usable, "a scratch still heals")
-        }
-        XCTAssertEqual(BattleItemUse(.revive, count: 0, healthShare: 0), .notOwned)
-        XCTAssertEqual(BattleItemUse(.revive, count: 1, healthShare: nil), .noPokemon)
-        XCTAssertEqual(BattleItemUse(.revive, count: 1, healthShare: 0), .usable)
-        XCTAssertEqual(BattleItemUse(.revive, count: 1, healthShare: 0.5), .notFainted)
-        XCTAssertEqual(BattleItemUse(.revive, count: 1, healthShare: 1), .notFainted)
-        XCTAssertEqual(BattleItemUse(.ivReroll, count: 0, healthShare: 1), .notOwned)
-        XCTAssertEqual(BattleItemUse(.ivReroll, count: 1, healthShare: nil), .noPokemon)
-        XCTAssertEqual(BattleItemUse(.ivReroll, count: 1, healthShare: 0), .usable, "a fainted Pokémon keeps its IVs")
-    }
-
     /// 0% only when fainted and 100% only when full, so the bar's number never contradicts what an item can do.
     func testHealthPercentReadsFaintedAndFullOnlyAtTheEnds() {
         XCTAssertEqual(BattleHealth.percent(0), 0)

@@ -1,8 +1,8 @@
 import SwiftUI
 
-// PR 03C battle items and HP in the popover: what the practice screens may do with the bag, whether a battle item
-// works right now, HP as a bar or "Fainted", and the IV reroll's two steps. Everything but the store glue at the
-// top takes plain values. Practice files use these views but never name the store (practice read-only guard).
+// PR 03C battle items and HP in the popover: what the practice screens may do with the bag, the line for the store's
+// verdict on a healing item, HP as a bar or "Fainted", and the IV reroll's two steps. Everything but the store glue at
+// the top takes plain values. Practice files use these views but never name the store (practice read-only guard).
 
 /// What the practice screens may do with the bag: count battle items, ask the store whether a healing item works on
 /// one individual (`HealingItemVerdict`, the store's one rule) and use it. `CompanionStore` conforms below, outside the
@@ -17,7 +17,15 @@ protocol PracticeItemBag: AnyObject {
 extension HealingItemVerdict {
     /// The line in place of Use when the item does not work now; nil when it does, or when there is nothing to say
     /// (not a healing item, none left: the bag lists only what it holds).
-    func reason(_ l: L) -> String? { nil }   // RED stub
+    func reason(_ l: L) -> String? {
+        switch self {
+        case .usable, .notHealing, .noneLeft: nil
+        case .inBattle: l.battleItemInBattle
+        case .needsRevive: l.battleItemNeedsRevive
+        case .hpFull: l.battleItemFullHealth
+        case .notFainted: l.battleItemOnlyFainted
+        }
+    }
 }
 
 extension CompanionStore: PracticeItemBag {
@@ -27,41 +35,6 @@ extension CompanionStore: PracticeItemBag {
     var currentIVs: PokemonIVs? { state.active?.profile?.ivs }
     /// The current Pokémon's HP share between battles (1 = full, 0 = fainted); nil without one.
     var currentHealthShare: Double? { currentInstanceID.map { healthShare(of: $0) } }
-}
-
-/// Whether a battle item works on a Pokémon right now, and why not. Mirrors `CompanionStore.useHealingItem`: a Potion
-/// or Hyper Potion needs one that is hurt but standing, a Revive one that fainted; the IV reroll a hatched Pokémon.
-/// `healthShare` is nil without a Pokémon (an egg, or before its profile exists).
-enum BattleItemUse: Equatable {
-    case usable
-    case notOwned
-    case noPokemon
-    case fullHealth
-    /// A Potion on a fainted Pokémon: only a Revive helps.
-    case fainted
-    /// A Revive on a Pokémon that is standing.
-    case notFainted
-
-    init(_ kind: ItemKind, count: Int, healthShare: Double?) {
-        guard count > 0 else { self = .notOwned; return }
-        guard let share = healthShare else { self = .noPokemon; return }
-        switch kind {
-        case .potion, .hyperPotion: self = share <= 0 ? .fainted : share >= 1 ? .fullHealth : .usable
-        case .revive: self = share <= 0 ? .usable : .notFainted
-        case .ivReroll, .rareCandy, .mint, .shinyCharm: self = .usable
-        }
-    }
-
-    /// The bag's line in place of Use when it does not work; nil when it does.
-    func reason(_ l: L, isEgg: Bool) -> String? {
-        switch self {
-        case .usable: nil
-        case .notOwned, .noPokemon: isEgg ? l.useAfterHatch : l.useNeedsPokemon
-        case .fullHealth: l.battleItemFullHealth
-        case .fainted: l.battleItemNeedsRevive
-        case .notFainted: l.battleItemOnlyFainted
-        }
-    }
 }
 
 /// HP shares as the screens show them.

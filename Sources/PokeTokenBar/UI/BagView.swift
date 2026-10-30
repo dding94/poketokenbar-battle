@@ -45,7 +45,11 @@ struct BagView: View {
     /// 배틀 아이템을 지금 현재 포켓몬에게 못 쓰는 이유. 쓸 수 있으면 nil.
     /// 회복약은 스토어의 판정(`healingItemVerdict`, `useHealingItem` 과 같은 규칙) 그대로 — 배틀 중·체력 가득·기절 여부.
     /// 재추첨은 부화한 포켓몬만 있으면 된다. 현재 포켓몬이 없으면(알·프로필 전) 그 사실을 말한다.
-    static func battleItemReason(_ kind: ItemKind, store: CompanionStore) -> String? { nil }   // RED stub
+    static func battleItemReason(_ kind: ItemKind, store: CompanionStore) -> String? {
+        let l = store.l
+        guard let instanceID = store.currentInstanceID else { return store.isEgg ? l.useAfterHatch : l.useNeedsPokemon }
+        return store.healingItemVerdict(kind, on: instanceID).reason(l)
+    }
 
     /// 빈 가방 — 움직이는 잠만보(143) + 안내(특정 아이템명 미언급, 확장 대비).
     private var emptyState: some View {
@@ -87,7 +91,11 @@ private struct ItemCard: View {
     /// 배틀 아이템 4종인지 — 현재 포켓몬의 체력·개체값에 따라 쓸 수 있는지가 갈린다.
     private var isBattleItem: Bool { [.potion, .hyperPotion, .revive, .ivReroll].contains(kind) }
     private var isHealing: Bool { [.potion, .hyperPotion, .revive].contains(kind) }
-    private var battleUse: BattleItemUse { BattleItemUse(kind, count: count, healthShare: store.currentHealthShare) }
+    /// 회복약이 지금 현재 포켓몬에게 듣는지 — 스토어의 판정 하나(`healingItemVerdict`, `useHealingItem` 과 같은 규칙).
+    /// 현재 포켓몬이 없으면(알·프로필 전) nil.
+    private var healingVerdict: HealingItemVerdict? {
+        store.currentInstanceID.map { store.healingItemVerdict(kind, on: $0) }
+    }
 
     private var selectedCandyCount: Int { min(candyCount, max(1, store.maxRareCandyUseCount)) }
 
@@ -154,8 +162,9 @@ private struct ItemCard: View {
         case .rareCandy: return store.canUseRareCandy
         case .mint:      return store.canUseMint
         case .shinyCharm: return false   // 보유형 — 사용 개념 없음(상시 효과)
-        // 회복약은 체력에 맞을 때만, 재추첨은 부화한 포켓몬이면(`BattleItemUse`, Core 의 사용 규칙과 같은 판정).
-        case .potion, .hyperPotion, .revive, .ivReroll: return battleUse == .usable
+        // 회복약은 스토어가 듣는다고 할 때만(배틀 중·체력 가득·기절 여부), 재추첨은 부화한 포켓몬이면(`useIVReroll`).
+        case .potion, .hyperPotion, .revive: return healingVerdict == .usable
+        case .ivReroll: return count > 0 && store.currentIVs != nil
         }
     }
     /// 사용 컨트롤 효과 힌트 ("+XP" / "성격 랜덤 변경" / "체력 +50%").
@@ -222,8 +231,8 @@ private struct ItemCard: View {
                     .buttonStyle(.bordered).controlSize(.small)
                 }
             }
-        } else if isBattleItem, let reason = battleUse.reason(l, isEgg: store.isEgg) {
-            // 배틀 아이템 — 지금 포켓몬의 체력 때문에 못 쓰는 이유를 말한다(체력 가득·기절·기절 아님).
+        } else if isBattleItem, let reason = BagView.battleItemReason(kind, store: store) {
+            // 배틀 아이템 — 지금 포켓몬에게 못 쓰는 이유를 말한다(배틀 중·체력 가득·기절·기절 아님·포켓몬 없음).
             HStack {
                 Text(l.battleItemEffectHint(kind)).font(.caption2).foregroundStyle(.tertiary).monospacedDigit()
                 Spacer(minLength: 6)

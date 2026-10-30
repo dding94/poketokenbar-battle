@@ -24,7 +24,7 @@ struct PracticeHealControl: View {
     var artwork = false
 
     /// The items the store says work on the entry, in the order given (shop order, cheapest first).
-    static func options(_ items: [PracticeHealItem]) -> [PracticeHealItem] { [] }   // RED stub
+    static func options(_ items: [PracticeHealItem]) -> [PracticeHealItem] { items.filter { $0.verdict == .usable } }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {

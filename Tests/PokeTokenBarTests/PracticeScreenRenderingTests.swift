@@ -1100,25 +1100,6 @@ final class PracticeScreenRenderingTests: XCTestCase {
         return CompanionStore(provider: OfflineWildProvider(), fileURL: file, defaults: defaults)
     }
 
-    /// The bag's verdict (`BattleItemUse`) and the store's own rule (`CompanionStore.useHealingItem`) agree for every
-    /// healing item at full, hurt and fainted HP, so Use is offered exactly when it works; the reroll needs only a
-    /// hatched Pokémon, fainted or not.
-    func testBattleItemUseMatchesTheStore() throws {
-        for kind in [ItemKind.potion, .hyperPotion, .revive] {
-            for share in [1.0, 0.4, 0] {
-                let store = try battleItemStore(language: .en, health: share)
-                XCTAssertEqual(store.currentHealthShare, share, "the save holds Pikachu's HP")
-                let offered = BattleItemUse(kind, count: store.itemCount(kind), healthShare: store.currentHealthShare) == .usable
-                let id = try XCTUnwrap(store.currentInstanceID)
-                XCTAssertEqual(store.useHealingItem(kind, on: id), offered, "\(kind) at HP \(share)")
-            }
-        }
-        let store = try battleItemStore(language: .en, health: 0)
-        let offered = BattleItemUse(.ivReroll, count: store.itemCount(.ivReroll), healthShare: store.currentHealthShare) == .usable
-        XCTAssertTrue(offered)
-        XCTAssertEqual(store.useIVReroll() != nil, offered)
-    }
-
     /// The bag says why a battle item does not work on the current Pokémon from the store's own verdict
     /// (`healingItemVerdict`): HP full, fainted or standing, and in a battle while a running battle with stakes holds
     /// it. The reroll needs only a hatched Pokémon; an egg can use neither.

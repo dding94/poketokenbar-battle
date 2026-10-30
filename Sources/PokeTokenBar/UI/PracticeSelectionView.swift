@@ -96,7 +96,12 @@ struct PracticeSelectionView: View {
 
     /// The healing items for the Heal control, in shop order: how many the bag holds and the store's verdict on my
     /// entry's individual (`HealingItemVerdict`). None without a bag or an entry.
-    static func healItems(entry: PracticeCandidate?, bag: (any PracticeItemBag)?) -> [PracticeHealItem] { [] }   // RED stub
+    static func healItems(entry: PracticeCandidate?, bag: (any PracticeItemBag)?) -> [PracticeHealItem] {
+        guard let bag, let instanceID = entry?.snapshot?.instanceID else { return [] }
+        return [ItemKind.potion, .hyperPotion, .revive].map {
+            PracticeHealItem(kind: $0, count: bag.itemCount($0), verdict: bag.healingItemVerdict($0, on: instanceID))
+        }
+    }
 
     // MARK: My entry
 
