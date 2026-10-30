@@ -91,9 +91,11 @@ export class Realtime {
   /** The client closed the socket or it failed: answer the close and update presence. */
   departed(ws: WebSocket): void {
     const attachment = attachmentOf(ws);
-    if (attachment && !attachment.closed) markClosed(ws, attachment);
+    // A socket the server already closed (4001/4003/4400) left presence at that moment.
+    const stillCounted = attachment !== null && !attachment.closed;
+    if (stillCounted) markClosed(ws, attachment);
     tryClose(ws, 1000, "");
-    if (attachment && !attachment.closed) this.announceIfOffline(attachment);
+    if (stillCounted) this.announceIfOffline(attachment);
   }
 
   /** Trainer ids with a live socket in the group, sorted. */
