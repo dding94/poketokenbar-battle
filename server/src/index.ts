@@ -11,7 +11,9 @@ import {
   readJsonObject,
   requireString,
 } from "./http";
+import { attemptBucket } from "./ip";
 import type { League, NewCredentials } from "./league";
+import { KEY_HASH_HEADER } from "./realtime";
 import {
   INVITE_CODE_LENGTH,
   RECONNECT_CODE_LENGTH,
@@ -51,7 +53,7 @@ function unwrap<T>(result: Result<T>): T {
 }
 
 async function ipHashOf(ctx: Context): Promise<string> {
-  return pepperedHash(pepper(ctx), "ip", ctx.request.headers.get("cf-connecting-ip") ?? "unknown");
+  return pepperedHash(pepper(ctx), "ip", attemptBucket(ctx.request.headers.get("cf-connecting-ip") ?? "unknown"));
 }
 
 async function codeHashOf(
@@ -154,6 +156,18 @@ const routes: Record<string, Partial<Record<string, Handler>>> = {
 
   "/v1/me": {
     GET: async (ctx) => json(200, unwrap(await ctx.league.me({ keyHash: await accessKeyHash(ctx.request) }))),
+  },
+
+  "/v1/connect": {
+    // WebSocket upgrade. The League sees only the key hash, never the Authorization header.
+    GET: async (ctx) => {
+      if (ctx.request.headers.get("upgrade")?.toLowerCase() !== "websocket") throw new ApiError("upgrade_required");
+      const keyHash = await accessKeyHash(ctx.request);
+      const headers = new Headers(ctx.request.headers);
+      headers.delete("authorization");
+      headers.set(KEY_HASH_HEADER, keyHash);
+      return ctx.league.fetch(new Request(ctx.request.url, { method: "GET", headers }));
+    },
   },
 
   "/v1/group": {

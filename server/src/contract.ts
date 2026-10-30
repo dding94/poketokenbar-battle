@@ -61,6 +61,8 @@ export interface TrainerView {
 
 export interface MemberView extends TrainerView {
   joinedAt: number;
+  /** A live WebSocket right now (Appendix C); never stored. */
+  online: boolean;
 }
 
 export interface GroupView {

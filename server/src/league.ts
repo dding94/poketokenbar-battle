@@ -14,6 +14,8 @@ import {
   fail,
   ok,
 } from "./contract";
+import { errorResponse } from "./http";
+import { type GroupChange, KEY_HASH_HEADER, Realtime } from "./realtime";
 
 // The League never sees a raw key or code: every *Hash argument is computed by the Worker.
 
@@ -124,17 +126,22 @@ export interface Email {
   norm: string;
 }
 
+/** Realtime work that runs only after its transaction has committed. */
+type Effect = { kind: "revoke"; trainerId: string } | { kind: "group_changed"; groupId: string; change: GroupChange };
+
 export class League extends DurableObject<Env> {
   /** Single clock for every time check. Tests replace it through runInDurableObject. */
   clock: () => number = () => Date.now();
 
   private readonly sql: SqlStorage;
   private readonly access: GroupAccess;
+  private readonly realtime: Realtime;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     this.sql = ctx.storage.sql;
     this.access = new GroupAccess(this.sql);
+    this.realtime = new Realtime(ctx);
     this.migrate();
   }
 
@@ -155,6 +162,36 @@ export class League extends DurableObject<Env> {
         String(SCHEMA_VERSION),
       );
     });
+  }
+
+  // ---- realtime connections ----
+
+  /**
+   * The WebSocket upgrade forwarded by the Worker, which has already replaced the access key
+   * with its hash. Only an active trainer is accepted; anything else gets no upgrade.
+   */
+  override fetch(request: Request): Response {
+    if (request.headers.get("upgrade")?.toLowerCase() !== "websocket") return errorResponse("upgrade_required");
+    const keyHash = request.headers.get(KEY_HASH_HEADER);
+    if (!keyHash) return errorResponse("unauthorized");
+    const auth = this.ctx.storage.transactionSync(() => this.access.actor(keyHash, "member"));
+    if (!auth.ok) return errorResponse(auth.code);
+    const [client, server] = Object.values(new WebSocketPair()) as [WebSocket, WebSocket];
+    this.realtime.accept(server, auth.value.trainer.id, auth.value.groupId, this.clock());
+    return new Response(null, { status: 101, webSocket: client });
+  }
+
+  /** `ping` never gets here (runtime auto-response); every other message closes the socket. */
+  override webSocketMessage(ws: WebSocket, _message: string | ArrayBuffer): void {
+    this.realtime.unexpectedMessage(ws);
+  }
+
+  override webSocketClose(ws: WebSocket, _code: number, _reason: string, _wasClean: boolean): void {
+    this.realtime.departed(ws);
+  }
+
+  override webSocketError(ws: WebSocket, _error: unknown): void {
+    this.realtime.departed(ws);
   }
 
   // ---- RPC: credential-less entry points ----
@@ -188,7 +225,7 @@ export class League extends DurableObject<Env> {
 
   join(input: { ipHash: string; inviteHash: string | null; email: Email; credentials: NewCredentials }): Result<AccountGrant> {
     const now = this.clock();
-    return this.tx(() => {
+    return this.tx((after) => {
       const limited = this.checkAttempts(input.ipHash, "invite", now);
       if (limited) return limited;
       const invite =
@@ -209,13 +246,14 @@ export class League extends DurableObject<Env> {
       const trainerId = newId("tr");
       this.insertTrainer(trainerId, invite.group_id, input.email, input.credentials, now);
       this.sql.exec("UPDATE invites SET uses = uses + 1 WHERE id = ?", invite.id);
+      after.push({ kind: "group_changed", groupId: invite.group_id, change: "join" });
       return ok(this.grant(trainerId));
     });
   }
 
   recover(input: { ipHash: string; recoveryHash: string | null; credentials: NewCredentials }): Result<AccountGrant> {
     const now = this.clock();
-    return this.tx(() => {
+    return this.tx((after) => {
       const limited = this.checkAttempts(input.ipHash, "recovery", now);
       if (limited) return limited;
       const trainer =
@@ -233,6 +271,7 @@ export class League extends DurableObject<Env> {
         input.credentials.recoveryHash,
         trainer.id,
       );
+      after.push({ kind: "revoke", trainerId: trainer.id });
       return ok(this.grant(trainer.id));
     });
   }
@@ -244,7 +283,7 @@ export class League extends DurableObject<Env> {
     credentials: NewCredentials;
   }): Result<AccountGrant> {
     const now = this.clock();
-    return this.tx(() => {
+    return this.tx((after) => {
       const limited = this.checkAttempts(input.ipHash, "reconnect", now);
       if (limited) return limited;
       const code =
@@ -276,6 +315,7 @@ export class League extends DurableObject<Env> {
           input.credentials.recoveryHash,
           trainer.id,
         );
+        after.push({ kind: "group_changed", groupId: code.group_id, change: "return" });
       } else {
         this.sql.exec(
           "UPDATE trainers SET key_hash = ?, recovery_hash = ? WHERE id = ?",
@@ -283,6 +323,7 @@ export class League extends DurableObject<Env> {
           input.credentials.recoveryHash,
           trainer.id,
         );
+        after.push({ kind: "revoke", trainerId: trainer.id });
       }
       this.sql.exec("UPDATE reconnect_codes SET used_at = ? WHERE id = ?", now, code.id);
       this.addAudit(code.group_id, now, "reconnect_code_used", trainer.id, trainer.id, null);
@@ -310,7 +351,11 @@ export class League extends DurableObject<Env> {
       const members = this.sql
         .exec<TrainerRow>(`SELECT ${TRAINER_COLUMNS} FROM trainers WHERE group_id = ? ORDER BY joined_at, id`, actor.groupId)
         .toArray()
-        .map((row) => ({ ...this.trainerView(row, group), joinedAt: row.joined_at }));
+        .map((row) => ({
+          ...this.trainerView(row, group),
+          joinedAt: row.joined_at,
+          online: row.status === "active" && this.realtime.isOnline(row.id),
+        }));
       return ok({ group: this.groupView(group), members });
     });
   }
@@ -439,13 +484,14 @@ export class League extends DurableObject<Env> {
 
   leave(input: { keyHash: string }): Result<{ ok: true }> {
     const now = this.clock();
-    return this.tx(() => {
+    return this.tx((after) => {
       const auth = this.access.actor(input.keyHash, "member");
       if (!auth.ok) return auth;
       const actor = auth.value;
       if (actor.isHost) return fail("host_must_transfer");
       this.anonymize(actor.trainer.id, now);
       this.addAudit(actor.groupId, now, "member_left", actor.trainer.id, actor.trainer.id, null);
+      after.push({ kind: "revoke", trainerId: actor.trainer.id }, { kind: "group_changed", groupId: actor.groupId, change: "leave" });
       return ok({ ok: true as const });
     });
   }
@@ -453,7 +499,7 @@ export class League extends DurableObject<Env> {
   /** Removal also revokes every open invite of the group, so a removed person cannot rejoin with one. */
   removeMember(input: { keyHash: string; trainerId: string }): Result<{ ok: true; revokedInvites: number }> {
     const now = this.clock();
-    return this.tx(() => {
+    return this.tx((after) => {
       const auth = this.access.actor(input.keyHash, "host");
       if (!auth.ok) return auth;
       const actor = auth.value;
@@ -463,13 +509,14 @@ export class League extends DurableObject<Env> {
       this.anonymize(target.id, now);
       this.addAudit(actor.groupId, now, "member_removed", actor.trainer.id, target.id, null);
       const revokedInvites = this.revokeOpenInvites(actor.groupId, actor.trainer.id, now);
+      after.push({ kind: "revoke", trainerId: target.id }, { kind: "group_changed", groupId: actor.groupId, change: "remove" });
       return ok({ ok: true as const, revokedInvites });
     });
   }
 
   transferHost(input: { keyHash: string; trainerId: string }): Result<{ group: GroupView }> {
     const now = this.clock();
-    return this.tx(() => {
+    return this.tx((after) => {
       const auth = this.access.actor(input.keyHash, "host");
       if (!auth.ok) return auth;
       const actor = auth.value;
@@ -478,6 +525,7 @@ export class League extends DurableObject<Env> {
       const target = found.value;
       this.sql.exec("UPDATE groups SET host_trainer_id = ? WHERE id = ?", target.id, actor.groupId);
       this.addAudit(actor.groupId, now, "host_transferred", actor.trainer.id, target.id, null);
+      after.push({ kind: "group_changed", groupId: actor.groupId, change: "host_transfer" });
       return ok({ group: this.groupView(this.groupRow(actor.groupId)) });
     });
   }
@@ -494,9 +542,20 @@ export class League extends DurableObject<Env> {
 
   // ---- internals ----
 
-  private tx<T>(fn: () => Result<T>): Result<T> {
-    const result = this.ctx.storage.transactionSync(fn);
+  /**
+   * Runs `fn` in one transaction. Realtime effects it queues run only after a successful commit:
+   * a thrown error rolls back and skips them, and so does a failed Result.
+   */
+  private tx<T>(fn: (after: Effect[]) => Result<T>): Result<T> {
+    const after: Effect[] = [];
+    const result = this.ctx.storage.transactionSync(() => fn(after));
     this.scheduleAttemptCleanup();
+    if (result.ok) {
+      for (const effect of after) {
+        if (effect.kind === "revoke") this.realtime.revoke(effect.trainerId);
+        else this.realtime.groupChanged(effect.groupId, effect.change);
+      }
+    }
     return result;
   }
 
