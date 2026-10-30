@@ -86,7 +86,8 @@ final class PracticeSession {
     /// The day a search in flight is making today's opponent for.
     private var dailySearchDay: String?
     private let recordStore: PracticeRecordStore
-    /// Wall clock and calendar for the local day (`PracticeDaily.dayKey`); `clock` is uptime for turn timing.
+    /// Wall clock and calendar for the local day (`PracticeDaily.dayKey`); `clock` is uptime for turn timing. The app's
+    /// calendar is `.autoupdatingCurrent`, so the day follows the system time zone after launch.
     private let now: () -> Date
     private let calendar: Calendar
 
@@ -97,7 +98,7 @@ final class PracticeSession {
          drivesAutomatically: Bool = true, wildSource: PracticeWildSource = .live,
          wildSeed: @escaping () -> UInt64 = { UInt64.random(in: .min ... .max) },
          recordStore: PracticeRecordStore = PracticeRecordStore(fileURL: nil),
-         now: @escaping () -> Date = Date.init, calendar: Calendar = .current) {
+         now: @escaping () -> Date = Date.init, calendar: Calendar = .autoupdatingCurrent) {
         self.engineURL = engineURL; self.clock = clock; self.drivesAutomatically = drivesAutomatically
         self.wildSource = wildSource; self.wildSeed = wildSeed
         self.recordStore = recordStore; self.now = now; self.calendar = calendar
