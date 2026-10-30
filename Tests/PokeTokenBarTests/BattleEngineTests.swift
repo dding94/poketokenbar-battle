@@ -79,4 +79,35 @@ final class BattleEngineTests: XCTestCase {
             XCTAssertEqual($0 as? BattleEngine.Failure, .engine("invalid_policy"))
         }
     }
+    /// A side's starting HP (`BattleConfig.Player.hp`, PR 03C) reaches the engine only when set: its own view shows it,
+    /// the opponent sees the HP bar percentage, and anything outside 1…max HP is refused rather than clamped.
+    @MainActor func testEngineStartsASideAtItsGivenHPAndRefusesHPOutsideItsMax() throws {
+        let engine = try BattleEngine(url: engineURL, expectedHash: expectedHash)
+        let ivs = Dictionary(uniqueKeysWithValues: ["hp", "attack", "defense", "special-attack", "special-defense", "speed"].map { ($0, 31) })
+        let set = BattleSet(speciesNum: 25, form: nil, level: 50, gender: .male, nature: "hardy", ability: "static",
+                            moves: ["thunderbolt"], ivs: ivs, shiny: false)
+        let info: BattlePublicInfo = try BattleJSON.decode(engine.call(.describeSet, arguments: [BattleJSON.encode(set)]))
+        let max = try XCTUnwrap(info.stats["hp"])
+        func config(_ hp: Int?) -> BattleConfig {
+            BattleConfig(seed: [1, 2, 3, 4], policySeed: 42, p1: .init(name: "p1", set: set, hp: hp), p2: .init(name: "p2", set: set))
+        }
+        struct Created: Decodable { let id: String }
+        let cases: [(hp: Int?, bar: Int)] = [(nil, 100), (37, 34), (max, 100)]   // bar = ceil(100 × hp / 110)
+        for (hp, bar) in cases {
+            let created: Created = try BattleJSON.decode(engine.call(.createBattle, arguments: [BattleJSON.encode(config(hp))]))
+            let id = try BattleJSON.encode(created.id)
+            let own: BattleView = try BattleJSON.decode(engine.call(.state, arguments: [id, BattleJSON.encode("p1")]))
+            let foe: BattleView = try BattleJSON.decode(engine.call(.state, arguments: [id, BattleJSON.encode("p2")]))
+            XCTAssertEqual([own.p1.hp, own.p1.maxhp], [hp ?? max, max])
+            XCTAssertEqual([foe.p1.hp, foe.p1.maxhp], [bar, 100])
+            let result: BattleResult = try BattleJSON.decode(engine.call(.result, arguments: [id]))
+            XCTAssertEqual(result.inputLog.config.p1.hp, hp)
+            _ = try engine.call(.destroy, arguments: [id])
+        }
+        for hp in [0, max + 1] {
+            XCTAssertThrowsError(try engine.call(.createBattle, arguments: [BattleJSON.encode(config(hp))])) {
+                XCTAssertEqual($0 as? BattleEngine.Failure, .engine("invalid_hp"))
+            }
+        }
+    }
 }

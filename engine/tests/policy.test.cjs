@@ -142,6 +142,12 @@ test('standard, named or omitted, picks exactly what auto-v1 picked across rando
   }
   assert.ok(decisions>=2500,`only ${decisions} decisions compared`);
 });
+test('battles that leave hp out play exactly as bundle ed6bffd4 (before config.pN.hp) played them',()=>{
+  // Every pairing of temperaments over 200 random level-matched battles; the digest was taken on ed6bffd4.
+  const hashes=randomConfigs(200).map((config,i)=>{config.p1.policy=TEMPERAMENTS[i%4];config.p2.policy=TEMPERAMENTS[(i>>2)%4];
+    return playAuto(context,config).logHash;});
+  assert.equal(createHash('sha256').update(hashes.join('\n')).digest('hex'),'4702168483a2d510b7fb206eae65f9547e5007d2fa8af90545a52755754b0917');
+});
 test('aggressive puts power before accuracy and matchups but still scores an immune move zero',()=>{
   const thunder=set(25,['thunder','thunderbolt'],'static');
   assert.equal(pick(battle(thunder)),2);   // standard: 110 x 70% < 90

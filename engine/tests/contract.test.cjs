@@ -63,6 +63,55 @@ test('replay runs only auto-v2 logs and validates the policies they carry',()=>{
   assert.deepEqual(call('replay',{...log,policyVersion:'auto-v1'}),{ok:false,error:'invalid_replay'});
   assert.deepEqual(call('replay',{...log,config:{...log.config,p2:{...log.config.p2,policy:'reckless'}}}),{ok:false,error:'invalid_policy'});
 });
+test('a player may start at 1..max HP (describeSet stats.hp); anything else is invalid_hp, never clamped',()=>{
+  const max={p1:call('describeSet',set()).stats.hp,p2:call('describeSet',set(129,'swift-swim',['splash'])).stats.hp};
+  assert.deepEqual(max,{p1:110,p2:95});
+  for (const side of ['p1','p2']) {
+    for (const hp of [1,max[side]]) {const c=config();c[side].hp=hp;call('destroy',create(c));}
+    for (const hp of [0,-1,max[side]+1,1.5,'50',null,true,[50],{}]) {
+      const c=config();c[side].hp=hp;
+      assert.deepEqual(call('createBattle',c),{ok:false,error:'invalid_hp'},`${side} ${JSON.stringify(hp)}`);
+    }
+  }
+  const c=config();c.p1.set=set(292,'wonder-guard',['scratch']);c.p1.hp=1;call('destroy',create(c));   // Shedinja: max HP 1
+  c.p1.hp=2;assert.deepEqual(call('createBattle',c),{ok:false,error:'invalid_hp'});
+});
+test('a starting HP shows exactly to its side and as the HP bar percentage to everyone else',()=>{
+  for (const [hp,bar] of [[37,34],[109,99],[1,1]]) {   // ceil(100 x hp / 110), and 99 until full
+    const c=config();c.p1.hp=hp;const id=create(c);
+    const own=call('state',id,'p1').p1;assert.deepEqual([own.hp,own.maxhp],[hp,110]);
+    for (const viewer of ['p2','spectator']) {const seen=call('state',id,viewer).p1;assert.deepEqual([seen.hp,seen.maxhp],[bar,100],viewer);}
+    const full=create();assert.deepEqual(call('request',id,'p1'),call('request',full,'p1'));
+    call('destroy',id);call('destroy',full);
+  }
+});
+test('a starting HP changes nothing in any view but the HP on the switch-in line',()=>{
+  const full=create(),c=config();c.p1.hp=37;const hurt=create(c);
+  for (const [viewer,before,after] of [['p1','110/110','37/110'],['p2','100/100','34/100'],['spectator','100/100','34/100']]) {
+    const a=call('drainLog',full,viewer),b=call('drainLog',hurt,viewer);
+    assert.equal(b.length,a.length,viewer);
+    assert.deepEqual(a.map((line,i)=>[line,b[i]]).filter(([x,y])=>x!==y),
+      [[`|switch|p1a: Pikachu|Pikachu, L50, M|${before}`,`|switch|p1a: Pikachu|Pikachu, L50, M|${after}`]],viewer);
+  }
+  call('destroy',full);call('destroy',hurt);
+});
+test('a starting HP stays in the input log, decides the battle and replays exactly',()=>{
+  const c=config();c.p2.set=set(53,'limber',['tackle']);   // Persian outspeeds Pikachu
+  const full=create(c);round(full);assert.equal(call('result',full).ended,false);
+  c.p1.hp=1;const id=create(c);round(id);const r=call('result',id);
+  assert.deepEqual([r.ended,r.winner,r.turns,r.inputLog.config.p1.hp],[true,'p2',1,1]);
+  assert.deepEqual(call('replay',r.inputLog),{winner:r.winner,logHash:r.logHash});
+  const forged={...r.inputLog,config:{...r.inputLog.config,p1:{...r.inputLog.config.p1,hp:111}}};
+  assert.deepEqual(call('replay',forged),{ok:false,error:'invalid_hp'});
+  call('destroy',full);call('destroy',id);
+});
+test('starting at max HP is the same battle as leaving hp out',()=>{
+  const c=config();c.p2.set=set(53,'limber',['tackle']);const omitted=create(c);
+  c.p1.hp=110;c.p2.hp=call('describeSet',c.p2.set).stats.hp;const named=create(c);
+  for (let i=0;i<10&&call('request',omitted,'p1').kind!=='none';i++){round(omitted);round(named);}
+  assert.equal(call('result',omitted).ended,true);assert.equal(call('result',named).logHash,call('result',omitted).logHash);
+  call('destroy',omitted);call('destroy',named);
+});
 test('rejects raw commands, tera, noninteger slots and out of range slots',()=>{
   const id=create();
   for (const choice of ['move 1', '>eval globalThis.hacked=true', {type:'move',slot:1,tera:true},
