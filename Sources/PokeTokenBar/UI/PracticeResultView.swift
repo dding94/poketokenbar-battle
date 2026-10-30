@@ -38,7 +38,7 @@ struct PracticeResultView: View {
             hero
             // The card takes its room from the log below, which scrolls.
             if let record, !PracticeResultRecord.isEmpty(record, stakes: stakes) {
-                PracticeResultRecord(update: record, stakes: stakes, l: l)
+                PracticeResultRecord(update: record, stakes: stakes, showsFaint: restartable, l: l)
             }
             if let playback {
                 tiles(playback.summary)
@@ -213,22 +213,31 @@ struct PracticeResultView: View {
 
     /// Rematch and Again on auto start the same pair, which Core refuses while my fainted entry faces a wild or
     /// today's opponent (`PracticeSession.startBlock`).
-    static func canRestart(startBlock: PracticeStartBlock?) -> Bool { true }   // RED stub
+    static func canRestart(startBlock: PracticeStartBlock?) -> Bool { startBlock == nil }
 
-    /// Again on auto: the same pair in automatic mode.
-    static func againOnAuto(_ session: PracticeSession) {   // RED stub: switches the mode even when nothing starts
+    /// Again on auto: the same pair in automatic mode. It changes the mode only when that battle can start, so a refused
+    /// start leaves the next selection as it was.
+    static func againOnAuto(_ session: PracticeSession) {
+        guard canRestart(startBlock: session.startBlock) else { return }
         session.mode = .automatic
         session.start()
     }
 
+    /// Whether the same pair can start again. Off, the fainted line above the buttons says what heals it and where,
+    /// and the record card leaves its own fainted row out so the faint is said once.
+    private var restartable: Bool { Self.canRestart(startBlock: session.startBlock) }
+
     private var actions: some View {
-        VStack(spacing: 8) {
+        let restart = restartable
+        return VStack(spacing: 8) {
+            if !restart { faintedLine }
             Button { session.start() } label: {
                 Text(l.practiceRematch).font(.body.weight(.semibold)).frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
             .keyboardShortcut(.defaultAction)
+            .disabled(!restart)
             HStack(spacing: 8) {
                 Button {
                     // A wild foe was just fought: offer fresh ones instead of the same three. Read off the
@@ -242,8 +251,24 @@ struct PracticeResultView: View {
                 Button { Self.againOnAuto(session) } label: {
                     Text(l.practiceAutoAgain).frame(maxWidth: .infinity)
                 }
+                .disabled(!restart)
             }
             .buttonStyle(.bordered)
+        }
+    }
+
+    /// "Fainted" and what heals it from where (a Revive, under New opponent's Heal control). Sparring through New
+    /// opponent stays open.
+    private var faintedLine: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Image(systemName: "heart.slash.fill")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.red)
+            Text(l.practiceFaintedTitle).font(.callout.weight(.semibold)).foregroundStyle(.red).fixedSize()
+            Text(l.practiceResultFaintedBlock(l.practiceOtherOpponent))
+                .font(.caption).foregroundStyle(.secondary)
+                .lineLimit(1).minimumScaleFactor(0.75)
+            Spacer(minLength: 0)
         }
     }
 }

@@ -2108,7 +2108,13 @@ extension L {
     var practiceCaptionResultStakes: String {
         lang == .ko ? "깎인 체력은 배틀이 끝나도 남아요 · 200턴이 지나면 무승부" : "Lost HP stays after the battle · draw at 200 turns"
     }
-    func practiceResultFaintedBlock(_ otherOpponent: String) -> String { "" }   // RED stub
+    /// After a fainting loss, next to "Fainted" above the Rematch it turns off: what heals it and where (the Heal control
+    /// under New opponent, `otherOpponent` as that button reads).
+    func practiceResultFaintedBlock(_ otherOpponent: String) -> String {
+        let revive = itemName(.revive)
+        return lang == .ko ? "\(otherOpponent)에서 \(KoreanParticle.object.attach(to: revive)) 쓰면 다시 붙을 수 있어요"
+            : "Use a \(revive) from \(otherOpponent) to battle again"
+    }
     var practiceFaintedTitle: String { lang == .ko ? "기절했어요" : "Fainted" }
     var practiceFaintedHint: String {
         let revive = itemName(.revive)

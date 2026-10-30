@@ -256,6 +256,8 @@ struct PracticeResultRecord: View {
     let update: PracticeRecordUpdate
     /// What a battle with stakes did outside the session (`PracticeSession.lastStakes`); nil after sparring.
     var stakes: PracticeStakesUpdate?
+    /// false leaves the fainted row out: the result screen says the faint above the buttons it turns off instead.
+    var showsFaint = true
     let l: L
 
     /// The XP line of a battle with stakes: what the current Pokémon got, or why it got nothing.
@@ -331,7 +333,7 @@ struct PracticeResultRecord: View {
             if let streak = Self.streak(update) { streakRow(streak) }
             if let stakes {
                 xpRow(Self.xpLine(update, stakes))
-                healthRow(stakes.healthShare)
+                if stakes.healthShare > 0 || showsFaint { healthRow(stakes.healthShare) }
             }
             if update.daily { starsRow }
         }
