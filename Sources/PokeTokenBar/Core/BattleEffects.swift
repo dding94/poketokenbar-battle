@@ -13,4 +13,7 @@ protocol PracticeBattleEffects: AnyObject {
     /// Grows the current Pokémon by `xp` (a practice win). False when there is no current Pokémon to grow.
     @discardableResult
     func grantBattleXP(_ xp: Int) -> Bool
+    /// The individual a running battle with stakes holds, or nil once none runs. The battle owns that HP until its
+    /// end sets it, so nothing may heal the individual meanwhile. In memory only, never saved.
+    func setInBattle(_ instanceID: String?)
 }

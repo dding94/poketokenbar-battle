@@ -1523,6 +1523,8 @@ final class RecordingBattleEffects: PracticeBattleEffects {
     func healthShare(of instanceID: String) -> Double { health[instanceID] ?? 1 }
     func setHealthShare(_ share: Double, of instanceID: String) { health[instanceID] = share }
     func grantBattleXP(_ xp: Int) -> Bool { grantedXP.append(xp); return true }
+    /// No healing rules here, so nothing to hold.
+    func setInBattle(_ instanceID: String?) {}
 }
 
 /// A bag that holds counts and records each healing use, standing in for the companion store.

@@ -347,6 +347,7 @@ final class PracticeSession {
         // A battle with stakes starts the player at the HP it has left; sparring starts full.
         next.start(player: player, opponent: opponent, mode: mode,
                    playerHealth: PracticeStakes.hold(against: opponent) ? healthShare(of: player) : nil)
+        syncInBattle()
         let staging = PracticePlayback(clock: clock)
         staging.timeScale = playbackSpeed.timeScale
         playback = staging
@@ -369,6 +370,7 @@ final class PracticeSession {
             record(.loss, of: battle, turns: 0, playerHPShare: 0, healthLeft: battle.view?.p1.hpShare)
         }
         stopDriver(); battle?.cancel(); battle = nil; dropPlayback(); resultSeen = true
+        syncInBattle()
     }
     /// Leaves a finished battle for the selection screen (to pick another opponent).
     func backToSelection() {
@@ -395,6 +397,7 @@ final class PracticeSession {
     func releaseIfIdle() {
         guard !isActive else { return }
         stopDriver(); battle?.cancel(); battle = nil; dropPlayback(); resultSeen = true
+        syncInBattle()
         roster = nil; engine = nil; typeChart = nil; moveInfo = [:]
         // The engine goes, so a search in flight stops; finished wild snapshots are plain data and stay.
         stopWildSearch(); stopDailySearch()
@@ -448,13 +451,16 @@ final class PracticeSession {
         guard let battle, battle.phase == .running else { return }
         body(battle)
         stageEvents()
-        guard battle.phase == .finished else { return }
-        resultSeen = false
-        // A finished battle has its result and its final view (`PracticeBattle.refresh`); p1's HP there is exact.
-        if let result = battle.result, let view = battle.view {
-            record(PracticeOutcome(winner: result.winner), of: battle, turns: view.turn, playerHPShare: view.p1.hpShare,
-                   healthLeft: view.p1.hpShare)
+        if battle.phase == .finished {
+            resultSeen = false
+            // A finished battle has its result and its final view (`PracticeBattle.refresh`); p1's HP there is exact.
+            if let result = battle.result, let view = battle.view {
+                record(PracticeOutcome(winner: result.winner), of: battle, turns: view.turn,
+                       playerHPShare: view.p1.hpShare, healthLeft: view.p1.hpShare)
+            }
         }
+        // After the end has settled, or a failure, the battle no longer holds its player.
+        syncInBattle()
     }
     /// Counts an ended battle against the pair it started with, settles its stakes, keeps what changed for the result
     /// screen and writes the records. Today's opponent is known by its id, which carries its day.
@@ -483,6 +489,14 @@ final class PracticeSession {
         }
         return PracticeStakesUpdate(healthShare: healthLeft, xp: xp,
                                     xpWinsLeft: max(0, PracticeStakes.dailyXPWins - records.xpWins(on: day)))
+    }
+    /// Tells `effects` which individual the battle holds while it runs with stakes, and none once it stops running,
+    /// however it stops (an end, a failure, a forfeit, a new start), so no heal lands under the battle's result.
+    private func syncInBattle() {
+        guard let effects else { return }
+        guard let battle, battle.phase == .running, let opponent = battle.opponent,
+              PracticeStakes.hold(against: opponent) else { effects.setInBattle(nil); return }
+        effects.setInBattle(battle.player?.id)
     }
     /// Hands the playback the events the engine added since the last call. A hidden screen plays nothing.
     private func stageEvents() {

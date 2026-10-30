@@ -268,6 +268,25 @@ enum BattleItem {
     static let ivRerollPrice = 400_000_000
 }
 
+/// Whether a healing item works on an individual right now, and why not (`CompanionStore.healingItemVerdict`).
+/// `useHealingItem` decides with exactly this, so what a screen offers and what the store does can't drift. When
+/// several reasons apply, the one listed first wins.
+enum HealingItemVerdict: Equatable, Sendable {
+    case usable
+    /// Not a healing item: a Rare Candy, Mint, Shiny Charm or IV reroll.
+    case notHealing
+    /// None of it in the bag.
+    case noneLeft
+    /// The individual is fighting a battle with stakes: the battle owns its HP until it ends, then sets it.
+    case inBattle
+    /// A Potion or Hyper Potion on a fainted individual: only a Revive brings it back.
+    case needsRevive
+    /// A Potion or Hyper Potion on an individual at full HP.
+    case hpFull
+    /// A Revive on an individual that isn't fainted.
+    case notFainted
+}
+
 /// 이로치 부적 밸런스 상수 — 보유형(1회 구매·영구, 소비 안 됨).
 enum ShinyCharm {
     /// 상점 구매가. 앞으로의 모든 부화에 적용되는 영구 럭 업그레이드라 프리미엄(레어 1마리 졸업분=3B).

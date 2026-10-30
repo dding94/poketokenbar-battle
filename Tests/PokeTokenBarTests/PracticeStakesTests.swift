@@ -81,6 +81,8 @@ private final class StakesEffects: PracticeBattleEffects {
     var hasCurrent = true
     private(set) var writes = 0
     private(set) var grants: [Int] = []
+    /// The individual the session last said a running battle with stakes holds.
+    private(set) var inBattle: String?
     func healthShare(of instanceID: String) -> Double { shares[instanceID] ?? 1 }
     func setHealthShare(_ share: Double, of instanceID: String) { shares[instanceID] = share; writes += 1 }
     func grantBattleXP(_ xp: Int) -> Bool {
@@ -88,6 +90,7 @@ private final class StakesEffects: PracticeBattleEffects {
         grants.append(xp)
         return true
     }
+    func setInBattle(_ instanceID: String?) { inBattle = instanceID }
 }
 
 /// The wall clock the session reads for the day; tests move it.
@@ -321,6 +324,54 @@ final class PracticeStakesStoreTests: XCTestCase {
             XCTAssertEqual(store.itemCount(kind), 1, "\(kind) not spent")
         }
         XCTAssertEqual(store.healthShare(of: "mon"), 0.3)
+    }
+
+    /// The verdict names why a use would be refused, and the store acts on exactly it: it uses an item only when the
+    /// verdict says usable, and a refusal spends nothing. Running out outranks the HP reasons.
+    func testTheHealingVerdictSaysWhyAndTheStoreFollowsIt() throws {
+        let folder = try stakesFolder(); defer { try? FileManager.default.removeItem(at: folder) }
+        let store = try makeStore(makeState(items: [.potion: 1, .hyperPotion: 1, .revive: 1, .mint: 1, .ivReroll: 1],
+                                            health: ["hurt": 0.3, "down": 0]), at: folder.appendingPathComponent("s.json"))
+        let inventory = store.state.inventory
+        let verdicts: [(ItemKind, String, HealingItemVerdict)] = [
+            (.potion, "down", .needsRevive), (.potion, "fresh", .hpFull),
+            (.hyperPotion, "down", .needsRevive), (.hyperPotion, "fresh", .hpFull),
+            (.revive, "hurt", .notFainted), (.revive, "fresh", .notFainted),
+            (.mint, "hurt", .notHealing), (.ivReroll, "down", .notHealing), (.rareCandy, "hurt", .notHealing),
+            (.potion, "hurt", .usable), (.hyperPotion, "hurt", .usable), (.revive, "down", .usable),
+        ]
+        for (kind, id, verdict) in verdicts {
+            XCTAssertEqual(store.healingItemVerdict(kind, on: id), verdict, "\(kind) on \(id)")
+        }
+        for (kind, id, verdict) in verdicts where verdict != .usable {
+            XCTAssertFalse(store.useHealingItem(kind, on: id), "\(kind) on \(id)")
+        }
+        XCTAssertEqual(store.state.inventory, inventory, "the refusals spent nothing")
+        XCTAssertTrue(store.useHealingItem(.potion, on: "hurt"))
+        XCTAssertEqual(store.healingItemVerdict(.potion, on: "hurt"), .noneLeft, "the only Potion is gone")
+        XCTAssertEqual(store.healingItemVerdict(.potion, on: "down"), .noneLeft, "running out outranks needing a Revive")
+    }
+
+    /// Nothing heals the individual a running battle with stakes holds, whatever its HP, until the battle lets go;
+    /// another individual stays healable.
+    func testNothingHealsTheIndividualARunningBattleHolds() throws {
+        let folder = try stakesFolder(); defer { try? FileManager.default.removeItem(at: folder) }
+        let store = try makeStore(makeState(items: [.potion: 1, .hyperPotion: 1, .revive: 1, .mint: 1],
+                                            health: ["mon": 0.3, "down": 0]), at: folder.appendingPathComponent("s.json"))
+        let inventory = store.state.inventory
+        store.setInBattle("mon")
+        XCTAssertEqual(store.inBattleInstanceID, "mon")
+        for kind in [ItemKind.potion, .hyperPotion, .revive] {
+            XCTAssertEqual(store.healingItemVerdict(kind, on: "mon"), .inBattle, "\(kind), whatever the HP says")
+            XCTAssertFalse(store.useHealingItem(kind, on: "mon"), "\(kind)")
+        }
+        XCTAssertEqual(store.state.inventory, inventory, "nothing spent")
+        XCTAssertEqual(store.healthShare(of: "mon"), 0.3)
+        XCTAssertEqual(store.healingItemVerdict(.mint, on: "mon"), .notHealing)
+        XCTAssertEqual(store.healingItemVerdict(.revive, on: "down"), .usable, "another individual stays healable")
+        store.setInBattle(nil)
+        XCTAssertEqual(store.healingItemVerdict(.potion, on: "mon"), .usable, "let go: the HP rules decide again")
+        XCTAssertEqual(store.healingItemVerdict(.revive, on: "mon"), .notFainted)
     }
 
     func testAHealIsSaved() throws {
@@ -715,6 +766,35 @@ final class PracticeStakesSessionTests: XCTestCase {
         let config = try XCTUnwrap(session.battle?.result?.inputLog.config)
         XCTAssertNil(config.p1.hp); XCTAssertNil(config.p2.hp)
     }
+
+    // MARK: Holding the player from healing
+
+    /// A running battle with stakes holds its player from healing (`setInBattle`) and lets go however it stops: an
+    /// end, running away, or a new start against an own Pokémon. Sparring holds nothing.
+    func testARunningBattleWithStakesHoldsItsPlayerUntilItStops() async throws {
+        let effects = StakesEffects()
+        let session = stakesSession([stakesTackler, stakesPikachu], wild: StakesWildStub(speciesID: 129, moves: ["splash"]),
+                                    effects: effects)
+        session.playerID = "b"
+        await stakesSearch(session)
+        session.opponentID = try XCTUnwrap(session.wildCandidates.first).id
+        session.mode = .automatic
+        session.start()
+        XCTAssertEqual(effects.inBattle, "b", "a running battle with stakes holds its player")
+        session.skipToResult()
+        XCTAssertEqual(session.battle?.phase, .finished)
+        XCTAssertNil(effects.inBattle, "its end lets go")
+        session.start()
+        XCTAssertEqual(effects.inBattle, "b")
+        session.forfeit()
+        XCTAssertNil(effects.inBattle, "running away lets go")
+        session.start()
+        XCTAssertEqual(effects.inBattle, "b")
+        session.opponentID = "p"
+        session.start()
+        XCTAssertEqual(session.battle?.phase, .running)
+        XCTAssertNil(effects.inBattle, "sparring, started over the running battle, holds nothing")
+    }
 }
 
 /// A battle's first log line: only sparring (or a session without the save) promises that nothing changes.
@@ -836,6 +916,7 @@ final class PracticeStakesLiveTests: XCTestCase {
         session.start()
         XCTAssertEqual(session.battle?.phase, .running)
         session.setPaused(true, reason: .screenHidden)
+        XCTAssertEqual(store.healingItemVerdict(.potion, on: "pika"), .inBattle, "what the bag shows")
         XCTAssertFalse(store.useHealingItem(.potion, on: "pika"), "the battle owns this HP until it ends")
         XCTAssertEqual(store.itemCount(.potion), 1, "a refused heal spends nothing")
         XCTAssertEqual(store.healthShare(of: "pika"), 0.4)
@@ -844,6 +925,8 @@ final class PracticeStakesLiveTests: XCTestCase {
         XCTAssertEqual(session.battle?.result?.winner, "p1")
         let left = try XCTUnwrap(session.lastStakes?.healthShare)
         XCTAssertEqual(store.healthShare(of: "pika"), left, "the HP the battle left")
+        XCTAssertNil(store.inBattleInstanceID)
+        XCTAssertEqual(store.healingItemVerdict(.potion, on: "pika"), .usable)
         XCTAssertTrue(store.useHealingItem(.potion, on: "pika"), "the battle is over: the Potion works")
         XCTAssertEqual(store.itemCount(.potion), 0)
         XCTAssertEqual(store.healthShare(of: "pika"), min(1, left + BattleItem.potionHeal), accuracy: 1e-9)

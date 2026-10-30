@@ -59,6 +59,10 @@ final class CompanionStore {
     // (설정창의 다른 슬라이더와 같은 자리), 세이브에 넣으면 남의 세이브를 불러올 때 내 난이도가 조용히
     // 바뀌며 SaveTransfer 의 관대 디코딩·검증까지 새 수치 필드를 떠안는다.
 
+    /// The individual a running battle with stakes holds (`PracticeBattleEffects.setInBattle`, PR 03C): healing
+    /// items refuse it until the battle ends. In memory only, never saved: a relaunch has no battle running.
+    private(set) var inBattleInstanceID: String?
+
     /// 성장 배율 — 알 부화 임계 + 진화/졸업 임계에 곱한다. 낮을수록 빨리 자란다.
     /// 사탕 XP(RareCandy.xp)는 스케일하지 않는다 — 함께 곱하면 서로 상쇄돼 사탕만 난이도를 안 탄다.
     private(set) var growthDifficulty: Double
@@ -2181,13 +2185,36 @@ extension CompanionStore: PracticeBattleEffects {
         return true
     }
 
-    /// Uses a Potion, Hyper Potion or Revive on one individual. False (nothing spent) when it can't be used:
-    /// none in the bag, a Revive on a Pokémon that isn't fainted, a Potion on a fainted or full one.
+    /// Marks the individual a running battle with stakes holds, or none; the session says it after every turn.
+    /// Unchanged, it leaves the property alone: `@Observable` from Swift 6.2 skips an equal value by itself, older
+    /// toolchains would redraw the screens observing it on every turn.
+    func setInBattle(_ instanceID: String?) {
+        if inBattleInstanceID != instanceID { inBattleInstanceID = instanceID }
+    }
+
+    /// Whether `kind` heals `instanceID` right now, and why not: the one rule set for the screens and for
+    /// `useHealingItem`. A Potion or Hyper Potion needs an individual that is hurt but standing, a Revive a fainted
+    /// one, and none works on the individual a running battle with stakes holds.
+    func healingItemVerdict(_ kind: ItemKind, on instanceID: String) -> HealingItemVerdict {
+        let share = healthShare(of: instanceID)
+        let byHealth: HealingItemVerdict
+        switch kind {
+        case .potion, .hyperPotion: byHealth = share <= 0 ? .needsRevive : share >= 1 ? .hpFull : .usable
+        case .revive: byHealth = share <= 0 ? .usable : .notFainted
+        case .rareCandy, .mint, .shinyCharm, .ivReroll: return .notHealing
+        }
+        if itemCount(kind) <= 0 { return .noneLeft }
+        if instanceID == inBattleInstanceID { return .inBattle }
+        return byHealth
+    }
+
+    /// Uses a Potion, Hyper Potion or Revive on one individual when `healingItemVerdict` says it is usable. False,
+    /// with nothing spent, otherwise.
     @discardableResult
     func useHealingItem(_ kind: ItemKind, on instanceID: String) -> Bool {
-        guard itemCount(kind) > 0, let healed = Self.healedShare(healthShare(of: instanceID), by: kind) else { return false }
+        guard healingItemVerdict(kind, on: instanceID) == .usable else { return false }
         state.inventory[kind.rawValue] = itemCount(kind) - 1
-        _ = writeHealthShare(healed, of: instanceID)
+        _ = writeHealthShare(Self.healedShare(healthShare(of: instanceID), by: kind), of: instanceID)
         save()
         return true
     }
@@ -2206,14 +2233,13 @@ extension CompanionStore: PracticeBattleEffects {
         return ivs
     }
 
-    /// The HP share a healing item leaves, or nil when it can't be used on `share`: a Potion or Hyper Potion on a
-    /// living Pokémon that isn't full, a Revive only on a fainted one.
-    private static func healedShare(_ share: Double, by kind: ItemKind) -> Double? {
+    /// The HP share a usable healing item leaves (`healingItemVerdict` decides whether it is usable).
+    private static func healedShare(_ share: Double, by kind: ItemKind) -> Double {
         switch kind {
-        case .potion: return share > 0 && share < 1 ? min(1, share + BattleItem.potionHeal) : nil
-        case .hyperPotion: return share > 0 && share < 1 ? 1 : nil
-        case .revive: return share == 0 ? BattleItem.reviveShare : nil
-        case .rareCandy, .mint, .shinyCharm, .ivReroll: return nil
+        case .potion: return min(1, share + BattleItem.potionHeal)
+        case .hyperPotion: return 1
+        case .revive: return BattleItem.reviveShare
+        case .rareCandy, .mint, .shinyCharm, .ivReroll: return share
         }
     }
     private func rollIV() -> Int { Int(rng.next() % 32) }
