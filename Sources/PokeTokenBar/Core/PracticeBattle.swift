@@ -132,7 +132,9 @@ final class PracticeBattle {
     init(engine: BattleEngine, clock: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }) {
         self.engine = engine; self.clock = clock
     }
-    func start(player: PracticeCandidate, opponent: PracticeCandidate, mode: Mode,
+    /// `playerHealth` is the player's HP share in a battle with stakes (`PracticeStakes`), which the player starts
+    /// with (`startingHP`). nil is a battle without stakes, which starts full. The opponent always starts full.
+    func start(player: PracticeCandidate, opponent: PracticeCandidate, mode: Mode, playerHealth: Double? = nil,
                seed: [UInt32] = (0..<4).map { _ in UInt32.random(in: 0...65535) }) {
         release()
         self.player = player; self.opponent = opponent
@@ -150,14 +152,22 @@ final class PracticeBattle {
             names = ["p1": player.name, "p2": opponent.name]
             // The opponent plays its temperament (`PracticeTemperament`); the player's automatic turns stay standard.
             let config = BattleConfig(seed: seed, policySeed: seed.reduce(0x505442) { ($0 &* 31) ^ $1 },
-                                      p1: .init(name: "p1", set: p1.set),
+                                      p1: .init(name: "p1", set: p1.set, hp: playerHealth.flatMap { Self.startingHP($0, of: p1) }),
                                       p2: .init(name: "p2", set: p2.set, policy: opponent.temperament?.policyID))
             struct Created: Decodable { let id: String }
             let created: Created = try BattleJSON.decode(engine.call(.createBattle, arguments: [BattleJSON.encode(config)]))
             battleID = created.id; phase = .running
-            messages = ["연습전을 시작합니다. 성장과 보유 상태는 바뀌지 않습니다."]
+            // Only a battle without stakes leaves everything as it was; one with stakes keeps the HP it costs.
+            messages = [playerHealth == nil ? "연습전을 시작합니다. 성장과 보유 상태는 바뀌지 않습니다."
+                                            : "연습전을 시작합니다. 깎인 체력은 배틀이 끝나도 남습니다."]
             try refresh()
         } catch { fail(error) }
+    }
+    /// The engine's starting HP (`config.p1.hp`) for an HP share of `snapshot`'s max HP: rounded, never below 1 since
+    /// the engine refuses 0, and nil at full HP, so a full start sends no HP and its input log stays as before.
+    private static func startingHP(_ share: Double, of snapshot: BattleSnapshot) -> Int? {
+        guard share < 1, let maxHP = snapshot.publicInfo.stats["hp"] else { return nil }
+        return max(1, Int((share * Double(maxHP)).rounded()))
     }
     func choose(slot: Int) {
         guard phase == .running, !isPaused else { return }

@@ -344,7 +344,9 @@ final class PracticeSession {
         stopDriver(); battle?.cancel(); dropPlayback(); lastRecord = nil; lastStakes = nil
         let next = PracticeBattle(engine: engine, clock: clock)
         battle = next
-        next.start(player: player, opponent: opponent, mode: mode)
+        // A battle with stakes starts the player at the HP it has left; sparring starts full.
+        next.start(player: player, opponent: opponent, mode: mode,
+                   playerHealth: PracticeStakes.hold(against: opponent) ? healthShare(of: player) : nil)
         let staging = PracticePlayback(clock: clock)
         staging.timeScale = playbackSpeed.timeScale
         playback = staging
