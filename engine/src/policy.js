@@ -33,7 +33,8 @@ function highest(moves,value,draw) {
 }
 // A status condition for the foe or a raise of the user's own stats.
 const setup=move=>move.category==='Status'&&(!!move.status||move.target==='self'&&!!move.boosts);
-// auto-v1's "would still work" check, plus the move's own type immunity (Thunder Wave cannot touch Ground).
+// auto-v1's "would still work" check, plus type immunity where the move obeys it. As in battle, Dex sets
+// ignoreImmunity on every status move but Thunder Wave: Harden works on a Ghost, Thunder Wave never on Ground.
 const useful=(c,move)=>statusScore(move,c.own,c.foe,c.battle)>0&&(move.ignoreImmunity||Dex.getImmunity(move.type,c.foe));
 // Restores the user's HP at once.
 const heal=move=>move.target==='self'&&(!!move.heal||['rest','moonlight','morningsun','synthesis'].includes(move.id));

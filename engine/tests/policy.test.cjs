@@ -163,6 +163,15 @@ test('tactical sets up at most twice while healthy and only with moves that stil
   assert.equal(pick(battle(set(151,['thunder-wave','tackle']),sandshrew,42,{p1:'tactical'})),2);   // Electric cannot touch Ground
   assert.equal(pick(battle(set(151,['thunder-wave','tackle']),undefined,42,{p1:'tactical'})),1);
 });
+test('tactical setups ignore the foe type immunity to the move type, as the simulator does, except Thunder Wave',()=>{
+  // Status moves skip type immunity in battle (Dex sets ignoreImmunity for them); Thunder Wave opts out.
+  const ghost=set(200,['splash'],'levitate'),dark=set(261,['splash'],'run-away');
+  assert.equal(pick(battle(set(151,['psychic','harden']),ghost)),1);   // standard attacks
+  assert.equal(pick(battle(set(151,['psychic','harden']),ghost,42,{p1:'tactical'})),2);   // Normal setup against a Ghost
+  assert.equal(pick(battle(set(151,['aura-sphere','calm-mind']),dark,42,{p1:'tactical'})),2);   // Psychic setup against a Dark type
+  assert.equal(pick(battle(set(151,['tackle','thunder-wave']),set(27,['splash'],'sand-veil'),42,{p1:'tactical'})),1);
+  assert.equal(pick(battle(set(151,['tackle','toxic']),set(227,['splash'],'keen-eye'),42,{p1:'tactical'})),1);   // Steel cannot be poisoned
+});
 test('tactical heals below half HP and attacks above it',()=>{
   const tosser={...set(242,['seismic-toss']),level:100};
   const run=policy=>{const id=battle(set(151,['recover','tackle']),tosser,42,policy);
