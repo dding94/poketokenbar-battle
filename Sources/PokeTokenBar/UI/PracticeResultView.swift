@@ -211,6 +211,16 @@ struct PracticeResultView: View {
 
     // MARK: Actions
 
+    /// Rematch and Again on auto start the same pair, which Core refuses while my fainted entry faces a wild or
+    /// today's opponent (`PracticeSession.startBlock`).
+    static func canRestart(startBlock: PracticeStartBlock?) -> Bool { true }   // RED stub
+
+    /// Again on auto: the same pair in automatic mode.
+    static func againOnAuto(_ session: PracticeSession) {   // RED stub: switches the mode even when nothing starts
+        session.mode = .automatic
+        session.start()
+    }
+
     private var actions: some View {
         VStack(spacing: 8) {
             Button { session.start() } label: {
@@ -229,10 +239,7 @@ struct PracticeResultView: View {
                 } label: {
                     Text(l.practiceOtherOpponent).frame(maxWidth: .infinity)
                 }
-                Button {
-                    session.mode = .automatic
-                    session.start()
-                } label: {
+                Button { Self.againOnAuto(session) } label: {
                     Text(l.practiceAutoAgain).frame(maxWidth: .infinity)
                 }
             }

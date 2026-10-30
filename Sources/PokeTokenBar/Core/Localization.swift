@@ -2108,6 +2108,7 @@ extension L {
     var practiceCaptionResultStakes: String {
         lang == .ko ? "깎인 체력은 배틀이 끝나도 남아요 · 200턴이 지나면 무승부" : "Lost HP stays after the battle · draw at 200 turns"
     }
+    func practiceResultFaintedBlock(_ otherOpponent: String) -> String { "" }   // RED stub
     var practiceFaintedTitle: String { lang == .ko ? "기절했어요" : "Fainted" }
     var practiceFaintedHint: String {
         let revive = itemName(.revive)

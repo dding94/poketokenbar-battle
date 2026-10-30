@@ -1143,6 +1143,92 @@ final class PracticeScreenRenderingTests: XCTestCase {
         XCTAssertFalse(PracticeSelectionProgress(session).faintedBlock, "sparring stays open while fainted")
     }
 
+    /// A real result after a fainting loss: my Magikarp, at 5% HP, loses to a wild opponent in a battle with stakes,
+    /// so Core settles it at 0 HP and `startBlock` turns `.fainted` for the same pair.
+    private func faintingLoss(effects: RecordingBattleEffects) async throws -> (PracticeSession, PracticeBattle) {
+        let session = makeSession(Self.stagedState(),
+                                  wildSource: PracticeWildSource(provider: WildLineProvider(), details: WildLineProvider()),
+                                  effects: effects)
+        let magikarp = try XCTUnwrap(session.opponentID, "Magikarp is the default opponent")
+        session.playerID = magikarp   // the wild batch is matched to the new entry
+        session.findWildOpponents()
+        try await waitForWild(session) { $0 == .ready }
+        let wild = try XCTUnwrap(session.wildCandidates.first, "no wild opponent")
+        session.opponentID = wild.id
+        effects.health[magikarp] = 0.05
+        XCTAssertNil(session.startBlock, "hurt, not fainted: it may still fight")
+        session.mode = .automatic
+        session.start()
+        session.skipToResult()
+        let battle = try XCTUnwrap(session.battle)
+        XCTAssertEqual(battle.phase, .finished)
+        XCTAssertNotEqual(battle.result?.winner, "p1", "Magikarp at 5% HP must not win")
+        XCTAssertEqual(effects.health[magikarp], 0, "the loss faints it")
+        XCTAssertEqual(session.lastStakes?.healthShare, 0)
+        XCTAssertEqual(session.startBlock, .fainted, "the same pair cannot start again")
+        return (session, battle)
+    }
+
+    /// After a fainting loss to a wild opponent, Rematch and Again on auto would start what Core refuses: both are off
+    /// and Again on auto leaves the mode alone. The screen fits its 520pt body in both languages, also in the worst case
+    /// (today's opponent, an ended streak) and the drawn screen changes with the block, which healing lifts.
+    /// (New opponent stays: sparring is allowed.)
+    func testFaintingLossTurnsOffTheRestart() async throws {
+        let effects = RecordingBattleEffects()
+        let (session, battle) = try await faintingLoss(effects: effects)
+        XCTAssertFalse(PracticeResultView.canRestart(startBlock: session.startBlock))
+        session.mode = .manual
+        PracticeResultView.againOnAuto(session)
+        XCTAssertEqual(session.mode, .manual, "Again on auto changes nothing it cannot start")
+        XCTAssertTrue(session.battle === battle, "nothing started")
+
+        let real = try XCTUnwrap(session.lastRecord), stakes = try XCTUnwrap(session.lastStakes)
+        let worst = PracticeRecordUpdate(outcome: .loss, streak: 0, bestStreak: 9, endedStreak: 7, daily: true,
+                                         newStars: [], stars: [.win, .quickWin])
+        let width = PopoverMetrics.contentWidth
+        func view(_ record: PracticeRecordUpdate, _ lang: AppLanguage) -> PracticeResultView {
+            PracticeResultView(session: session, battle: battle, record: record, stakes: stakes, l: L(lang), artwork: false)
+        }
+        for lang in [AppLanguage.en, .ko] {
+            for (name, record) in [("real", real), ("worst", worst)] {
+                let least = NSHostingController(rootView: view(record, lang).frame(width: width))
+                    .sizeThatFits(in: CGSize(width: width, height: 0)).height
+                XCTAssertLessThanOrEqual(least + Self.resultLogMinimum, Self.boardBodyHeight,
+                                         "\(lang.rawValue) \(name): the fainted result needs \(least)pt plus its log")
+            }
+        }
+        let shut = try Self.capture2x(hostView(view(real, .en), width: width, height: Self.boardBodyHeight))
+        try save(shut, as: "practice-03c-result-fainted-blocked-layout.png")
+
+        let player = try XCTUnwrap(battle.player?.id)
+        effects.health[player] = 0.5
+        XCTAssertNil(session.startBlock)
+        XCTAssertTrue(PracticeResultView.canRestart(startBlock: session.startBlock), "healed, the pair may start again")
+        let open = try Self.capture2x(hostView(view(real, .en), width: width, height: Self.boardBodyHeight))
+        XCTAssertNotEqual(Self.pixels(shut), Self.pixels(open), "the screen shows the block only while it holds")
+    }
+
+    /// The fainted result says why Rematch is off and where to heal; read by OCR on CI (Vision is wedged on the
+    /// development Mac), with ko/en PNGs for review.
+    func testFaintingLossResultSaysWhyRestartIsOff() async throws {
+        let effects = RecordingBattleEffects()
+        let (session, battle) = try await faintingLoss(effects: effects)
+        for lang in [AppLanguage.en, .ko] {
+            let view = PracticeResultView(session: session, battle: battle, record: session.lastRecord,
+                                          stakes: session.lastStakes, l: L(lang), artwork: false)
+            let host = hostView(view, width: PopoverMetrics.contentWidth, height: Self.boardBodyHeight)
+            guard lang == .en else {
+                let (_, bitmap) = try await waitForText(["%"], in: host)
+                try save(bitmap, as: "practice-03c-result-fainted-blocked-ko.png")
+                continue
+            }
+            let needles = ["Fainted", "Use a Revive from New opponent", "Rematch", "New opponent", "Again on auto"]
+            let (text, bitmap) = try await waitForText(needles, in: host)
+            try save(bitmap, as: "practice-03c-result-fainted-blocked-en.png")
+            assertRendered(needles, in: text)
+        }
+    }
+
     /// HP as a bar with its percentage, or a "Fainted" tag at 0.
     func testHealthLineShowsPercentOrFainted() async throws {
         let width: CGFloat = 200

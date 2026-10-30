@@ -364,6 +364,14 @@ final class PracticeWordingTests: XCTestCase {
         XCTAssertEqual(L(.en).practiceCaptionResultStakes, "Lost HP stays after the battle · draw at 200 turns")
     }
 
+    /// After a fainting loss the line above the off buttons says, after "Fainted", what heals it and where: a Revive,
+    /// from New opponent (the selection's Heal control), naming that button and the item as they read.
+    func testResultFaintedBlockWording() {
+        let ko = L(.ko), en = L(.en)
+        XCTAssertEqual(ko.practiceResultFaintedBlock(ko.practiceOtherOpponent), "다른 상대에서 기력의조각을 쓰면 다시 붙을 수 있어요")
+        XCTAssertEqual(en.practiceResultFaintedBlock(en.practiceOtherOpponent), "Use a Revive from New opponent to battle again")
+    }
+
     /// Healing from the selection screen uses the item on my entry's individual, never on the current Pokémon.
     func testHealUsesTheItemOnTheEntry() throws {
         let bag = RecordingItemBag([.potion: 1])
