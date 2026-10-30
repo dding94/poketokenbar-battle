@@ -769,6 +769,27 @@ read_when:
   끝낸다. 회귀 가드는 `PokeAPIClientCancellationTests`(URLProtocol 스텁이 요청을 붙잡아 실제 취소를 재현하고,
   같은 오류의 비취소 대조군을 함께 둔다). 비동기 함수에 취소 가능한 호출자를 새로 붙이면 그 아래 `catch` 를
   전수 점검한다. 스텁을 쓰는 테스트는 테스트가 띄운 백그라운드 작업이 끝날 때까지 기다린 뒤 스텁을 해제한다.
+- **A write that lands when a long process ends must hold its target against other writers until then.** Fork PR
+  03C review: a Potion used from the bag while a battle with stakes ran raised the saved HP to 0.9 and spent the
+  item. The battle's end then wrote the HP it left (0.4) over it. **Why missed:** the store tests healed with no
+  battle running and the session tests used fake effects, so no test interleaved a bag action with a running
+  session battle. → The session tells the store which individual a running battle with stakes holds
+  (`PracticeBattleEffects.setInBattle`, in memory only). It re-derives that after every start, step, forfeit and
+  release, so every way a battle stops lets go, a failure included. `CompanionStore.healingItemVerdict` returns
+  `.inBattle` for it, and `useHealingItem` acts on that same verdict, so a screen and the store can't disagree.
+  Regression guards: `PracticeStakesLiveTests.testAPotionCannotHealThePokemonOfARunningBattleWithStakes` (real store
+  and session, the repro) and `testARunningBattleWithStakesHoldsItsPlayerUntilItStops`. Sweep: the IV reroll, a Mint
+  or a Rare Candy during a battle change growth, not HP, and reach the next start (next entry). Quitting the app
+  mid-battle skips a faint; the coordinator accepted that.
+- **A copy of the save taken when a screen appears goes stale when that screen's own actions change the save.**
+  Fork PR 03C review: the practice roster was built only in `prepare` (the screen appearing, skipped while a battle
+  runs). A win's XP that levelled or evolved the current Pokémon, or an IV reroll used mid-battle, missed Rematch
+  and the wild search band. **Why missed:** the session tests' fake effects granted XP without changing anything,
+  and the real-file test checked the save but never the next battle. → `PracticeBattleEffects.companionState()`
+  hands the session the save as it is. The session rebuilds the roster at every start and after a settlement that
+  paid XP (200 individuals build in about 38 ms), and a battle keeps the pair it started with. Regression guards:
+  `testAWinThatCrossesALevelRematchesAtTheNewLevel` and `testAnIVRerollDuringABattleReachesTheRematch`. When an
+  action can change the save while a copy of it is on screen, refresh the copy at the next point that uses it.
 
 ## 프로세스·인스턴스
 
