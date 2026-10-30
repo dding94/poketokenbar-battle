@@ -85,12 +85,12 @@ describe("display email", () => {
     "a b@c",
     "a@b\tc",
     "a@b\u0007",
-    "a@b c",
+    "a@b\u00a0c",
     `${"x".repeat(250)}@b.cd`,
   ];
 
   for (const email of bad) {
-    it(`rejects ${JSON.stringify(email.length > 20 ? `${email.slice(0, 12)}…(${email.length})` : email)}`, async () => {
+    it(`rejects ${JSON.stringify(email.length > 20 ? `${email.slice(0, 12)}\u2026(${email.length})` : email)}`, async () => {
       expectError(await call("POST", "/v1/groups", { body: groupBody({ displayEmail: email }) }), 400, "bad_request");
     });
   }
