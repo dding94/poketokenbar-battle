@@ -704,6 +704,9 @@ struct CompanionState: Codable, Sendable {
     var candyWindowEpoch: [String: String] = [:]
     // 사탕 지급 첫 실행 시드 완료 — 업데이트 직후 이미 100%였던 창의 소급 지급 차단.
     var candyFeatureSeeded = false
+    /// PR 03C: HP share each individual has left between battles with stakes, keyed by `PokemonProfile.instanceID`
+    /// (0 = fainted). RED stub: not decoded yet.
+    var battleHealth: [String: Double] = [:]
 
     init() {}
 

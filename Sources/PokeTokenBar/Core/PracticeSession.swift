@@ -81,6 +81,7 @@ final class PracticeSession {
     /// The individual's HP share between battles (0 = fainted); nil for wild and today's opponents and without
     /// `effects`.
     func healthShare(of candidate: PracticeCandidate) -> Double? { nil }   // contract stub
+    var startBlock: PracticeStartBlock? { nil }   // RED stub
     /// The battle that just ended, for the result screen; nil until one ends.
     private(set) var lastRecord: PracticeRecordUpdate?
     /// Today's opponent for the current player (`PracticeDaily`); never saved. Its id is "daily-<day>".

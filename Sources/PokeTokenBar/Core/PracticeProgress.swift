@@ -77,6 +77,12 @@ enum PracticeStakes {
     static let dailyXPWins = 10
 }
 
+/// Why the selection can't start a battle (`PracticeSession.startBlock`).
+enum PracticeStartBlock: Equatable, Sendable {
+    /// The player fainted: no battle against a wild or today's opponent until it is healed. Sparring stays open.
+    case fainted
+}
+
 /// What the result screen shows about a battle with stakes (`PracticeSession.lastStakes`).
 struct PracticeStakesUpdate: Equatable, Sendable {
     /// The player's HP share after the battle (0 = fainted).
