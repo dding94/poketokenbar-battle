@@ -135,6 +135,16 @@ final class LocalizationInterpolationTests: XCTestCase {
             // 등급 라벨을 끼워 넣는 문구 — 번역이 치환 대신 등급을 고정 표기하면 여기서 걸린다.
             expect(lang, "eggDescription(.rare)", l.eggDescription(.rare), l.rarityRare)
             expect(lang, "eggGuaranteeHint(.uncommon)", l.eggGuaranteeHint(.uncommon), l.rarityUncommon)
+
+            // Battle items (PR 03C): the healing shares come from `BattleItem`, the menu bar line names the Pokémon.
+            // 배틀 아이템 — 회복 비율은 `BattleItem` 상수에서, 메뉴바 줄은 기절한 포켓몬 이름을 끼워 넣는다.
+            let potion = "\(Int((BattleItem.potionHeal * 100).rounded()))%"
+            let revive = "\(Int((BattleItem.reviveShare * 100).rounded()))%"
+            expect(lang, "itemDescription(.potion)", l.itemDescription(.potion), potion)
+            expect(lang, "itemDescription(.revive)", l.itemDescription(.revive), revive)
+            expect(lang, "battleItemEffectHint(.potion)", l.battleItemEffectHint(.potion), potion)
+            expect(lang, "battleItemEffectHint(.revive)", l.battleItemEffectHint(.revive), revive)
+            expect(lang, "menuFaintedLine", l.menuFaintedLine(a), a)
         }
     }
 

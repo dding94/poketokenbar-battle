@@ -121,7 +121,7 @@ struct PopoverView: View {
                 RecapScreen(store: store, companion: companion) { nav.showingRecap = false }
             } else if nav.showingPractice, let practice {
                 // Back only leaves the screen; the session keeps the battle (and pauses manual turns).
-                PracticeScreen(session: practice, l: l) { nav.showingPractice = false }
+                PracticeScreen(session: practice, bag: companion, l: l) { nav.showingPractice = false }
                     .onAppear {
                         practice.prepare(state: companion.state, activeName: companion.displayName)
                         practice.setPaused(false, reason: .screenHidden)

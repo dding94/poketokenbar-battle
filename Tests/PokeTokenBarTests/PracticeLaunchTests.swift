@@ -85,6 +85,41 @@ final class PracticeLaunchTests: XCTestCase {
                        "tip\n" + l.practiceStatusResult)
     }
 
+    // MARK: fainted current Pokémon (PR 03C)
+
+    /// The fainted mark follows the practice badge on the first line, and shows alone without one.
+    func testFaintedMarkJoinsThePracticeBadge() {
+        let mark = AppDelegate.faintedMark
+        XCTAssertNil(AppDelegate.menuBadge(practice: nil, fainted: false))
+        XCTAssertEqual(AppDelegate.menuBadge(practice: nil, fainted: true), mark)
+        XCTAssertEqual(AppDelegate.menuBadge(practice: "⚔︎", fainted: false), "⚔︎")
+        XCTAssertEqual(AppDelegate.menuBadge(practice: "⚔︎", fainted: true), "⚔︎ " + mark)
+        XCTAssertEqual(AppDelegate.menuLines(["5h 12%", "1.2M"], badge: AppDelegate.menuBadge(practice: nil, fainted: true)),
+                       ["5h 12% " + mark, "1.2M"])
+    }
+
+    /// The tooltip names the fainted Pokémon and how to heal it, after the practice line; healed, it is gone.
+    func testToolTipTellsTheCurrentPokemonFainted() {
+        let l = L(.en)
+        let fainted = l.menuFaintedLine("Pikachu")
+        XCTAssertTrue(fainted.contains("Pikachu"), fainted)
+        XCTAssertEqual(AppDelegate.menuToolTip(base: "tip", badge: nil, resultReady: false, faintedName: "Pikachu", l: l),
+                       "tip\n" + fainted)
+        XCTAssertEqual(AppDelegate.menuToolTip(base: nil, badge: nil, resultReady: false, faintedName: "Pikachu", l: l), fainted)
+        XCTAssertEqual(AppDelegate.menuToolTip(base: "tip", badge: "⚑", resultReady: true, faintedName: "Pikachu", l: l),
+                       "tip\n" + l.practiceStatusResult + "\n" + fainted)
+        XCTAssertEqual(AppDelegate.menuToolTip(base: "tip", badge: nil, resultReady: false, faintedName: nil, l: l), "tip")
+    }
+
+    /// The sprite dims only while it shows the current Pokémon and that one is fainted; a chosen representative is
+    /// another Pokémon and stays bright.
+    func testSpriteDimsOnlyForTheFaintedCurrentPokemon() {
+        XCTAssertLessThan(AppDelegate.statusSpriteOpacity(fainted: true, showsCurrent: true), 1)
+        XCTAssertGreaterThan(AppDelegate.statusSpriteOpacity(fainted: true, showsCurrent: true), 0, "dim, never gone")
+        XCTAssertEqual(AppDelegate.statusSpriteOpacity(fainted: true, showsCurrent: false), 1)
+        XCTAssertEqual(AppDelegate.statusSpriteOpacity(fainted: false, showsCurrent: true), 1)
+    }
+
     // MARK: Finder reopen
 
     func testFinderReopenOpensPracticeWithoutCreatingAWindow() {

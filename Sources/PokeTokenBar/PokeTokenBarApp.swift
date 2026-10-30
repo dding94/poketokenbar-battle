@@ -57,11 +57,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
     /// 기존 툴팁 아래에 연습전 상태 줄을 붙인다. 배지가 없으면 기존 툴팁 그대로.
     nonisolated static func menuToolTip(base: String?, badge: String?, resultReady: Bool, l: L) -> String? {
+        menuToolTip(base: base, badge: badge, resultReady: resultReady, faintedName: nil, l: l)
+    }
+
+    // MARK: 기절 표시 (PR 03C, 순수 — 테스트용)
+
+    /// The small mark after the first menu line while the current Pokémon is fainted.
+    nonisolated static let faintedMark = "\u{271A}"
+
+    /// The first line's suffix: the practice badge and the fainted mark, in that order; nil when neither.
+    nonisolated static func menuBadge(practice: String?, fainted: Bool) -> String? { practice }   // RED stub
+
+    /// The tooltip with the practice line and, while the current Pokémon (`faintedName`) is fainted, how to heal it.
+    nonisolated static func menuToolTip(base: String?, badge: String?, resultReady: Bool, faintedName: String?,
+                                        l: L) -> String? {
         guard badge != nil else { return base }
         let line = resultReady ? l.practiceStatusResult : l.practiceStatusRunning
         guard let base, !base.isEmpty else { return line }
         return base + "\n" + line
-    }
+    }   // RED stub: no fainted line yet
+
+    /// The menu bar sprite's opacity: dimmed while the Pokémon it shows is the current one and fainted. A chosen
+    /// representative is another Pokémon, so it stays bright (the mark and the tooltip still tell).
+    nonisolated static func statusSpriteOpacity(fainted: Bool, showsCurrent: Bool) -> Float { 1 }   // RED stub
 
     // 메뉴바 캐릭터 애니메이션 — 단일 타이머로 프레임 순환.
     // 프레임 = 이미 22px 로 합성된 이미지 + delay. egg/static 은 2프레임 bob, animated 는 GIF 실제 프레임.

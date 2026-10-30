@@ -11,6 +11,8 @@ struct PracticeSelectionView: View {
     let progress: PracticeSelectionProgress
     let l: L
     let artwork: Bool
+    /// Healing items for my entry (PR 03C); nil hides the Heal control.
+    var bag: (any PracticeItemBag)?
     @State private var changingPlayer = false
 
     private var eligible: [PracticeCandidate] { session.roster?.eligible ?? [] }
@@ -72,6 +74,16 @@ struct PracticeSelectionView: View {
     }
 
     private var wildSearchDue: Bool { session.wildState == .idle && session.player != nil }
+
+    /// Start needs both sides, and a fainted entry may only spar (`PracticeSelectionProgress.faintedBlock`).
+    static func canStart(player: PracticeCandidate?, opponent: PracticeCandidate?, faintedBlock: Bool) -> Bool {
+        player != nil && opponent != nil   // RED stub: ignores the block
+    }
+
+    /// Uses a healing item on my entry, the individual it is (`BattleSnapshot.instanceID`). False when nothing
+    /// was used: no bag, no entry, or the item does not work on it.
+    @discardableResult
+    static func heal(_ kind: ItemKind, entry: PracticeCandidate?, bag: (any PracticeItemBag)?) -> Bool { false }   // RED stub
 
     // MARK: My entry
 
@@ -307,14 +319,18 @@ struct PracticeOpponentRow<Detail: View>: View {
     let temperament: PracticeTemperament?
     let selected: Bool
     var number: Int?
+    /// My own Pokémon's HP share between battles (PR 03C); nil for wild and today's opponents.
+    var health: Double?
     let l: L
     let artwork: Bool
     let onSelect: () -> Void
     let detail: Detail
 
     init(candidate: PracticeCandidate, temperament: PracticeTemperament?, selected: Bool, number: Int? = nil,
-         l: L, artwork: Bool, onSelect: @escaping () -> Void, @ViewBuilder detail: () -> Detail) {
+         health: Double? = nil, l: L, artwork: Bool, onSelect: @escaping () -> Void,
+         @ViewBuilder detail: () -> Detail) {
         self.candidate = candidate; self.temperament = temperament; self.selected = selected; self.number = number
+        self.health = health
         self.l = l; self.artwork = artwork; self.onSelect = onSelect; self.detail = detail()
     }
 

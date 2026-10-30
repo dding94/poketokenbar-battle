@@ -10,6 +10,8 @@ struct PracticeResultView: View {
     let battle: PracticeBattle
     /// What this battle did to the practice record; `PracticeScreen` passes `session.lastRecord`.
     let record: PracticeRecordUpdate?
+    /// HP left and XP paid by a battle with stakes; `PracticeScreen` passes `session.lastStakes` (nil after sparring).
+    var stakes: PracticeStakesUpdate?
     let l: L
     let artwork: Bool
 

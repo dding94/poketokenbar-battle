@@ -5,13 +5,16 @@ import SwiftUI
 @MainActor
 struct PracticeScreen: View {
     let session: PracticeSession
+    /// Healing items for my entry (PR 03C); the popover passes the companion store. nil hides healing.
+    let bag: (any PracticeItemBag)?
     let l: L
     /// false keeps tests offline: no sprite downloads and no PokéAPI name lookups.
     var artwork = true
     let onClose: () -> Void
 
-    init(session: PracticeSession, l: L, artwork: Bool = true, onClose: @escaping () -> Void) {
-        self.session = session; self.l = l; self.artwork = artwork; self.onClose = onClose
+    init(session: PracticeSession, bag: (any PracticeItemBag)? = nil, l: L, artwork: Bool = true,
+         onClose: @escaping () -> Void) {
+        self.session = session; self.bag = bag; self.l = l; self.artwork = artwork; self.onClose = onClose
     }
 
     /// Top bar 22 + body 520 + caption 16, with the tabs' 12pt spacing and 14pt padding: 610pt,
@@ -53,11 +56,13 @@ struct PracticeScreen: View {
     private var content: some View {
         switch stage {
         case .selection:
-            PracticeSelectionView(session: session, progress: PracticeSelectionProgress(session), l: l, artwork: artwork)
+            PracticeSelectionView(session: session, progress: PracticeSelectionProgress(session), l: l, artwork: artwork,
+                                  bag: bag)
         case .battle(let battle):
             PracticeBattleBoard(session: session, battle: battle, l: l, artwork: artwork)
         case .result(let battle):
-            PracticeResultView(session: session, battle: battle, record: session.lastRecord, l: l, artwork: artwork)
+            PracticeResultView(session: session, battle: battle, record: session.lastRecord, stakes: session.lastStakes,
+                               l: l, artwork: artwork)
         }
     }
 

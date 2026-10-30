@@ -13,9 +13,17 @@ struct PracticeSelectionProgress {
     var dailyState: PracticeWildState = .idle
     /// Today's stars only (`PracticeSession.todayStars`): the records keep another day's until today earns one.
     var todayStars: Set<PracticeDailyGoal> = []
+    /// HP shares of my own Pokémon by candidate id (`PracticeSession.healthShare(of:)`, PR 03C); wild and today's
+    /// opponents have none.
+    var health: [String: Double] = [:]
+    /// The start is refused: a fainted entry against a wild or today's opponent. Sparring stays open.
+    var faintedBlock = false
 }
 
 extension PracticeSelectionProgress {
+    /// A fainted entry may only spar: a wild or today's opponent is refused (PR 03C).
+    static func blocksStart(playerShare: Double?, opponent: PracticeCandidate?) -> Bool { false }   // RED stub
+
     @MainActor init(_ session: PracticeSession) {
         self.init(records: session.records, daily: session.dailyCandidate, dailyState: session.dailyState,
                   todayStars: session.todayStars)
@@ -244,7 +252,25 @@ enum PracticeDailyNotice: Equatable {
 @MainActor
 struct PracticeResultRecord: View {
     let update: PracticeRecordUpdate
+    /// What a battle with stakes did outside the session (`PracticeSession.lastStakes`); nil after sparring.
+    var stakes: PracticeStakesUpdate?
     let l: L
+
+    /// The XP line of a battle with stakes: what the current Pokémon got, or why it got nothing.
+    enum XPLine: Equatable {
+        case gained(xp: Int, winsLeft: Int)
+        /// A win past today's XP-paying wins.
+        case capReached
+        /// A win with no current Pokémon to grow (an egg).
+        case noPokemon
+        case loss
+        case draw
+    }
+
+    static func xpLine(_ update: PracticeRecordUpdate, _ stakes: PracticeStakesUpdate) -> XPLine { .loss }   // RED stub
+
+    /// Nothing to show: no streak change, not today's opponent and no stakes.
+    static func isEmpty(_ update: PracticeRecordUpdate, stakes: PracticeStakesUpdate?) -> Bool { isEmpty(update) }   // RED stub
 
     enum Streak: Equatable {
         /// A win after a loss, a draw or nothing.

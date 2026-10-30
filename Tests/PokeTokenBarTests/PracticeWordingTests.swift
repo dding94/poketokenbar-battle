@@ -210,6 +210,216 @@ final class PracticeWordingTests: XCTestCase {
         XCTAssertFalse(PracticeScreen.clockIsUrgent(remaining: 5, paused: true), "a held clock is not running out")
     }
 
+    // MARK: Battle items, HP and stakes (PR 03C)
+
+    private static let battleItems: [ItemKind] = [.potion, .hyperPotion, .revive, .ivReroll]
+
+    /// Official names for the three healing items; the IV reroll is the app's own, so it has its own short name.
+    /// Every language has a name of its own for each, never the raw case name.
+    func testBattleItemNames() {
+        let ko = L(.ko), en = L(.en)
+        XCTAssertEqual(Self.battleItems.map(ko.itemName), ["상처약", "고급상처약", "기력의조각", "개체값 재추첨권"])
+        XCTAssertEqual(Self.battleItems.map(en.itemName), ["Potion", "Hyper Potion", "Revive", "IV Reroll"])
+        for language in AppLanguage.allCases {
+            let names = Self.battleItems.map(L(language).itemName)
+            XCTAssertEqual(Set(names).count, names.count, "\(language): \(names)")
+            for (kind, name) in zip(Self.battleItems, names) {
+                XCTAssertFalse(name.isEmpty || name == kind.rawValue, "\(language) \(kind): \(name)")
+            }
+        }
+    }
+
+    /// Descriptions come from `BattleItem`: the Potion's and the Revive's share in every language, and the reroll
+    /// warns that the IVs may drop.
+    func testBattleItemDescriptionsFollowTheConstants() {
+        let potion = "\(Int((BattleItem.potionHeal * 100).rounded()))%"
+        let revive = "\(Int((BattleItem.reviveShare * 100).rounded()))%"
+        XCTAssertEqual(L(.ko).itemDescription(.potion), "포켓몬의 체력을 \(potion) 회복해요.")
+        XCTAssertEqual(L(.en).itemDescription(.potion), "Restores \(potion) of a Pokémon's HP.")
+        XCTAssertEqual(L(.ko).itemDescription(.hyperPotion), "포켓몬의 체력을 모두 회복해요.")
+        XCTAssertEqual(L(.en).itemDescription(.hyperPotion), "Fully restores a Pokémon's HP.")
+        XCTAssertEqual(L(.ko).itemDescription(.revive), "기절한 포켓몬을 체력 \(revive)로 되살려요.")
+        XCTAssertEqual(L(.en).itemDescription(.revive), "Revives a fainted Pokémon with \(revive) of its HP.")
+        XCTAssertEqual(L(.ko).itemDescription(.ivReroll), "현재 포켓몬의 개체값 6개를 모두 다시 뽑아요. 더 낮아질 수도 있어요.")
+        XCTAssertEqual(L(.en).itemDescription(.ivReroll), "Re-rolls all six IVs of your Pokémon. They may get lower.")
+        for language in AppLanguage.allCases {
+            let l = L(language)
+            XCTAssertTrue(l.itemDescription(.potion).contains(potion), "\(language)")
+            XCTAssertTrue(l.itemDescription(.revive).contains(revive), "\(language)")
+            XCTAssertFalse(l.itemDescription(.hyperPotion).isEmpty, "\(language)")
+            XCTAssertFalse(l.itemDescription(.ivReroll).isEmpty, "\(language)")
+        }
+    }
+
+    /// The bag's effect hint next to Use, and why an item cannot be used now.
+    func testBattleItemHintsAndReasons() {
+        let ko = L(.ko), en = L(.en)
+        let potion = "\(Int((BattleItem.potionHeal * 100).rounded()))%"
+        let revive = "\(Int((BattleItem.reviveShare * 100).rounded()))%"
+        XCTAssertEqual(Self.battleItems.map(ko.battleItemEffectHint), ["체력 +\(potion)", "체력 완전 회복", "기절 → 체력 \(revive)", "개체값 6개 다시 뽑기"])
+        XCTAssertEqual(Self.battleItems.map(en.battleItemEffectHint), ["HP +\(potion)", "Full HP", "Fainted → \(revive) HP", "Re-roll all 6 IVs"])
+        XCTAssertEqual(ko.battleItemFullHealth, "체력이 가득해요")
+        XCTAssertEqual(en.battleItemFullHealth, "HP is full")
+        XCTAssertEqual(ko.battleItemNeedsRevive, "기절했어요 · 기력의조각이 필요해요")
+        XCTAssertEqual(en.battleItemNeedsRevive, "Fainted · needs a Revive")
+        XCTAssertEqual(ko.battleItemOnlyFainted, "기절했을 때만 쓸 수 있어요")
+        XCTAssertEqual(en.battleItemOnlyFainted, "Only for a fainted Pokémon")
+        XCTAssertEqual(ko.battleFainted, "기절")
+        XCTAssertEqual(en.battleFainted, "Fainted")
+        XCTAssertEqual(ko.ivRerollMayDrop, "더 낮아질 수 있어요")
+        XCTAssertEqual(en.ivRerollMayDrop, "They may get lower")
+        for language in AppLanguage.allCases {
+            let l = L(language)
+            for text in Self.battleItems.map(l.battleItemEffectHint) + [l.battleItemFullHealth, l.battleItemNeedsRevive,
+                    l.battleItemOnlyFainted, l.battleHP, l.battleFainted, l.ivRerollCurrent, l.ivRerollMayDrop,
+                    l.ivRerollAction, l.ivRerollNew, l.menuFaintedLine("Pikachu")] {
+                XCTAssertFalse(text.isEmpty, "\(language): an empty battle item string")
+            }
+        }
+    }
+
+    /// Mirrors `CompanionStore.useHealingItem`: Potions need a hurt Pokémon that is standing, a Revive a fainted
+    /// one, the reroll any hatched one. Nothing works without the item or a Pokémon.
+    func testBattleItemUseFollowsTheHealthShare() {
+        for kind in [ItemKind.potion, .hyperPotion] {
+            XCTAssertEqual(BattleItemUse(kind, count: 0, healthShare: 0.5), .notOwned)
+            XCTAssertEqual(BattleItemUse(kind, count: 1, healthShare: nil), .noPokemon)
+            XCTAssertEqual(BattleItemUse(kind, count: 1, healthShare: 1), .fullHealth)
+            XCTAssertEqual(BattleItemUse(kind, count: 1, healthShare: 0), .fainted)
+            XCTAssertEqual(BattleItemUse(kind, count: 1, healthShare: 0.5), .usable)
+            XCTAssertEqual(BattleItemUse(kind, count: 2, healthShare: 0.999), .usable, "a scratch still heals")
+        }
+        XCTAssertEqual(BattleItemUse(.revive, count: 0, healthShare: 0), .notOwned)
+        XCTAssertEqual(BattleItemUse(.revive, count: 1, healthShare: nil), .noPokemon)
+        XCTAssertEqual(BattleItemUse(.revive, count: 1, healthShare: 0), .usable)
+        XCTAssertEqual(BattleItemUse(.revive, count: 1, healthShare: 0.5), .notFainted)
+        XCTAssertEqual(BattleItemUse(.revive, count: 1, healthShare: 1), .notFainted)
+        XCTAssertEqual(BattleItemUse(.ivReroll, count: 0, healthShare: 1), .notOwned)
+        XCTAssertEqual(BattleItemUse(.ivReroll, count: 1, healthShare: nil), .noPokemon)
+        XCTAssertEqual(BattleItemUse(.ivReroll, count: 1, healthShare: 0), .usable, "a fainted Pokémon keeps its IVs")
+    }
+
+    /// 0% only when fainted and 100% only when full, so the bar's number never contradicts what an item can do.
+    func testHealthPercentReadsFaintedAndFullOnlyAtTheEnds() {
+        XCTAssertEqual(BattleHealth.percent(0), 0)
+        XCTAssertEqual(BattleHealth.percent(1), 100)
+        XCTAssertEqual(BattleHealth.percent(0.63), 63)
+        XCTAssertEqual(BattleHealth.percent(0.996), 99, "a scratch is not full")
+        XCTAssertEqual(BattleHealth.percent(0.004), 1, "a sliver is not fainted")
+        XCTAssertEqual(BattleHealth.percent(-0.2), 0)
+        XCTAssertEqual(BattleHealth.percent(1.3), 100)
+    }
+
+    /// The reroll's result marks each IV as up, down or unchanged.
+    func testIVChangesFollowEachStat() {
+        let old = PokemonIVs(hp: 31, attack: 12, defense: 0, specialAttack: 25, specialDefense: 7, speed: 18)
+        let new = PokemonIVs(hp: 20, attack: 12, defense: 9, specialAttack: 25, specialDefense: 30, speed: 2)
+        XCTAssertEqual(IVGrid.change("hp", from: old, to: new), .down)
+        XCTAssertEqual(IVGrid.change("attack", from: old, to: new), .same)
+        XCTAssertEqual(IVGrid.change("defense", from: old, to: new), .up)
+        XCTAssertEqual(IVGrid.change("special-defense", from: old, to: new), .up)
+        XCTAssertEqual(IVGrid.change("speed", from: old, to: new), .down)
+        XCTAssertNil(IVGrid.change("speed", from: nil, to: new), "no arrows before a reroll")
+    }
+
+    /// The Heal control lists only the items I own that would work on the entry, cheapest first.
+    func testHealOptionsListOnlyItemsThatWork() {
+        let counts: [ItemKind: Int] = [.potion: 2, .hyperPotion: 1, .revive: 3, .ivReroll: 1]
+        XCTAssertEqual(PracticeHealControl.options(share: 0.5, counts: counts).map(\.kind), [.potion, .hyperPotion])
+        XCTAssertEqual(PracticeHealControl.options(share: 0.5, counts: counts).map(\.count), [2, 1])
+        XCTAssertEqual(PracticeHealControl.options(share: 0, counts: counts).map(\.kind), [.revive])
+        XCTAssertTrue(PracticeHealControl.options(share: 1, counts: counts).isEmpty, "nothing to heal at full HP")
+        XCTAssertEqual(PracticeHealControl.options(share: 0.5, counts: [.potion: 0, .hyperPotion: 1]).map(\.kind), [.hyperPotion])
+        XCTAssertTrue(PracticeHealControl.options(share: 0, counts: [.potion: 4]).isEmpty, "a Potion cannot wake a fainted one")
+    }
+
+    /// Only a fainted entry against a wild or today's opponent is refused; sparring and a hurt entry are not.
+    func testFaintedEntryMayOnlySpar() {
+        let owned = PracticeCandidate(id: "owned", name: "o", snapshot: nil, blockedReason: nil)
+        let wild = PracticeCandidate(id: "wild", name: "w", snapshot: nil, blockedReason: nil,
+                                     origin: .wild(rarity: .common, shiny: false))
+        let daily = PracticeCandidate(id: PracticeDaily.idPrefix + "2026-10-30", name: "d", snapshot: nil, blockedReason: nil,
+                                      origin: .wild(rarity: .rare, shiny: false))
+        XCTAssertTrue(PracticeSelectionProgress.blocksStart(playerShare: 0, opponent: wild))
+        XCTAssertTrue(PracticeSelectionProgress.blocksStart(playerShare: 0, opponent: daily))
+        XCTAssertFalse(PracticeSelectionProgress.blocksStart(playerShare: 0, opponent: owned), "sparring stays open")
+        XCTAssertFalse(PracticeSelectionProgress.blocksStart(playerShare: 0.2, opponent: wild), "hurt is not fainted")
+        XCTAssertFalse(PracticeSelectionProgress.blocksStart(playerShare: nil, opponent: wild), "no stakes, no block")
+        XCTAssertFalse(PracticeSelectionProgress.blocksStart(playerShare: 0, opponent: nil))
+
+        XCTAssertTrue(PracticeSelectionView.canStart(player: owned, opponent: wild, faintedBlock: false))
+        XCTAssertFalse(PracticeSelectionView.canStart(player: owned, opponent: wild, faintedBlock: true))
+        XCTAssertFalse(PracticeSelectionView.canStart(player: nil, opponent: wild, faintedBlock: false))
+        XCTAssertFalse(PracticeSelectionView.canStart(player: owned, opponent: nil, faintedBlock: false))
+    }
+
+    /// Healing from the selection screen uses the item on my entry's individual, never on the current Pokémon.
+    func testHealUsesTheItemOnTheEntry() throws {
+        let bag = RecordingItemBag([.potion: 1])
+        let entry = PracticeScreenRenderingTests.syntheticCandidate(id: "entry-7", name: "Pikachu", species: 25, level: 30,
+                                                                    types: ["Electric"])
+        XCTAssertTrue(PracticeSelectionView.heal(.potion, entry: entry, bag: bag))
+        XCTAssertEqual(bag.uses.map(\.kind), [.potion])
+        XCTAssertEqual(bag.uses.map(\.instanceID), [try XCTUnwrap(entry.snapshot?.instanceID)])
+        XCTAssertFalse(PracticeSelectionView.heal(.potion, entry: nil, bag: bag), "no entry, nothing used")
+        XCTAssertFalse(PracticeSelectionView.heal(.potion, entry: entry, bag: nil), "no bag, nothing used")
+        XCTAssertEqual(bag.uses.count, 1)
+    }
+
+    /// The result's XP line: what the current Pokémon got and how many paying wins are left, or why it got none.
+    func testResultXPLine() {
+        func update(_ outcome: PracticeOutcome) -> PracticeRecordUpdate {
+            PracticeRecordUpdate(outcome: outcome, streak: outcome == .win ? 1 : 0, bestStreak: 3, endedStreak: nil,
+                                 daily: false, newStars: [], stars: [])
+        }
+        let xp = PracticeStakes.winXP
+        XCTAssertEqual(PracticeResultRecord.xpLine(update(.win), PracticeStakesUpdate(healthShare: 0.7, xp: xp, xpWinsLeft: 9)),
+                       .gained(xp: xp, winsLeft: 9))
+        XCTAssertEqual(PracticeResultRecord.xpLine(update(.win), PracticeStakesUpdate(healthShare: 0.7, xp: xp, xpWinsLeft: 0)),
+                       .gained(xp: xp, winsLeft: 0), "the last paying win still paid")
+        XCTAssertEqual(PracticeResultRecord.xpLine(update(.win), PracticeStakesUpdate(healthShare: 0.7, xp: 0, xpWinsLeft: 0)),
+                       .capReached)
+        XCTAssertEqual(PracticeResultRecord.xpLine(update(.win), PracticeStakesUpdate(healthShare: 0.7, xp: 0, xpWinsLeft: 4)),
+                       .noPokemon)
+        XCTAssertEqual(PracticeResultRecord.xpLine(update(.loss), PracticeStakesUpdate(healthShare: 0, xp: 0, xpWinsLeft: 4)),
+                       .loss)
+        XCTAssertEqual(PracticeResultRecord.xpLine(update(.draw), PracticeStakesUpdate(healthShare: 0.3, xp: 0, xpWinsLeft: 4)),
+                       .draw)
+        XCTAssertTrue(PracticeResultRecord.isEmpty(update(.loss), stakes: nil), "sparring a loss shows no card")
+        XCTAssertFalse(PracticeResultRecord.isEmpty(update(.loss), stakes: PracticeStakesUpdate(healthShare: 0, xp: 0, xpWinsLeft: 4)),
+                       "a battle with stakes always reports HP and XP")
+    }
+
+    /// The selection's heal and block lines and the result's XP and HP lines.
+    func testStakesWording() {
+        let ko = L(.ko), en = L(.en)
+        let cap = PracticeStakes.dailyXPWins
+        XCTAssertEqual(ko.practiceHeal, "회복")
+        XCTAssertEqual(en.practiceHeal, "Heal")
+        XCTAssertEqual(ko.practiceHealNone, "쓸 수 있는 회복약이 없어요 · 상점에서 살 수 있어요")
+        XCTAssertEqual(en.practiceHealNone, "No healing item that works · buy one in the shop")
+        XCTAssertEqual(ko.practiceFaintedBlock, "기절 · 회복해야 야생·오늘의 상대와 싸울 수 있어요")
+        XCTAssertEqual(en.practiceFaintedBlock, "Fainted · heal it to fight wild or today's opponents")
+        XCTAssertEqual(ko.practiceXPGained(xp: 5_000_000, winsLeft: 9), "+5M XP · 오늘 9번 남음")
+        XCTAssertEqual(en.practiceXPGained(xp: 5_000_000, winsLeft: 9), "+5M XP · 9 more today")
+        XCTAssertEqual(ko.practiceXPGained(xp: 5_000_000, winsLeft: 0), "+5M XP · 오늘은 마지막이에요")
+        XCTAssertEqual(en.practiceXPGained(xp: 5_000_000, winsLeft: 0), "+5M XP · last one today")
+        XCTAssertEqual(ko.practiceXPCapReached, "경험치 없음 · 오늘 \(cap)승을 모두 채웠어요")
+        XCTAssertEqual(en.practiceXPCapReached, "No XP · today's limit of \(cap) wins is reached")
+        XCTAssertEqual(ko.practiceXPNoPokemon, "경험치 없음 · 키우는 포켓몬이 없어요")
+        XCTAssertEqual(en.practiceXPNoPokemon, "No XP · no current Pokémon to grow")
+        XCTAssertEqual(ko.practiceXPLoss, "진 판은 경험치가 없어요")
+        XCTAssertEqual(en.practiceXPLoss, "No XP for a loss")
+        XCTAssertEqual(ko.practiceXPDraw, "무승부는 경험치가 없어요")
+        XCTAssertEqual(en.practiceXPDraw, "No XP for a draw")
+        XCTAssertEqual(ko.practiceHPCarries(63), "63% · 다음 판까지 남아요")
+        XCTAssertEqual(en.practiceHPCarries(63), "63% · stays for your next battle")
+        XCTAssertEqual(ko.practiceFaintedTitle, "기절했어요")
+        XCTAssertEqual(en.practiceFaintedTitle, "Fainted")
+        XCTAssertEqual(ko.practiceFaintedHint, "기력의조각으로 되살려야 야생과 다시 싸울 수 있어요")
+        XCTAssertEqual(en.practiceFaintedHint, "Use a Revive to fight wild opponents again")
+    }
+
     func testBoostArrowsFollowTheStageSign() {
         let l = L(.ko)
         XCTAssertEqual(l.practiceBoost(stat: "atk", stages: 1), "공격 ↑")

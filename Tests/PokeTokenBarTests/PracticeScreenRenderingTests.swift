@@ -1034,6 +1034,382 @@ final class PracticeScreenRenderingTests: XCTestCase {
             try save(bitmap, as: "practice-step5-board-\(lang.rawValue).png")
         }
     }
+
+    // MARK: Battle items, HP and stakes (PR 03C)
+    //
+    // Core keeps HP and pays XP in parallel, so until it lands the session reports no HP and no stakes: these tests
+    // feed the views plain values (`PracticeSelectionProgress.health`, `PracticeStakesUpdate`, a recording bag). The
+    // fainted tag, star-like marks and arrows are small, so they are checked by size and pixels, never by OCR.
+
+    /// A finished staged battle: my Pikachu's Volt Tackle wins in one turn, or my Magikarp loses to Pikachu.
+    private func finishedBattle(won: Bool) throws -> (PracticeSession, PracticeBattle) {
+        let session = makeSession(Self.stagedState())
+        if won {
+            try chooseVoltTackle(session)
+            for _ in 0..<120 where session.battle?.phase != .finished || session.playback?.isPlaying != false {
+                now += 0.5
+                session.tick()
+            }
+        } else {
+            let pikachu = try XCTUnwrap(session.playerID), magikarp = try XCTUnwrap(session.opponentID)
+            session.playerID = magikarp
+            session.opponentID = pikachu
+            session.mode = .automatic
+            session.start()
+            session.skipToResult()
+        }
+        let battle = try XCTUnwrap(session.battle)
+        XCTAssertEqual(battle.phase, .finished)
+        XCTAssertEqual(battle.result?.winner == "p1", won, "the staged battle must end the way the test needs")
+        return (session, battle)
+    }
+
+    /// A companion store on a temp file: Pikachu is the current Pokémon with known IVs, and the four battle items
+    /// are in the bag. HP is whatever the store reports for a fresh save.
+    private func battleItemStore(language: AppLanguage) throws -> CompanionStore {
+        let suite = "PracticeBag-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("\(suite).json")
+        addTeardownBlock {
+            UserDefaults.standard.removePersistentDomain(forName: suite)
+            try? FileManager.default.removeItem(at: file)
+        }
+        var profile = PokemonProfile.generate(seed: 7, instanceID: "bag-pikachu")
+        profile.gender = .male; profile.level = 30; profile.abilityName = "static"
+        profile.moves = [PokemonKnownMove(name: "thunderbolt", learnedAtLevel: 1)]
+        profile.ivs = PokemonIVs(hp: 31, attack: 12, defense: 0, specialAttack: 25, specialDefense: 7, speed: 18)
+        var state = CompanionState()
+        state.active = MonState(baseID: 25, pathIDs: [25], stageIndex: 0, usedAtStage: 0, rarity: .common,
+                                totalForms: 1, nature: .hardy, profile: profile)
+        state.inventory = [ItemKind.potion.rawValue: 2, ItemKind.hyperPotion.rawValue: 1, ItemKind.revive.rawValue: 1,
+                           ItemKind.ivReroll.rawValue: 1]
+        state.language = language
+        try JSONEncoder().encode(state).write(to: file)
+        return CompanionStore(provider: OfflineWildProvider(), fileURL: file, defaults: defaults)
+    }
+
+    /// HP as a bar with its percentage, or a "Fainted" tag at 0.
+    func testHealthLineShowsPercentOrFainted() async throws {
+        let width: CGFloat = 200
+        let (text, bitmap) = try await waitForText(["63%"], in: hostView(BattleHealthLine(share: 0.63, l: L(.en)).padding(6),
+                                                                         width: width, height: 30))
+        try save(bitmap, as: "practice-03c-health-line.png")
+        assertRendered(["63%"], in: text)
+        let empty = Self.emptyWidth
+        XCTAssertGreaterThan(NSHostingView(rootView: BattleHealthLine(share: 0, l: L(.en))).fittingSize.width, empty + 10,
+                             "a fainted Pokémon shows its tag")
+        XCTAssertGreaterThan(NSHostingView(rootView: BattleFaintedTag(l: L(.en))).fittingSize.width, empty + 10)
+        let low = try Self.capture2x(hostView(BattleHealthLine(share: 0.2, l: L(.en)), width: width, height: 30))
+        let high = try Self.capture2x(hostView(BattleHealthLine(share: 0.9, l: L(.en)), width: width, height: 30))
+        let zero = try Self.capture2x(hostView(BattleHealthLine(share: 0, l: L(.en)), width: width, height: 30))
+        XCTAssertNotEqual(Self.pixels(low), Self.pixels(high), "the bar follows the share")
+        XCTAssertNotEqual(Self.pixels(zero), Self.pixels(low), "fainted is drawn apart from a low bar")
+    }
+
+    /// The IV reroll's confirm shows the six current IVs and warns they may drop; the result shows the new six. Both
+    /// fit the bag's column in both languages.
+    func testIVRerollPanelShowsTheIVsBeforeAndAfter() async throws {
+        let old = PokemonIVs(hp: 31, attack: 12, defense: 0, specialAttack: 25, specialDefense: 7, speed: 18)
+        let new = PokemonIVs(hp: 20, attack: 12, defense: 9, specialAttack: 26, specialDefense: 30, speed: 2)
+        let width = PopoverMetrics.scrollContentWidth
+        func confirms(_ stage: IVRerollPanel.Stage) -> Bool {
+            if case .confirm = stage { return true }
+            return false
+        }
+        for lang in [AppLanguage.en, .ko] {
+            for stage in [IVRerollPanel.Stage.confirm(current: old), .result(old: old, new: new)] {
+                let panel = IVRerollPanel(stage: stage, l: L(lang), onReroll: {}, onCancel: {}, onDone: {})
+                let size = NSHostingController(rootView: panel)
+                    .sizeThatFits(in: CGSize(width: width, height: .greatestFiniteMagnitude))
+                XCTAssertGreaterThan(size.height, 40, "\(lang.rawValue) \(stage): no panel")
+                XCTAssertLessThanOrEqual(size.width, width + 0.5, "\(lang.rawValue) \(stage): \(size)")
+                let host = hostView(panel.padding(8), width: width, height: 170)
+                let isConfirm = confirms(stage)
+                let name = "practice-03c-iv-reroll-\(isConfirm ? "confirm" : "result")-\(lang.rawValue).png"
+                guard lang == .en else {
+                    let (_, bitmap) = try await waitForText(["31"], in: host)
+                    try save(bitmap, as: name)
+                    continue
+                }
+                let needles = isConfirm ? ["Current IVs", "They may get lower", "Re-roll", "Cancel", "Attack", "Speed", "25", "18"]
+                    : ["New IVs", "Close", "Attack", "26", "30"]
+                let (text, bitmap) = try await waitForText(needles, in: host)
+                try save(bitmap, as: name)
+                assertRendered(needles, in: text)
+                if !isConfirm {
+                    XCTAssertFalse(Self.normalized(text).contains(Self.normalized("They may get lower")),
+                                   "the warning belongs before the reroll: \(text)")
+                }
+            }
+        }
+    }
+
+    /// The bag lists the four battle items with their effect, and says why a healing item cannot be used on the
+    /// current Pokémon: a fresh save is at full HP, so Potions say so and the Revive waits for a faint. The reroll
+    /// is ready to use.
+    func testBagShowsBattleItemsWithWhatTheyDoNow() async throws {
+        for lang in [AppLanguage.en, .ko] {
+            let store = try battleItemStore(language: lang)
+            XCTAssertEqual(store.currentInstanceID, "bag-pikachu")
+            XCTAssertEqual(store.currentIVs?.speed, 18)
+            XCTAssertEqual(store.currentHealthShare, 1, "a fresh save starts at full HP")
+            let host = hostView(BagView(store: store, nav: PopoverNavigation()), width: PopoverMetrics.contentWidth, height: 520)
+            guard lang == .en else {
+                let (_, bitmap) = try await waitForText(["IV"], in: host)
+                try save(bitmap, as: "practice-03c-bag-ko.png")
+                continue
+            }
+            let needles = ["Potion", "Hyper Potion", "Revive", "IV Reroll", "HP is full", "Only for a fainted Pokémon",
+                           "Re-roll all 6 IVs"]
+            let (text, bitmap) = try await waitForText(needles, in: host)
+            try save(bitmap, as: "practice-03c-bag-en.png")
+            assertRendered(needles, in: text)
+        }
+    }
+
+    /// The Heal control lists only the items that would work on the entry, and says where to get one when none do.
+    func testHealControlListsWhatWorksOnTheEntry() async throws {
+        let width = PopoverMetrics.scrollContentWidth
+        let counts: [ItemKind: Int] = [.potion: 2, .hyperPotion: 1, .revive: 1]
+        func host(_ share: Double, _ counts: [ItemKind: Int], open: Bool = true) -> NSView {
+            hostView(PracticeHealControl(share: share, counts: counts, isOpen: open, l: L(.en), onToggle: {}, onUse: { _ in })
+                .padding(8), width: width, height: 130)
+        }
+        let hurt = ["Heal", "Potion", "Hyper Potion"]
+        let (text, bitmap) = try await waitForText(hurt, in: host(0.63, counts))
+        try save(bitmap, as: "practice-03c-heal-open.png")
+        assertRendered(hurt, in: text)
+        XCTAssertFalse(Self.normalized(text).contains("revive"), "a Revive does nothing for a hurt entry: \(text)")
+
+        let (faintedText, _) = try await waitForText(["Revive"], in: host(0, counts))
+        assertRendered(["Revive"], in: faintedText)
+        XCTAssertFalse(Self.normalized(faintedText).contains("potion"), "a Potion cannot wake a fainted entry: \(faintedText)")
+
+        let (noneText, _) = try await waitForText(["No healing item"], in: host(0.63, [:]))
+        assertRendered(["No healing item"], in: noneText)
+
+        let (closedText, _) = try await waitForText(["Heal"], in: host(0.63, counts, open: false))
+        assertRendered(["Heal"], in: closedText)
+        XCTAssertFalse(Self.normalized(closedText).contains("potion"), "closed, it lists nothing: \(closedText)")
+    }
+
+    /// My hurt entry shows its HP and the Heal control; a fainted owned Pokémon is drawn apart from a healthy one and
+    /// can still be sparred with. The rows with HP fit the column in both languages.
+    func testSelectionShowsHurtAndFaintedPokemon() async throws {
+        let session = makeSession(Self.stagedState())
+        let pikachu = try XCTUnwrap(session.player), magikarp = try XCTUnwrap(session.opponent)
+        let progress = PracticeSelectionProgress(health: [pikachu.id: 0.63, magikarp.id: 0])
+        let bag = RecordingItemBag([.potion: 2, .hyperPotion: 1])
+        for lang in [AppLanguage.en, .ko] {
+            let view = PracticeSelectionView(session: session, progress: progress, l: L(lang), artwork: false, bag: bag)
+            let host = hostView(view, width: PopoverMetrics.contentWidth, height: Self.boardBodyHeight)
+            guard lang == .en else {
+                let (_, bitmap) = try await waitForText(["63%"], in: host)
+                try save(bitmap, as: "practice-03c-selection-hurt-ko.png")
+                continue
+            }
+            let needles = ["63%", "Heal", "Start battle"]
+            let (text, bitmap) = try await waitForText(needles, in: host)
+            try save(bitmap, as: "practice-03c-selection-hurt-en.png")
+            assertRendered(needles, in: text)
+        }
+        XCTAssertFalse(progress.faintedBlock)
+        XCTAssertTrue(PracticeSelectionView.canStart(player: pikachu, opponent: magikarp, faintedBlock: progress.faintedBlock),
+                      "sparring a fainted Pokémon of my own stays open")
+
+        let width = PopoverMetrics.scrollContentWidth
+        func row(_ health: Double?, _ lang: AppLanguage = .en) -> some View {
+            PracticeOpponentRow(candidate: magikarp, temperament: .standard, selected: false, number: 2, health: health,
+                                l: L(lang), artwork: false, onSelect: {}) { EmptyView() }
+        }
+        let fainted = try Self.capture2x(hostView(row(0), width: width, height: 70))
+        try save(fainted, as: "practice-03c-row-fainted.png")
+        let healthy = try Self.capture2x(hostView(row(1), width: width, height: 70))
+        let wild = try Self.capture2x(hostView(row(nil), width: width, height: 70))
+        XCTAssertNotEqual(Self.pixels(fainted), Self.pixels(healthy), "a fainted row is drawn apart")
+        XCTAssertNotEqual(Self.pixels(healthy), Self.pixels(wild), "an owned row shows its HP")
+        for lang in [AppLanguage.en, .ko] {
+            for health in [0, 0.5, 1] {
+                let size = NSHostingController(rootView: row(health, lang))
+                    .sizeThatFits(in: CGSize(width: width, height: .greatestFiniteMagnitude))
+                XCTAssertLessThanOrEqual(size.width, width + 0.5, "\(lang.rawValue) HP \(health): \(size)")
+            }
+        }
+    }
+
+    /// A fainted entry cannot start against a wild opponent: Start is refused and the line above it says why. The
+    /// Heal control offers the Revive.
+    func testFaintedEntryCannotStartAgainstAWildOpponent() async throws {
+        let session = makeSession(Self.stagedState(),
+                                  wildSource: PracticeWildSource(provider: WildLineProvider(), details: WildLineProvider()))
+        session.findWildOpponents()
+        try await waitForWild(session) { $0 == .ready }
+        let wild = try XCTUnwrap(session.wildCandidates.first, "no wild opponent")
+        session.opponentID = wild.id
+        let pikachu = try XCTUnwrap(session.player)
+        let blocked = PracticeSelectionProgress.blocksStart(playerShare: 0, opponent: session.opponent)
+        XCTAssertTrue(blocked, "a fainted entry against a wild opponent")
+        let progress = PracticeSelectionProgress(health: [pikachu.id: 0], faintedBlock: blocked)
+        XCTAssertFalse(PracticeSelectionView.canStart(player: session.player, opponent: session.opponent,
+                                                      faintedBlock: progress.faintedBlock))
+        let bag = RecordingItemBag([.revive: 1, .potion: 3])
+        for lang in [AppLanguage.en, .ko] {
+            let view = PracticeSelectionView(session: session, progress: progress, l: L(lang), artwork: false, bag: bag)
+            let host = hostView(view, width: PopoverMetrics.contentWidth, height: Self.boardBodyHeight)
+            guard lang == .en else {
+                let (_, bitmap) = try await waitForText(["Lv."], in: host)
+                try save(bitmap, as: "practice-03c-selection-fainted-ko.png")
+                continue
+            }
+            let needles = ["heal it to fight wild", "Heal", "Start battle"]
+            let (text, bitmap) = try await waitForText(needles, in: host)
+            try save(bitmap, as: "practice-03c-selection-fainted-en.png")
+            assertRendered(needles, in: text)
+        }
+    }
+
+    /// The result card reports what a battle with stakes did: XP with the paying wins left, why there was none, the
+    /// HP that carries over, or the faint with a way to heal it.
+    func testResultCardReportsXPAndHP() async throws {
+        let width = PopoverMetrics.contentWidth
+        func host(_ outcome: PracticeOutcome, _ stakes: PracticeStakesUpdate) -> NSView {
+            let update = PracticeRecordUpdate(outcome: outcome, streak: outcome == .win ? 2 : 0, bestStreak: 5,
+                                              endedStreak: outcome == .win ? nil : 3, daily: false, newStars: [], stars: [])
+            return hostView(PracticeResultRecord(update: update, stakes: stakes, l: L(.en)), width: width, height: 90)
+        }
+        let won = ["+5M XP", "9 more today", "71%", "stays for your next battle"]
+        let (text, bitmap) = try await waitForText(won, in: host(.win, PracticeStakesUpdate(healthShare: 0.71, xp: 5_000_000,
+                                                                                               xpWinsLeft: 9)))
+        try save(bitmap, as: "practice-03c-result-card-win.png")
+        assertRendered(won, in: text)
+
+        let lost = ["Fainted", "Use a Revive", "No XP for a loss"]
+        let (lostText, lostBitmap) = try await waitForText(lost, in: host(.loss, PracticeStakesUpdate(healthShare: 0, xp: 0,
+                                                                                                         xpWinsLeft: 9)))
+        try save(lostBitmap, as: "practice-03c-result-card-fainted.png")
+        assertRendered(lost, in: lostText)
+
+        let capped = ["No XP", "limit of \(PracticeStakes.dailyXPWins) wins"]
+        let (cappedText, _) = try await waitForText(capped, in: host(.win, PracticeStakesUpdate(healthShare: 0.5, xp: 0,
+                                                                                                   xpWinsLeft: 0)))
+        assertRendered(capped, in: cappedText)
+    }
+
+    /// The result screen with streak, XP, HP and today's stars still fits its 520pt body in both languages, won or
+    /// fainted, and the HP left is said once (the summary drops its own row).
+    func testResultWithStakesFitsTheBody() async throws {
+        let width = PopoverMetrics.contentWidth
+        for won in [true, false] {
+            let (session, battle) = try finishedBattle(won: won)
+            let record = won
+                ? PracticeRecordUpdate(outcome: .win, streak: 4, bestStreak: 4, endedStreak: nil, daily: true,
+                                       newStars: [.quickWin], stars: [.win, .quickWin])
+                : PracticeRecordUpdate(outcome: .loss, streak: 0, bestStreak: 7, endedStreak: 7, daily: true,
+                                       newStars: [], stars: [.win])
+            let stakes = won ? PracticeStakesUpdate(healthShare: 0.71, xp: PracticeStakes.winXP, xpWinsLeft: 9)
+                : PracticeStakesUpdate(healthShare: 0, xp: 0, xpWinsLeft: 9)
+            for lang in [AppLanguage.en, .ko] {
+                func least(_ stakes: PracticeStakesUpdate?) -> CGFloat {
+                    let view = PracticeResultView(session: session, battle: battle, record: record, stakes: stakes,
+                                                  l: L(lang), artwork: false)
+                    return NSHostingController(rootView: view.frame(width: width))
+                        .sizeThatFits(in: CGSize(width: width, height: 0)).height
+                }
+                let with = least(stakes), bare = least(nil)
+                XCTAssertGreaterThan(with, bare, "\(lang.rawValue) won \(won): the stakes are on the result screen")
+                XCTAssertLessThanOrEqual(with + Self.resultLogMinimum, Self.boardBodyHeight,
+                                         "\(lang.rawValue) won \(won): the result needs \(with)pt plus its log")
+                let view = PracticeResultView(session: session, battle: battle, record: record, stakes: stakes,
+                                              l: L(lang), artwork: false)
+                let host = hostView(view, width: width, height: Self.boardBodyHeight)
+                let name = "practice-03c-result-\(won ? "win" : "fainted")-\(lang.rawValue).png"
+                guard lang == .en else {
+                    let (_, bitmap) = try await waitForText(["%"], in: host)
+                    try save(bitmap, as: name)
+                    continue
+                }
+                let needles = (won ? ["+5M XP", "71%"] : ["Fainted", "Use a Revive"]) + ["Rematch", "Again on auto"]
+                let (text, bitmap) = try await waitForText(needles, in: host)
+                try save(bitmap, as: name)
+                assertRendered(needles, in: text)
+                XCTAssertFalse(Self.normalized(text).contains(Self.normalized("HP left")),
+                               "won \(won): the HP is said once, on the stakes line: \(text)")
+            }
+        }
+    }
+
+    /// Review image only: the status item cannot be hosted in a test, so this draws the menu bar text the app builds
+    /// with the fainted mark, next to a sprite tile at the opacity the app gives a fainted current Pokémon, and the
+    /// tooltip the app sets.
+    func testMenuBarFaintIllustration() async throws {
+        let mark = AppDelegate.faintedMark
+        let lines = AppDelegate.menuLines(["5h 12%", "1.2M"], badge: AppDelegate.menuBadge(practice: nil, fainted: true))
+        XCTAssertEqual(lines.first, "5h 12% " + mark, "the mark follows the first line")
+        let opacity = Double(AppDelegate.statusSpriteOpacity(fainted: true, showsCurrent: true))
+        XCTAssertLessThan(opacity, 1)
+        for lang in [AppLanguage.en, .ko] {
+            let l = L(lang)
+            let tip = AppDelegate.menuToolTip(base: "5h 12% · 1.2M", badge: nil, resultReady: false,
+                                              faintedName: lang == .ko ? "피카츄" : "Pikachu", l: l) ?? ""
+            XCTAssertTrue(tip.contains(l.menuFaintedLine(lang == .ko ? "피카츄" : "Pikachu")))
+            let host = hostView(MenuBarFaintPreview(lines: lines, opacity: opacity, toolTip: tip),
+                                width: 300, height: 92)
+            let (_, bitmap) = try await waitForText(["1.2M"], in: host)
+            try save(bitmap, as: "practice-03c-menubar-\(lang.rawValue).png")
+        }
+    }
+}
+
+/// A bag that holds counts and records each healing use, standing in for the companion store.
+@MainActor
+final class RecordingItemBag: PracticeItemBag {
+    private(set) var counts: [ItemKind: Int]
+    private(set) var uses: [(kind: ItemKind, instanceID: String)] = []
+
+    init(_ counts: [ItemKind: Int]) { self.counts = counts }
+
+    func itemCount(_ kind: ItemKind) -> Int { counts[kind] ?? 0 }
+
+    func useHealingItem(_ kind: ItemKind, on instanceID: String) -> Bool {
+        guard itemCount(kind) > 0 else { return false }
+        counts[kind, default: 0] -= 1
+        uses.append((kind, instanceID))
+        return true
+    }
+}
+
+/// The review illustration of the menu bar while the current Pokémon is fainted (`testMenuBarFaintIllustration`):
+/// the app's own lines and opacity on a menu-bar-like strip, with its tooltip underneath.
+@MainActor
+private struct MenuBarFaintPreview: View {
+    let lines: [String]
+    let opacity: Double
+    let toolTip: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 4) {
+                Image(systemName: "pawprint.fill")
+                    .font(.system(size: 16))
+                    .frame(width: 22, height: 22)
+                    .opacity(opacity)
+                VStack(spacing: 0) {
+                    ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
+                        Text(line).font(.system(size: 10).monospacedDigit())
+                    }
+                }
+            }
+            .padding(.horizontal, 8).padding(.vertical, 2)
+            .frame(height: 24)
+            .background(Color.secondary.opacity(0.15), in: RoundedRectangle(cornerRadius: 4))
+            Text(toolTip)
+                .font(.system(size: 11))
+                .padding(6)
+                .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(8)
+    }
 }
 
 // MARK: Wild stubs

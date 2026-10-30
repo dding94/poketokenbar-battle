@@ -1534,6 +1534,18 @@ struct L {
     }
     /// 가방 사용 컨트롤의 효과 힌트 — 민트("성격 랜덤 변경", 사탕의 "+XP" 자리).
     var mintEffectHint: String { t("성격 랜덤 변경", "Random nature", "せいかくランダム変更", "Naturaleza aleatoria", "Nature aléatoire", "Natureza aleatória", "Zufälliges Wesen", "Случайный характер") }
+    // PR 03C battle items and HP (bag, practice screens, menu bar). RED stubs.
+    func battleItemEffectHint(_ kind: ItemKind) -> String { "" }
+    var battleItemFullHealth: String { "" }
+    var battleItemNeedsRevive: String { "" }
+    var battleItemOnlyFainted: String { "" }
+    var battleHP: String { "" }
+    var battleFainted: String { "" }
+    var ivRerollCurrent: String { "" }
+    var ivRerollMayDrop: String { "" }
+    var ivRerollAction: String { "" }
+    var ivRerollNew: String { "" }
+    func menuFaintedLine(_ name: String) -> String { "" }
 
     // MARK: 상점 (재화 = 사용한 토큰)
     var shop: String { t("상점", "Shop", "ショップ", "Tienda", "Boutique", "Loja", "Laden", "Магазин") }
@@ -1989,4 +2001,16 @@ extension L {
     func practiceStreakContinued(_ streak: Int) -> String { lang == .ko ? "\(streak)연승!" : "\(streak)-win streak!" }
     func practiceStreakEnded(_ streak: Int) -> String { lang == .ko ? "연승 \(streak)에서 멈췄어요" : "Streak ended at \(streak)" }
     var practiceBestStreak: String { lang == .ko ? "최고 기록" : "Personal best" }
+    // PR 03C stakes: healing my entry, the fainted start block, and the result's XP and HP lines. RED stubs.
+    var practiceHeal: String { "" }
+    var practiceHealNone: String { "" }
+    var practiceFaintedBlock: String { "" }
+    func practiceXPGained(xp: Int, winsLeft: Int) -> String { "" }
+    var practiceXPCapReached: String { "" }
+    var practiceXPNoPokemon: String { "" }
+    var practiceXPLoss: String { "" }
+    var practiceXPDraw: String { "" }
+    func practiceHPCarries(_ percent: Int) -> String { "" }
+    var practiceFaintedTitle: String { "" }
+    var practiceFaintedHint: String { "" }
 }
