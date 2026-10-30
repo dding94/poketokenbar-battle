@@ -60,6 +60,19 @@ describe("wrangler config", () => {
     expect(config.migrations).toEqual([{ tag: "v1", new_sqlite_classes: ["League"] }]);
   });
 
+  it("declares the dev environment with its own name and the bindings it does not inherit", () => {
+    const dev = config.env?.dev;
+    expect(dev?.name).toBe("ptb-battle-league-dev");
+    expect(dev?.name).not.toBe(config.name);
+    // Bindings are not inherited by environments; migrations stay at the top level.
+    expect(dev?.durable_objects?.bindings).toEqual([{ name: "LEAGUE", class_name: "League" }]);
+    expect(dev?.migrations ?? config.migrations).toEqual([{ tag: "v1", new_sqlite_classes: ["League"] }]);
+    expect(dev?.workers_dev ?? config.workers_dev).toBe(true);
+    expect(dev?.observability?.enabled).toBe(false);
+    expect(dev?.observability?.logs?.enabled ?? false).toBe(false);
+    expect(Object.keys(config.env ?? {})).toEqual(["dev"]);
+  });
+
   it("holds no secret values", () => {
     expect(config.vars?.OPERATOR_SECRET).toBeUndefined();
     expect(config.vars?.CODE_PEPPER).toBeUndefined();

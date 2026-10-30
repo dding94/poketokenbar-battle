@@ -19,6 +19,7 @@ export const ERROR_STATUS = {
   code_used: 410,
   payload_too_large: 413,
   unsupported_media_type: 415,
+  upgrade_required: 426,
   too_many_attempts: 429,
   internal: 500,
   operator_disabled: 503,

@@ -25,9 +25,9 @@ function next(): number {
   return counter;
 }
 
-/** A client IP no other test uses. */
+/** A client IP no other test uses, in its own IPv6 /64 (attempt limits count per /64). */
 export function freshIp(): string {
-  return `2001:db8:${runTag.slice(0, 4)}:${runTag.slice(4, 8)}::${next().toString(16)}`;
+  return `2001:db8:${runTag.slice(0, 4)}:${next().toString(16)}::1`;
 }
 
 /** An email no other test uses. */
@@ -167,6 +167,22 @@ export async function issueReconnect(hostKey: string, trainerId: string): Promis
   const res = await call("POST", "/v1/reconnect-codes", { key: hostKey, body: { trainerId } });
   expect(res.status, res.text).toBe(200);
   return res.body.reconnectCode;
+}
+
+export async function leaveGroup(key: string): Promise<ApiResponse> {
+  return call("POST", "/v1/leave", { key });
+}
+
+export async function removeMember(hostKey: string, trainerId: string): Promise<ApiResponse> {
+  return call("POST", "/v1/members/remove", { key: hostKey, body: { trainerId } });
+}
+
+export async function transferHost(hostKey: string, trainerId: string): Promise<ApiResponse> {
+  return call("POST", "/v1/host/transfer", { key: hostKey, body: { trainerId } });
+}
+
+export async function reconnectWith(code: string, displayEmail?: string): Promise<ApiResponse> {
+  return call("POST", "/v1/reconnect", { body: displayEmail === undefined ? { reconnectCode: code } : { reconnectCode: code, displayEmail } });
 }
 
 export function leagueStub(): DurableObjectStub<League> {
