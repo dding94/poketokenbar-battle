@@ -173,6 +173,8 @@ final class PracticeStakesSaveTests: XCTestCase {
         let store = CompanionStore(provider: StakesLineProvider(), clock: { stakesNow },
                                    fileURL: fork.appendingPathComponent(UpstreamSaveImport.fileName),
                                    rng: StakesRNG(state: 1), dittoDisguiseRollingEnabled: false)
+        // The imported save itself loaded, not a fresh one that a failed decode would fall back to.
+        XCTAssertEqual(store.state.dex.compactMap(\.profile?.instanceID), ["p"], "the imported save did not load")
         XCTAssertEqual(store.state.battleHealth, [:])
         XCTAssertEqual(store.healthShare(of: "p"), 1)
     }
