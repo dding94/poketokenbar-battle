@@ -1,8 +1,9 @@
 name: CI
 
 # Public since 2026-10-29, so standard runners are free. Pushes to feat/** and pull requests run the
-# app jobs, plus determinism when the engine boundary or this file changed (see `changes`); a dispatch
-# picks the scope. Push and PR events have no inputs, hence the `inputs.<name> || <default>` fallbacks.
+# app jobs unless only server/ changed, determinism when the engine boundary or this file changed, and
+# the server job when server/ changed (see `changes`); a dispatch picks the scope. Push and PR events
+# have no inputs, hence the `inputs.<name> || <default>` fallbacks.
 # A push or PR that changes only docs (docs/**, *.md) runs nothing: no test or script reads them.
 on:
   push:
@@ -36,8 +37,10 @@ jobs:
   # (RENDERING_TESTS) and the identity guard; `rest` skips exactly that regex and runs everything else
   # under the coverage gate. test-union checks that the shards ran every listed test once between them.
   build-test:
-    if: ${{ (inputs.scope || 'app') == 'app' }}
-    name: build-test (${{ matrix.shard }})
+    needs: changes
+    # A dispatch skips `changes` and picks the scope itself; !cancelled() keeps that skipped need from
+    # skipping this job too.
+    if: ${{ !cancelled() && ((github.event_name == 'workflow_dispatch' && inputs.scope == 'app') || needs.changes.outputs.app == 'true') }}
     strategy:
       fail-fast: false
       matrix:
@@ -111,10 +114,10 @@ jobs:
           retention-days: 1
 
   # Fails unless the build-test shards between them ran every test `swift test list` reports, each
-  # exactly once (scripts/check-test-union.sh).
+  # exactly once (scripts/check-test-union.sh). Skipped with build-test, which leaves no logs.
   test-union:
     needs: build-test
-    if: ${{ !cancelled() && (inputs.scope || 'app') == 'app' }}
+    if: ${{ !cancelled() && needs.build-test.result != 'skipped' }}
     name: test-union
     runs-on: ubuntu-latest
     # Seconds of work (a checkout, an artifact download, two sorts); 3 minutes like secret-scan.
@@ -152,21 +155,28 @@ jobs:
           # only docs runs no CI (paths-ignore), so its commits are scanned with the next run instead.
           BASE_REF: ${{ github.event_name == 'push' && needs.changes.outputs.base || '' }}
 
-  # Push and PR runs start determinism only when the engine boundary or this file changed (an edit to
-  # the determinism job, such as its FILTER, has to run it): a PR against its base, a push against the
+  # Decides what a push or PR runs: determinism when the engine boundary or this file changed (an edit
+  # to the determinism job, such as its FILTER, has to run it), the app jobs unless only server/ or docs
+  # changed, and the server job when server/ changed. A PR compares with its base, a push with the
   # newest green push run it builds on (scripts/changed-since-green.sh says why).
   changes:
     if: ${{ github.event_name != 'workflow_dispatch' }}
     name: changes
     runs-on: ubuntu-latest
-    # Seconds of work (a full-history checkout, one API call, one diff); 3 minutes like secret-scan.
+    # Seconds of work (a full-history checkout, three API calls and diffs); 3 minutes like secret-scan.
     timeout-minutes: 3
     permissions:
       contents: read
       actions: read
     outputs:
       engine: ${{ steps.engine.outputs.changed }}
+      app: ${{ steps.app.outputs.changed }}
+      server: ${{ steps.server.outputs.changed }}
       base: ${{ steps.engine.outputs.base }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -176,13 +186,29 @@ jobs:
       # also catches a deleted or renamed file.
       - name: Engine boundary changed
         id: engine
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           ./scripts/changed-since-green.sh engine Package.swift .github/workflows/ci.yml \
             'Sources/PokeTokenBar/Core/Battle*.swift' 'Sources/PokeTokenBar/Core/Practice*.swift'
+
+      # Everything but server/ and docs, so a new top-level path runs the app jobs by default. No Swift
+      # file, Package.swift or script reads server/ (the tests read Sources/, engine/ and scripts/ by
+      # name, 2026-10-30); once one names a server/ path, a server change counts as an app change.
+      - name: App inputs changed
+        id: app
+        run: |
+          if named="$(git grep -n -E '(^|[^A-Za-z0-9_.-])server/|"server"' -- Sources Tests Package.swift scripts)"; then
+            echo "::notice::app code names server/ (${named%%$'\n'*}), so server changes run the app jobs"
+            ./scripts/changed-since-green.sh . ':(exclude)docs' ':(exclude,glob)**/*.md'
+          else
+            ./scripts/changed-since-green.sh . ':(exclude)server' ':(exclude)docs' ':(exclude,glob)**/*.md'
+          fi
+
+      # Only once server/ exists: without a green run to compare with, the answer is "changed", which
+      # would start the server job on a branch that has no server/ yet.
+      - name: Server changed
+        id: server
+        if: hashFiles('server/**') != ''
+        run: ./scripts/changed-since-green.sh server
 
   determinism:
     needs: changes
@@ -219,3 +245,25 @@ jobs:
         if: ${{ (inputs.scope || 'engine') == 'engine' }}
         working-directory: engine
         run: npm test && npm run corpus && npm run compatibility
+
+  # The battle server (PR 04; contract in docs/BATTLE_PLAN.md, Appendix B), a Node project of its own.
+  server:
+    needs: changes
+    if: ${{ needs.changes.outputs.server == 'true' }}
+    name: server
+    runs-on: ubuntu-latest
+    # No green run to size this from until server/ lands; then set it to about 1.5x the slowest one.
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.14.0'
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+      - name: Install pinned dependencies
+        run: npm ci --prefix server
+      - name: Typecheck
+        run: npm run typecheck --prefix server
+      - name: Worker and League tests in workerd
+        run: npm test --prefix server
