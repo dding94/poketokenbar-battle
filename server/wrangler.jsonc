@@ -1,0 +1,15 @@
+// Local and test configuration only. PR 04 does not deploy; see README.md.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "ptb-battle-league",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-01",
+  "workers_dev": true,
+  "durable_objects": {
+    "bindings": [{ "name": "LEAGUE", "class_name": "League" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["League"] }],
+  // Workers Logs stay off until PR 05 checks what would actually be recorded.
+  "observability": { "enabled": false, "logs": { "enabled": false } }
+  // Secrets OPERATOR_SECRET and CODE_PEPPER are never written here.
+}

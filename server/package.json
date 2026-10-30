@@ -1,0 +1,19 @@
+{
+  "name": "ptb-battle-server",
+  "version": "0.0.0",
+  "private": true,
+  "description": "PokeTokenBar Battle league server (Cloudflare Worker + League Durable Object). Not deployed from this package.",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "0.23.0",
+    "@cloudflare/workers-types": "5.20260815.1",
+    "typescript": "7.0.2",
+    "vitest": "4.1.12",
+    "wrangler": "4.124.0"
+  }
+}
