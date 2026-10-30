@@ -46,10 +46,10 @@ jobs:
     # (swift-tools-version: 6.0, platform macOS 15). Its Swift 6.1 is also the strictest compiler we
     # build with, so isolation errors that newer Swift accepts still fail here.
     runs-on: macos-15
-    # About 1.5x the slower shard (451 s, 2026-10-30). Runners vary up to ~1.6x on the same commit.
+    # About 1.5x the slowest shard (rest, 517 s, 2026-10-30). Runners vary up to ~1.6x on the same commit.
     # A job that runs out shows as "cancelled", like a newer run on the same ref would; recheck this
     # budget when a suite is added.
-    timeout-minutes: 12
+    timeout-minutes: 13
     env:
       # About 210 s of the 480 s suite on 2026-10-30 (SnapshotHistory ~175 s, DexBack ~35 s). They
       # leave the coverage gate; PracticeScreenRenderingTests stays in `rest` for the practice files.
