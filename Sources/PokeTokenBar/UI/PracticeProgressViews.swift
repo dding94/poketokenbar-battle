@@ -16,26 +16,19 @@ struct PracticeSelectionProgress {
     /// HP shares of my own Pokémon by candidate id (`PracticeSession.healthShare(of:)`, PR 03C); wild and today's
     /// opponents have none.
     var health: [String: Double] = [:]
-    /// The start is refused: a fainted entry against a wild or today's opponent. Sparring stays open.
+    /// The start is refused (`PracticeSession.startBlock == .fainted`): a fainted entry against a wild or today's
+    /// opponent. Sparring stays open.
     var faintedBlock = false
 }
 
 extension PracticeSelectionProgress {
-    /// A fainted entry may only spar: a wild or today's opponent is refused (PR 03C). Without stakes (no HP) nothing is.
-    static func blocksStart(playerShare: Double?, opponent: PracticeCandidate?) -> Bool {
-        guard let playerShare, playerShare <= 0, let opponent else { return false }
-        return opponent.origin.wildTraits != nil
-    }
-
     @MainActor init(_ session: PracticeSession) {
         var health: [String: Double] = [:]
         for candidate in session.roster?.eligible ?? [] {
             if let share = session.healthShare(of: candidate) { health[candidate.id] = share }
         }
-        // Core will report its own start block for a fainted entry; until then the same rule is read off the HP.
-        let blocked = Self.blocksStart(playerShare: session.player.flatMap { health[$0.id] }, opponent: session.opponent)
         self.init(records: session.records, daily: session.dailyCandidate, dailyState: session.dailyState,
-                  todayStars: session.todayStars, health: health, faintedBlock: blocked)
+                  todayStars: session.todayStars, health: health, faintedBlock: session.startBlock == .fainted)
     }
 }
 

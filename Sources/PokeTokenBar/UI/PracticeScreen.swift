@@ -88,10 +88,22 @@ struct PracticeScreen: View {
         return l.practiceTitle
     }
 
-    /// Selection and result: practice keeps its own record and never touches the save. Manual battle: turn and
-    /// seconds left. Automatic battle: "Auto".
+    /// Whether the selection or the result is about a battle with stakes (PR 03C): the selected opponent on the
+    /// selection screen (`PracticeStakes.hold(against:)`), the battle that ended on the result screen (`lastStakes`).
+    static func showsStakes(onResult: Bool, opponent: PracticeCandidate?, lastStakes: PracticeStakesUpdate?) -> Bool {
+        onResult ? lastStakes != nil : opponent.map(PracticeStakes.hold(against:)) ?? false
+    }
+
+    private var stakes: Bool {
+        var onResult = false
+        if case .result = stage { onResult = true }
+        return Self.showsStakes(onResult: onResult, opponent: session.opponent, lastStakes: session.lastStakes)
+    }
+
+    /// Selection and result: sparring leaves the save untouched, a battle with stakes keeps the HP it costs. Manual
+    /// battle: turn and seconds left. Automatic battle: "Auto".
     private var statusCapsule: some View {
-        var text = l.practiceSaveUntouched
+        var text = stakes ? l.practiceStakesCapsule : l.practiceSaveUntouched
         var urgent = false
         if case .battle(let battle) = stage, battle.phase == .running {
             if session.mode == .automatic {
@@ -121,7 +133,7 @@ struct PracticeScreen: View {
         switch stage {
         case .selection: text = l.practiceRules
         case .battle: text = l.practiceCaptionBattle
-        case .result: text = l.practiceCaptionResult
+        case .result: text = stakes ? l.practiceCaptionResultStakes : l.practiceCaptionResult
         }
         return Label(text, systemImage: "lock.shield")
             .font(.system(size: 11))

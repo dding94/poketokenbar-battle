@@ -53,11 +53,13 @@ final class PracticeScreenRenderingTests: XCTestCase {
 
     /// The selection screen searches wild opponents on appear. Tests never reach PokéAPI: by default the search
     /// fails as if offline, which keeps the owned-opponent tests on their own data with a compact wild section.
+    /// `effects` gives battles with stakes HP and XP (PR 03C); without it nothing changes outside the session.
     private func makeSession(_ state: CompanionState = syntheticState(),
                              wildSource: PracticeWildSource = PracticeWildSource(provider: OfflineWildProvider(),
-                                                                                 details: OfflineWildProvider())) -> PracticeSession {
+                                                                                 details: OfflineWildProvider()),
+                             effects: (any PracticeBattleEffects)? = nil) -> PracticeSession {
         let session = PracticeSession(engineURL: Self.engineURL, clock: { self.now }, drivesAutomatically: false,
-                                      wildSource: wildSource, wildSeed: { 0x5EED })
+                                      wildSource: wildSource, wildSeed: { 0x5EED }, effects: effects)
         session.prepare(state: state, activeName: nil)
         return session
     }
@@ -1065,8 +1067,8 @@ final class PracticeScreenRenderingTests: XCTestCase {
     }
 
     /// A companion store on a temp file: Pikachu is the current Pokémon with known IVs, and the four battle items
-    /// are in the bag. HP is whatever the store reports for a fresh save.
-    private func battleItemStore(language: AppLanguage) throws -> CompanionStore {
+    /// are in the bag. `health` is Pikachu's HP share in the save (`CompanionState.battleHealth`); full keeps no entry.
+    private func battleItemStore(language: AppLanguage, health: Double = 1) throws -> CompanionStore {
         let suite = "PracticeBag-\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         let file = FileManager.default.temporaryDirectory.appendingPathComponent("\(suite).json")
@@ -1083,9 +1085,62 @@ final class PracticeScreenRenderingTests: XCTestCase {
                                 totalForms: 1, nature: .hardy, profile: profile)
         state.inventory = [ItemKind.potion.rawValue: 2, ItemKind.hyperPotion.rawValue: 1, ItemKind.revive.rawValue: 1,
                            ItemKind.ivReroll.rawValue: 1]
+        if health < 1 { state.battleHealth = [profile.instanceID: health] }
         state.language = language
         try JSONEncoder().encode(state).write(to: file)
         return CompanionStore(provider: OfflineWildProvider(), fileURL: file, defaults: defaults)
+    }
+
+    /// The bag's verdict (`BattleItemUse`) and the store's own rule (`CompanionStore.useHealingItem`) agree for every
+    /// healing item at full, hurt and fainted HP, so Use is offered exactly when it works; the reroll needs only a
+    /// hatched Pokémon, fainted or not.
+    func testBattleItemUseMatchesTheStore() throws {
+        for kind in [ItemKind.potion, .hyperPotion, .revive] {
+            for share in [1.0, 0.4, 0] {
+                let store = try battleItemStore(language: .en, health: share)
+                XCTAssertEqual(store.currentHealthShare, share, "the save holds Pikachu's HP")
+                let offered = BattleItemUse(kind, count: store.itemCount(kind), healthShare: store.currentHealthShare) == .usable
+                let id = try XCTUnwrap(store.currentInstanceID)
+                XCTAssertEqual(store.useHealingItem(kind, on: id), offered, "\(kind) at HP \(share)")
+            }
+        }
+        let store = try battleItemStore(language: .en, health: 0)
+        let offered = BattleItemUse(.ivReroll, count: store.itemCount(.ivReroll), healthShare: store.currentHealthShare) == .usable
+        XCTAssertTrue(offered)
+        XCTAssertEqual(store.useIVReroll() != nil, offered)
+    }
+
+    /// The selection reads HP and the start block off the session (Core's `healthShare(of:)` and `startBlock`): my own
+    /// Pokémon have HP, wild ones none, and a fainted entry is blocked against a wild opponent but may still spar.
+    func testSelectionReadsHPAndTheStartBlockOffTheSession() async throws {
+        let effects = RecordingBattleEffects()
+        let session = makeSession(Self.stagedState(),
+                                  wildSource: PracticeWildSource(provider: WildLineProvider(), details: WildLineProvider()),
+                                  effects: effects)
+        let pikachu = try XCTUnwrap(session.player), magikarp = try XCTUnwrap(session.opponent)
+        effects.health = [pikachu.id: 0.63, magikarp.id: 0]
+        let sparring = PracticeSelectionProgress(session)
+        XCTAssertEqual(sparring.health[pikachu.id], 0.63)
+        XCTAssertEqual(sparring.health[magikarp.id], 0)
+        XCTAssertFalse(sparring.faintedBlock, "sparring a fainted Pokémon of my own")
+
+        session.findWildOpponents()
+        try await waitForWild(session) { $0 == .ready }
+        let wild = try XCTUnwrap(session.wildCandidates.first, "no wild opponent")
+        session.opponentID = wild.id
+        let hurt = PracticeSelectionProgress(session)
+        XCTAssertNil(hurt.health[wild.id], "a wild opponent has no HP to keep")
+        XCTAssertFalse(hurt.faintedBlock, "hurt is not fainted")
+
+        effects.health[pikachu.id] = 0
+        let fainted = PracticeSelectionProgress(session)
+        XCTAssertEqual(session.startBlock, .fainted)
+        XCTAssertTrue(fainted.faintedBlock)
+        XCTAssertFalse(PracticeSelectionView.canStart(player: session.player, opponent: session.opponent,
+                                                      faintedBlock: fainted.faintedBlock))
+
+        session.opponentID = magikarp.id
+        XCTAssertFalse(PracticeSelectionProgress(session).faintedBlock, "sparring stays open while fainted")
     }
 
     /// HP as a bar with its percentage, or a "Fainted" tag at 0.
@@ -1199,9 +1254,11 @@ final class PracticeScreenRenderingTests: XCTestCase {
     /// My hurt entry shows its HP and the Heal control; a fainted owned Pokémon is drawn apart from a healthy one and
     /// can still be sparred with. The rows with HP fit the column in both languages.
     func testSelectionShowsHurtAndFaintedPokemon() async throws {
-        let session = makeSession(Self.stagedState())
+        let effects = RecordingBattleEffects()
+        let session = makeSession(Self.stagedState(), effects: effects)
         let pikachu = try XCTUnwrap(session.player), magikarp = try XCTUnwrap(session.opponent)
-        let progress = PracticeSelectionProgress(health: [pikachu.id: 0.63, magikarp.id: 0])
+        effects.health = [pikachu.id: 0.63, magikarp.id: 0]
+        let progress = PracticeSelectionProgress(session)
         let bag = RecordingItemBag([.potion: 2, .hyperPotion: 1])
         for lang in [AppLanguage.en, .ko] {
             let view = PracticeSelectionView(session: session, progress: progress, l: L(lang), artwork: false, bag: bag)
@@ -1243,16 +1300,19 @@ final class PracticeScreenRenderingTests: XCTestCase {
     /// A fainted entry cannot start against a wild opponent: Start is refused and the line above it says why. The
     /// Heal control offers the Revive.
     func testFaintedEntryCannotStartAgainstAWildOpponent() async throws {
+        let effects = RecordingBattleEffects()
         let session = makeSession(Self.stagedState(),
-                                  wildSource: PracticeWildSource(provider: WildLineProvider(), details: WildLineProvider()))
+                                  wildSource: PracticeWildSource(provider: WildLineProvider(), details: WildLineProvider()),
+                                  effects: effects)
         session.findWildOpponents()
         try await waitForWild(session) { $0 == .ready }
         let wild = try XCTUnwrap(session.wildCandidates.first, "no wild opponent")
         session.opponentID = wild.id
         let pikachu = try XCTUnwrap(session.player)
-        let blocked = PracticeSelectionProgress.blocksStart(playerShare: 0, opponent: session.opponent)
-        XCTAssertTrue(blocked, "a fainted entry against a wild opponent")
-        let progress = PracticeSelectionProgress(health: [pikachu.id: 0], faintedBlock: blocked)
+        effects.health = [pikachu.id: 0]
+        XCTAssertEqual(session.startBlock, .fainted, "a fainted entry against a wild opponent")
+        let progress = PracticeSelectionProgress(session)
+        XCTAssertTrue(progress.faintedBlock)
         XCTAssertFalse(PracticeSelectionView.canStart(player: session.player, opponent: session.opponent,
                                                       faintedBlock: progress.faintedBlock))
         let bag = RecordingItemBag([.revive: 1, .potion: 3])
@@ -1361,6 +1421,20 @@ final class PracticeScreenRenderingTests: XCTestCase {
             try save(bitmap, as: "practice-03c-menubar-\(lang.rawValue).png")
         }
     }
+}
+
+/// HP between battles by instance id (absent = full) and the XP granted, standing in for the companion store's
+/// `PracticeBattleEffects`.
+@MainActor
+final class RecordingBattleEffects: PracticeBattleEffects {
+    var health: [String: Double]
+    private(set) var grantedXP: [Int] = []
+
+    init(_ health: [String: Double] = [:]) { self.health = health }
+
+    func healthShare(of instanceID: String) -> Double { health[instanceID] ?? 1 }
+    func setHealthShare(_ share: Double, of instanceID: String) { health[instanceID] = share }
+    func grantBattleXP(_ xp: Int) -> Bool { grantedXP.append(xp); return true }
 }
 
 /// A bag that holds counts and records each healing use, standing in for the companion store.

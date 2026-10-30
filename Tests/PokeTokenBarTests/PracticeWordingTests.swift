@@ -333,24 +333,35 @@ final class PracticeWordingTests: XCTestCase {
         XCTAssertTrue(PracticeHealControl.options(share: 0, counts: [.potion: 4]).isEmpty, "a Potion cannot wake a fainted one")
     }
 
-    /// Only a fainted entry against a wild or today's opponent is refused; sparring and a hurt entry are not.
-    func testFaintedEntryMayOnlySpar() {
+    /// Start needs both sides and no fainted block. The block itself is Core's (`PracticeSession.startBlock`); the
+    /// selection reads it through `PracticeSelectionProgress` (wired in the rendering tests).
+    func testStartNeedsAPairAndNoFaintedBlock() {
         let owned = PracticeCandidate(id: "owned", name: "o", snapshot: nil, blockedReason: nil)
         let wild = PracticeCandidate(id: "wild", name: "w", snapshot: nil, blockedReason: nil,
                                      origin: .wild(rarity: .common, shiny: false))
-        let daily = PracticeCandidate(id: PracticeDaily.idPrefix + "2026-10-30", name: "d", snapshot: nil, blockedReason: nil,
-                                      origin: .wild(rarity: .rare, shiny: false))
-        XCTAssertTrue(PracticeSelectionProgress.blocksStart(playerShare: 0, opponent: wild))
-        XCTAssertTrue(PracticeSelectionProgress.blocksStart(playerShare: 0, opponent: daily))
-        XCTAssertFalse(PracticeSelectionProgress.blocksStart(playerShare: 0, opponent: owned), "sparring stays open")
-        XCTAssertFalse(PracticeSelectionProgress.blocksStart(playerShare: 0.2, opponent: wild), "hurt is not fainted")
-        XCTAssertFalse(PracticeSelectionProgress.blocksStart(playerShare: nil, opponent: wild), "no stakes, no block")
-        XCTAssertFalse(PracticeSelectionProgress.blocksStart(playerShare: 0, opponent: nil))
-
         XCTAssertTrue(PracticeSelectionView.canStart(player: owned, opponent: wild, faintedBlock: false))
         XCTAssertFalse(PracticeSelectionView.canStart(player: owned, opponent: wild, faintedBlock: true))
         XCTAssertFalse(PracticeSelectionView.canStart(player: nil, opponent: wild, faintedBlock: false))
         XCTAssertFalse(PracticeSelectionView.canStart(player: owned, opponent: nil, faintedBlock: false))
+    }
+
+    /// Sparring leaves the save alone, a battle with stakes keeps the HP it costs (the battle's first log line says
+    /// the same): the selection asks about the selected opponent, the result about the battle that ended.
+    func testStakesAwareSaveNote() {
+        let owned = PracticeCandidate(id: "owned", name: "o", snapshot: nil, blockedReason: nil)
+        let wild = PracticeCandidate(id: "wild", name: "w", snapshot: nil, blockedReason: nil,
+                                     origin: .wild(rarity: .common, shiny: false))
+        let stakes = PracticeStakesUpdate(healthShare: 0.5, xp: 0, xpWinsLeft: 3)
+        XCTAssertTrue(PracticeScreen.showsStakes(onResult: false, opponent: wild, lastStakes: nil))
+        XCTAssertFalse(PracticeScreen.showsStakes(onResult: false, opponent: owned, lastStakes: stakes), "sparring is picked")
+        XCTAssertFalse(PracticeScreen.showsStakes(onResult: false, opponent: nil, lastStakes: nil))
+        XCTAssertTrue(PracticeScreen.showsStakes(onResult: true, opponent: owned, lastStakes: stakes),
+                      "the result follows the battle that ended, not the selection")
+        XCTAssertFalse(PracticeScreen.showsStakes(onResult: true, opponent: wild, lastStakes: nil))
+        XCTAssertEqual(L(.ko).practiceStakesCapsule, "깎인 체력은 남아요")
+        XCTAssertEqual(L(.en).practiceStakesCapsule, "Lost HP stays")
+        XCTAssertEqual(L(.ko).practiceCaptionResultStakes, "깎인 체력은 배틀이 끝나도 남아요 · 200턴이 지나면 무승부")
+        XCTAssertEqual(L(.en).practiceCaptionResultStakes, "Lost HP stays after the battle · draw at 200 turns")
     }
 
     /// Healing from the selection screen uses the item on my entry's individual, never on the current Pokémon.

@@ -2102,6 +2102,12 @@ extension L {
     func practiceHPCarries(_ percent: Int) -> String {
         lang == .ko ? "\(percent)% · 다음 판까지 남아요" : "\(percent)% · stays for your next battle"
     }
+    /// A battle with stakes keeps the HP it costs, like the battle's first log line says; sparring keeps
+    /// `practiceSaveUntouched` and `practiceCaptionResult`.
+    var practiceStakesCapsule: String { lang == .ko ? "깎인 체력은 남아요" : "Lost HP stays" }
+    var practiceCaptionResultStakes: String {
+        lang == .ko ? "깎인 체력은 배틀이 끝나도 남아요 · 200턴이 지나면 무승부" : "Lost HP stays after the battle · draw at 200 turns"
+    }
     var practiceFaintedTitle: String { lang == .ko ? "기절했어요" : "Fainted" }
     var practiceFaintedHint: String {
         let revive = itemName(.revive)
