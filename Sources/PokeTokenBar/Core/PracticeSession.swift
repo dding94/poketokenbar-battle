@@ -338,6 +338,8 @@ final class PracticeSession {
     /// replaces is cancelled, which is not counted (`forfeit` is the way to give up). Nothing starts while
     /// `startBlock` says why not.
     func start() {
+        // Mine fight as the save has them now: a win's XP, an evolution or an IV reroll since `prepare` included.
+        refreshRoster()
         guard let engine, let player, let opponent, player.id != opponent.id, startBlock == nil else { return }
         // A reroll or today's opponent still in flight would replace the candidate under this battle's opponent.
         stopWildSearch(); stopDailySearch()
@@ -469,7 +471,18 @@ final class PracticeSession {
         lastRecord = records.record(outcome, dailyDay: PracticeDaily.dayKey(ofCandidateID: battle.opponent?.id),
                                     turns: turns, playerHPShare: playerHPShare)
         lastStakes = settleStakes(of: battle, outcome: outcome, healthLeft: healthLeft)
+        // The XP may have grown or evolved the current Pokémon; the selection and the wild search read the roster.
+        if (lastStakes?.xp ?? 0) > 0 { refreshRoster() }
         recordStore.persist(records)
+    }
+    /// Rebuilds the roster from the save as it is now (`PracticeBattleEffects.companionState`), keeping the
+    /// selection: an individual keeps its id through growth, evolution and graduation. Without `effects`, or from a
+    /// stand-in that keeps no save, the roster `prepare` built stays. A battle keeps the pair it started with.
+    private func refreshRoster() {
+        guard let engine, let now = effects?.companionState() else { return }
+        let roster = PracticeRoster(state: now.state, activeName: now.activeName, engine: engine)
+        self.roster = roster
+        loadHints(engine: engine, roster: roster)
     }
     /// A battle against a wild opponent or today's opponent leaves the player with the HP it has left (0 after a loss:
     /// fainted) and pays a win with growth XP for the current Pokémon, whoever fought, up to

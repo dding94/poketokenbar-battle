@@ -16,4 +16,8 @@ protocol PracticeBattleEffects: AnyObject {
     /// The individual a running battle with stakes holds, or nil once none runs. The battle owns that HP until its
     /// end sets it, so nothing may heal the individual meanwhile. In memory only, never saved.
     func setInBattle(_ instanceID: String?)
+    /// The save as it is now, a value copy, with the current Pokémon's name as the app shows it: what the session
+    /// rebuilds its roster from, so growth, an evolution or an IV reroll since the practice screen opened reaches the
+    /// next battle. nil from a stand-in that keeps no save; the roster `prepare` built then stays.
+    func companionState() -> (state: CompanionState, activeName: String?)?
 }

@@ -2185,6 +2185,9 @@ extension CompanionStore: PracticeBattleEffects {
         return true
     }
 
+    /// The save as it is now and the current Pokémon's name, as the popover hands them to `PracticeSession.prepare`.
+    func companionState() -> (state: CompanionState, activeName: String?)? { (state, displayName) }
+
     /// Marks the individual a running battle with stakes holds, or none; the session says it after every turn.
     /// Unchanged, it leaves the property alone: `@Observable` from Swift 6.2 skips an equal value by itself, older
     /// toolchains would redraw the screens observing it on every turn.

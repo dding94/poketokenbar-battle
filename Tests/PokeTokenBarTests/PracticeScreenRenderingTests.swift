@@ -1525,6 +1525,8 @@ final class RecordingBattleEffects: PracticeBattleEffects {
     func grantBattleXP(_ xp: Int) -> Bool { grantedXP.append(xp); return true }
     /// No healing rules here, so nothing to hold.
     func setInBattle(_ instanceID: String?) {}
+    /// No save here: the session keeps the roster `prepare` built.
+    func companionState() -> (state: CompanionState, activeName: String?)? { nil }
 }
 
 /// A bag that holds counts and records each healing use, standing in for the companion store.

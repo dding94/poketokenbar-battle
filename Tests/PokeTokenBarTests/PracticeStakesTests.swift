@@ -83,6 +83,9 @@ private final class StakesEffects: PracticeBattleEffects {
     private(set) var grants: [Int] = []
     /// The individual the session last said a running battle with stakes holds.
     private(set) var inBattle: String?
+    /// The save the session rebuilds its roster from (`stakesSession` gives it the prepared one); nil keeps the
+    /// prepared roster.
+    var state: CompanionState?
     func healthShare(of instanceID: String) -> Double { shares[instanceID] ?? 1 }
     func setHealthShare(_ share: Double, of instanceID: String) { shares[instanceID] = share; writes += 1 }
     func grantBattleXP(_ xp: Int) -> Bool {
@@ -91,6 +94,7 @@ private final class StakesEffects: PracticeBattleEffects {
         return true
     }
     func setInBattle(_ instanceID: String?) { inBattle = instanceID }
+    func companionState() -> (state: CompanionState, activeName: String?)? { state.map { ($0, nil) } }
 }
 
 /// The wall clock the session reads for the day; tests move it.
@@ -109,7 +113,9 @@ private func stakesSession(_ specs: [StakesSpec], wild: StakesWildStub, effects:
     let session = PracticeSession(engineURL: stakesEngineURL, clock: { 0 }, drivesAutomatically: false,
                                   wildSource: PracticeWildSource(provider: wild, details: wild), wildSeed: { 11 },
                                   recordStore: recordStore, now: { today.date }, calendar: stakesUTC, effects: effects)
-    session.prepare(state: stakesState(specs), activeName: nil)
+    let state = stakesState(specs)
+    (effects as? StakesEffects)?.state = state   // every start rebuilds the roster from the same save, like the app
+    session.prepare(state: state, activeName: nil)
     return session
 }
 
