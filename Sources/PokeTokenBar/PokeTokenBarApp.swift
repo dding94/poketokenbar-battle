@@ -126,7 +126,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         companion = CompanionStore()
         // 연습전 세션은 앱 수명 소유 — 팝오버 호스팅 트리는 닫힐 때마다 버려진다.
         practice = PracticeSession(engineURL: Bundle.main.url(forResource: "battle-engine", withExtension: "js"),
-                                   recordStore: PracticeRecordStore(fileURL: AppStatePaths.directory().appendingPathComponent("practice-records.json")))
+                                   recordStore: PracticeRecordStore(fileURL: AppStatePaths.directory().appendingPathComponent("practice-records.json")),
+                                   effects: companion)
         onOpenPractice = { [weak self] in self?.showPopover { $0.showingPractice = true } }   // 창 없이 팝오버로
         Task { await companion.preparePokemonProfiles() }
         updater = UpdateChecker()

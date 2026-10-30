@@ -20,8 +20,9 @@ enum PracticePauseReason: Hashable, CaseIterable, Sendable {
 ///
 /// The popover discards its hosting tree on every close, so view `@State` and `.task` loops cannot hold
 /// a battle. The selection, the battle and its driver live here; `AppDelegate` owns one instance and
-/// injects it into the popover environment. Read-only like `PracticeBattle`: it never writes the save,
-/// growth or ownership. Its one write is the practice records, through `PracticeRecordStore`.
+/// injects it into the popover environment. It never writes the save itself: a battle with stakes changes HP and
+/// growth through `PracticeBattleEffects` (the app's `CompanionStore`), and the practice records go through
+/// `PracticeRecordStore`.
 @MainActor @Observable
 final class PracticeSession {
     /// Built by `prepare` from a value copy of the save; nil until then or after `releaseIfIdle`.
@@ -80,8 +81,16 @@ final class PracticeSession {
     private(set) var lastStakes: PracticeStakesUpdate?
     /// The individual's HP share between battles (0 = fainted); nil for wild and today's opponents and without
     /// `effects`.
-    func healthShare(of candidate: PracticeCandidate) -> Double? { nil }   // contract stub
-    var startBlock: PracticeStartBlock? { nil }   // RED stub
+    func healthShare(of candidate: PracticeCandidate) -> Double? {
+        guard let effects, candidate.origin == .owned else { return nil }
+        return effects.healthShare(of: candidate.id)
+    }
+    /// Why `start()` would do nothing for the current selection: a fainted player can't face a wild or today's
+    /// opponent until it is healed. Sparring stays open. nil when it can start.
+    var startBlock: PracticeStartBlock? {
+        guard let player, let opponent, PracticeStakes.hold(against: opponent), healthShare(of: player) == 0 else { return nil }
+        return .fainted
+    }
     /// The battle that just ended, for the result screen; nil until one ends.
     private(set) var lastRecord: PracticeRecordUpdate?
     /// Today's opponent for the current player (`PracticeDaily`); never saved. Its id is "daily-<day>".
@@ -326,12 +335,13 @@ final class PracticeSession {
         playerID = player; opponentID = opponent
     }
     /// Starts a battle with the current selection and mode; a rematch is the same call. A running battle it
-    /// replaces is cancelled, which is not counted (`forfeit` is the way to give up).
+    /// replaces is cancelled, which is not counted (`forfeit` is the way to give up). Nothing starts while
+    /// `startBlock` says why not.
     func start() {
-        guard let engine, let player, let opponent, player.id != opponent.id else { return }
+        guard let engine, let player, let opponent, player.id != opponent.id, startBlock == nil else { return }
         // A reroll or today's opponent still in flight would replace the candidate under this battle's opponent.
         stopWildSearch(); stopDailySearch()
-        stopDriver(); battle?.cancel(); dropPlayback(); lastRecord = nil
+        stopDriver(); battle?.cancel(); dropPlayback(); lastRecord = nil; lastStakes = nil
         let next = PracticeBattle(engine: engine, clock: clock)
         battle = next
         next.start(player: player, opponent: opponent, mode: mode)
@@ -349,10 +359,13 @@ final class PracticeSession {
         refreshHold()
     }
     /// Gives up the running battle and returns to the selection screen. Giving up a running battle is a loss; the
-    /// failure screen leaves through here too, and a failed or finished battle has nothing left to give up.
+    /// failure screen leaves through here too, and a failed or finished battle has nothing left to give up. With
+    /// stakes it is running away: the player keeps the HP it has left now, never fainting from it, and earns no XP.
     func forfeit() {
-        // Turns and HP only count towards a win's stars.
-        if let battle, battle.phase == .running { record(.loss, against: battle.opponent, turns: 0, playerHPShare: 0) }
+        if let battle, battle.phase == .running {
+            // Turns and HP only count towards a win's stars.
+            record(.loss, of: battle, turns: 0, playerHPShare: 0, healthLeft: battle.view?.p1.hpShare)
+        }
         stopDriver(); battle?.cancel(); battle = nil; dropPlayback(); resultSeen = true
     }
     /// Leaves a finished battle for the selection screen (to pick another opponent).
@@ -435,19 +448,39 @@ final class PracticeSession {
         stageEvents()
         guard battle.phase == .finished else { return }
         resultSeen = false
-        // A finished battle has its result and its final view (`PracticeBattle.refresh`).
+        // A finished battle has its result and its final view (`PracticeBattle.refresh`); p1's HP there is exact.
         if let result = battle.result, let view = battle.view {
-            record(PracticeOutcome(winner: result.winner), against: battle.opponent, turns: view.turn,
-                   playerHPShare: view.p1.hpShare)
+            record(PracticeOutcome(winner: result.winner), of: battle, turns: view.turn, playerHPShare: view.p1.hpShare,
+                   healthLeft: view.p1.hpShare)
         }
     }
-    /// Counts an ended battle against the opponent it started with, keeps what changed for the result screen and
-    /// writes the records. Today's opponent is known by its id, which carries its day.
-    private func record(_ outcome: PracticeOutcome, against opponent: PracticeCandidate?, turns: Int,
-                        playerHPShare: Double) {
-        lastRecord = records.record(outcome, dailyDay: PracticeDaily.dayKey(ofCandidateID: opponent?.id),
+    /// Counts an ended battle against the pair it started with, settles its stakes, keeps what changed for the result
+    /// screen and writes the records. Today's opponent is known by its id, which carries its day.
+    private func record(_ outcome: PracticeOutcome, of battle: PracticeBattle, turns: Int, playerHPShare: Double,
+                        healthLeft: Double?) {
+        lastRecord = records.record(outcome, dailyDay: PracticeDaily.dayKey(ofCandidateID: battle.opponent?.id),
                                     turns: turns, playerHPShare: playerHPShare)
+        lastStakes = settleStakes(of: battle, outcome: outcome, healthLeft: healthLeft)
         recordStore.persist(records)
+    }
+    /// A battle against a wild opponent or today's opponent leaves the player with the HP it has left (0 after a loss:
+    /// fainted) and pays a win with growth XP for the current Pokémon, whoever fought, up to
+    /// `PracticeStakes.dailyXPWins` a local day. Sparring, or a session without `effects`, changes nothing outside the
+    /// session.
+    private func settleStakes(of battle: PracticeBattle, outcome: PracticeOutcome,
+                              healthLeft: Double?) -> PracticeStakesUpdate? {
+        guard let effects, let player = battle.player, let opponent = battle.opponent,
+              PracticeStakes.hold(against: opponent), let healthLeft else { return nil }
+        effects.setHealthShare(healthLeft, of: player.id)
+        let day = today
+        var xp = 0
+        if outcome == .win, records.xpWins(on: day) < PracticeStakes.dailyXPWins,
+           effects.grantBattleXP(PracticeStakes.winXP) {
+            records.countXPWin(on: day)
+            xp = PracticeStakes.winXP
+        }
+        return PracticeStakesUpdate(healthShare: healthLeft, xp: xp,
+                                    xpWinsLeft: max(0, PracticeStakes.dailyXPWins - records.xpWins(on: day)))
     }
     /// Hands the playback the events the engine added since the last call. A hidden screen plays nothing.
     private func stageEvents() {

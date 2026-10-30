@@ -75,6 +75,19 @@ enum PracticeStakes {
     static let winXP = 5_000_000
     /// Wins per local day that pay XP.
     static let dailyXPWins = 10
+
+    /// Stakes hold in a battle against a wild opponent or today's opponent; sparring between own Pokémon has none.
+    static func hold(against opponent: PracticeCandidate) -> Bool { opponent.origin != .owned }
+}
+
+extension PracticeRecords {
+    /// The XP-paying wins counted on `day`: none on another day, which is how the count starts over at midnight.
+    func xpWins(on day: String) -> Int { xpDay == day ? xpWins ?? 0 : 0 }
+    /// Counts one XP-paying win on `day`, starting the day's count when it is a new one.
+    mutating func countXPWin(on day: String) {
+        xpWins = xpWins(on: day) + 1
+        xpDay = day
+    }
 }
 
 /// Why the selection can't start a battle (`PracticeSession.startBlock`).
