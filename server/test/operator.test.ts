@@ -113,6 +113,31 @@ describe("POST /v1/operator/host-reconnect", () => {
     expect((await call("GET", "/v1/me", { key: host.accessKey })).status).toBe(200);
   });
 
+  it("leaves a pending host-issued code alone when the secret is wrong or the group unknown", async () => {
+    const { host, members } = await setupGroup(1);
+    const heir = members[0]!;
+    const res = await call("POST", "/v1/reconnect-codes", { key: host.accessKey, body: { trainerId: heir.trainerId } });
+    expect(res.status, res.text).toBe(200);
+    const pending = res.body.reconnectCode;
+    // The code's trainer becomes the current host, the one the operator path would target.
+    expect((await call("POST", "/v1/host/transfer", { key: host.accessKey, body: { trainerId: heir.trainerId } })).status).toBe(200);
+
+    expectError(await hostReconnect(host.groupId, { secret: WRONG }), 403, "operator_denied");
+    expectError(await hostReconnect("gr_missing"), 404, "not_found");
+
+    const back = await redeem(pending);
+    expect(back.status, back.text).toBe(200);
+    expect(back.body.trainer).toMatchObject({ trainerId: heir.trainerId, role: "host" });
+  });
+
+  it("leaves a pending operator code alone when a later call is refused", async () => {
+    const { host } = await setupGroup(0);
+    const pending = (await hostReconnect(host.groupId)).body.reconnectCode;
+    expectError(await hostReconnect(host.groupId, { secret: WRONG }), 403, "operator_denied");
+    expectError(await hostReconnect("gr_missing"), 404, "not_found");
+    expect((await redeem(pending)).status).toBe(200);
+  });
+
   it("leaves an audit entry members can see", async () => {
     const { host, members } = await setupGroup(1);
     const res = await hostReconnect(host.groupId);
