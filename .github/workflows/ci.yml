@@ -55,7 +55,7 @@ jobs:
       # otherwise drop out silently). An unset `shell` has no pipefail, so it is set here.
       - name: Fork isolation tests
         env:
-          FILTER: "AppIdentityTests|SupportMailTests|UpdateCheckerTests|BattleEngineTests|BattleSnapshotTests|PracticeBattleTests|PracticeSessionTests|PracticePlaybackTests|PracticeHintsTests|PracticeWild|PracticeReadOnlyGuardTests|PracticeWordingTests|PracticeScreenRenderingTests|PracticeLaunchTests|PopoverNavigationTests|LocalizedUILiteralTests|ScrollerLaneTests|SwiftUIIsolationTests|LocalizationColumnTests|LocalizationInterpolationTests"
+          FILTER: "AppIdentityTests|SupportMailTests|UpdateCheckerTests|BattleEngineTests|BattleSnapshotTests|PracticeBattleTests|PracticeSessionTests|PracticePlaybackTests|PracticeHintsTests|PracticeWild|PracticeReadOnlyGuardTests|PracticeRecord|PracticeDaily|PracticeTemperament|PracticeWordingTests|PracticeScreenRenderingTests|PracticeLaunchTests|PopoverNavigationTests|LocalizedUILiteralTests|ScrollerLaneTests|SwiftUIIsolationTests|LocalizationColumnTests|LocalizationInterpolationTests"
         run: |
           set -o pipefail
           swift test --filter "$FILTER" 2>&1 | tee "$RUNNER_TEMP/fork-isolation.log"
@@ -149,7 +149,7 @@ jobs:
         run: echo "PTB_STATE_DIR=$RUNNER_TEMP/ptb-engine-state" >> "$GITHUB_ENV"
       - name: Swift JavaScriptCore boundary
         env:
-          FILTER: "BattleEngineTests|BattleSnapshotTests|PracticeBattleTests|PracticeSessionTests|PracticePlaybackTests|PracticeHintsTests|PracticeWild|PracticeWordingTests|PracticeScreenRenderingTests|LocalizedUILiteralTests|ScrollerLaneTests"
+          FILTER: "BattleEngineTests|BattleSnapshotTests|PracticeBattleTests|PracticeSessionTests|PracticePlaybackTests|PracticeHintsTests|PracticeWild|PracticeRecord|PracticeDaily|PracticeTemperament|PracticeWordingTests|PracticeScreenRenderingTests|LocalizedUILiteralTests|ScrollerLaneTests"
         run: |
           set -o pipefail
           swift test --enable-code-coverage --filter "$FILTER" 2>&1 | tee "$RUNNER_TEMP/jsc-boundary.log"
