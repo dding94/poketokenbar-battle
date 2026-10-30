@@ -1140,27 +1140,30 @@ final class PracticeDailySessionTests: XCTestCase {
         XCTAssertTrue(session.battle === battle); XCTAssertEqual(battle.opponent?.id, "o")
     }
 
-    func testStartDuringANewDaysSearchKeepsYesterdaysOpponent() async throws {
+    /// Yesterday's opponent is not today's: a new day's search drops it at once, with a selection of it, so it can
+    /// no longer be started. `start()` then stops the search like the wild one, and its late result never lands.
+    func testANewDaysSearchDropsYesterdaysOpponentAndStartStopsIt() async throws {
         let gate = GatedProvider(WildStub.standard()), today = Today()
         let session = makeSession(gate, today: today)
         let found = await completeSearch(session, gate)
         XCTAssertTrue(found)
-        let yesterday = try XCTUnwrap(session.dailyCandidate)
-        session.opponentID = yesterday.id
+        session.opponentID = try XCTUnwrap(session.dailyCandidate).id
         today.date += 86_400
         session.findWildOpponents()
         XCTAssertEqual(session.dailyState, .searching, "a new day makes a new opponent")
+        XCTAssertNil(session.dailyCandidate, "yesterday's opponent goes at once")
+        XCTAssertEqual(session.opponentID, "o", "its selection falls back to an own individual")
         let reached = await waitSuspended(gate, count: 2)
         XCTAssertTrue(reached)
         let stale = session.dailyTask, staleWild = session.wildTask
         session.mode = .manual
         session.start()
-        XCTAssertEqual(session.dailyState, .ready); XCTAssertEqual(session.dailyCandidate?.id, yesterday.id)
+        XCTAssertEqual(session.dailyState, .idle)
+        XCTAssertEqual(session.battle?.opponent?.id, "o")
         await gate.resume()
         await stale?.value; await staleWild?.value
-        XCTAssertEqual(session.dailyCandidate?.id, yesterday.id, "the late result must not replace it")
-        XCTAssertEqual(session.opponentID, yesterday.id)
-        XCTAssertEqual(session.battle?.opponent?.id, yesterday.id)
+        XCTAssertEqual(session.dailyState, .idle); XCTAssertNil(session.dailyCandidate, "the late result must not land")
+        XCTAssertEqual(session.opponentID, "o")
         XCTAssertEqual(session.battle?.phase, .running)
     }
 
@@ -1170,14 +1173,19 @@ final class PracticeDailySessionTests: XCTestCase {
         await searchAll(session)
         let yesterday = try XCTUnwrap(session.dailyCandidate)
         session.opponentID = yesterday.id
+        // The same day: a search leaves it.
+        session.findWildOpponents()
+        XCTAssertEqual(session.dailyState, .ready); XCTAssertEqual(session.opponentID, yesterday.id)
+        await session.wildTask?.value
         today.date += 86_400
         session.findWildOpponents()
-        XCTAssertEqual(session.dailyState, .searching)
+        XCTAssertEqual(session.dailyState, .searching); XCTAssertNil(session.dailyCandidate)
+        XCTAssertEqual(session.opponentID, "o", "yesterday's opponent is gone, so the selection falls back to an own one")
         let tasks = [session.wildTask, session.dailyTask]
         for task in tasks { await task?.value }
         XCTAssertEqual(session.dailyCandidate?.id, "daily-2026-10-31")
         XCTAssertNotEqual(session.dailyCandidate?.snapshot, yesterday.snapshot)
-        XCTAssertEqual(session.opponentID, "o", "yesterday's opponent is gone, so the selection falls back to an own one")
+        XCTAssertEqual(session.opponentID, "o", "the new opponent is offered, not selected")
     }
 
     /// The menu-bar app runs for days and the wild batch survives closing the popover, so no search is due when the
@@ -1186,16 +1194,66 @@ final class PracticeDailySessionTests: XCTestCase {
         let today = Today()
         let session = makeSession(WildStub.standard(), today: today)
         await searchAll(session)
+        session.opponentID = try XCTUnwrap(session.dailyCandidate).id
         session.releaseIfIdle()
         session.prepare(state: state(), activeName: nil)
         XCTAssertEqual(session.dailyState, .ready, "the same day starts nothing")
+        XCTAssertEqual(session.opponentID, "daily-2026-10-30")
         session.releaseIfIdle()
         today.date += 86_400
         session.prepare(state: state(), activeName: nil)
         XCTAssertEqual(session.dailyState, .searching)
+        XCTAssertNil(session.dailyCandidate)
+        XCTAssertEqual(session.opponentID, "o", "yesterday's opponent is no longer today's")
         XCTAssertEqual(session.wildState, .ready, "the wild batch is not tied to a day")
         await session.dailyTask?.value
         XCTAssertEqual(session.dailyCandidate?.id, "daily-2026-10-31")
+    }
+
+    /// A release (or `start()`) can stop the search for today's opponent while the wild batch stays on screen, so no
+    /// search is due afterwards. Opening the screen again makes it.
+    func testReopeningAfterAnInterruptedSearchMakesTodaysOpponent() async throws {
+        let gate = GatedProvider(WildStub.standard()), today = Today()
+        let session = makeSession(gate, today: today)
+        let found = await completeSearch(session, gate)
+        XCTAssertTrue(found)
+        session.releaseIfIdle()
+        today.date += 86_400
+        session.prepare(state: state(), activeName: nil)
+        XCTAssertEqual(session.dailyState, .searching)
+        let reached = await waitSuspended(gate)
+        XCTAssertTrue(reached)
+        let stale = session.dailyTask
+        session.releaseIfIdle()
+        XCTAssertEqual(session.dailyState, .idle); XCTAssertEqual(session.wildState, .ready)
+        await gate.resume()
+        await stale?.value
+        XCTAssertEqual(session.dailyState, .idle, "the stopped search does not land")
+        session.prepare(state: state(), activeName: nil)
+        XCTAssertEqual(session.dailyState, .searching)
+        let resumed = await waitSuspended(gate)
+        XCTAssertTrue(resumed)
+        let task = session.dailyTask
+        await gate.resume()
+        await task?.value
+        XCTAssertEqual(session.dailyCandidate?.id, "daily-2026-10-31")
+    }
+
+    func testPrepareKeepsTodaysOpponentSelectedForTheSamePlayerOnly() async throws {
+        let session = makeSession(WildStub.standard())
+        await searchAll(session)
+        let daily = try XCTUnwrap(session.dailyCandidate)
+        session.opponentID = daily.id
+        session.prepare(state: state(), activeName: nil)
+        XCTAssertEqual(session.opponentID, daily.id)
+        XCTAssertEqual(session.opponent?.snapshot, daily.snapshot)
+        XCTAssertNotNil(session.matchup)
+        XCTAssertEqual(session.dailyState, .ready, "nothing to make again")
+        // The player is gone from the save: another player, so today's opponent goes with the wild batch.
+        session.prepare(state: state(player: "q"), activeName: nil)
+        XCTAssertEqual(session.playerID, "q")
+        XCTAssertNil(session.dailyCandidate); XCTAssertEqual(session.dailyState, .idle)
+        XCTAssertEqual(session.opponentID, "o")
     }
 
     /// A finished battle on screen keeps yesterday's opponent for its rematch; the selection screen gets the new one.
@@ -1249,6 +1307,8 @@ final class PracticeDailySessionTests: XCTestCase {
         await searchAll(session)
         XCTAssertEqual(session.dailyState, .unavailable); XCTAssertNil(session.dailyCandidate)
         stub.failIndex = false
+        session.prepare(state: state(), activeName: nil)
+        XCTAssertEqual(session.dailyState, .unavailable, "opening the screen again does not retry; a search does")
         await searchAll(session)
         XCTAssertEqual(session.dailyState, .ready)
         XCTAssertEqual(session.dailyCandidate?.id, "daily-2026-10-30")
