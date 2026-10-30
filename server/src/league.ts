@@ -1,4 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
+import { GroupAccess, INVITE_COLUMNS, type InviteRow, TRAINER_COLUMNS, type TrainerRow } from "./access";
 import {
   type AccountGrant,
   type AttemptKind,
@@ -87,25 +88,7 @@ const SCHEMA_V1 = [
   `CREATE INDEX attempts_at ON attempts (at)`,
 ];
 
-type TrainerRow = {
-  id: string;
-  group_id: string;
-  status: "active" | "left";
-  display_email: string | null;
-  joined_at: number;
-};
-
 type GroupRow = { id: string; name: string; host_trainer_id: string };
-
-type InviteRow = {
-  id: string;
-  group_id: string;
-  created_at: number;
-  expires_at: number;
-  max_uses: number;
-  uses: number;
-  revoked_at: number | null;
-};
 
 type ReconnectRow = {
   id: string;
@@ -124,8 +107,6 @@ type AuditRow = {
   target_id: string | null;
   invite_id: string | null;
 };
-
-const TRAINER_COLUMNS = "id, group_id, status, display_email, joined_at";
 
 function newId(prefix: string): string {
   return `${prefix}_${crypto.randomUUID().replaceAll("-", "")}`;
@@ -146,10 +127,12 @@ export class League extends DurableObject<Env> {
   clock: () => number = () => Date.now();
 
   private readonly sql: SqlStorage;
+  private readonly access: GroupAccess;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     this.sql = ctx.storage.sql;
+    this.access = new GroupAccess(this.sql);
     this.migrate();
   }
 
@@ -211,7 +194,7 @@ export class League extends DurableObject<Env> {
           ? undefined
           : this.sql
               .exec<InviteRow>(
-                "SELECT id, group_id, created_at, expires_at, max_uses, uses, revoked_at FROM invites WHERE code_hash = ?",
+                `SELECT ${INVITE_COLUMNS} FROM invites WHERE code_hash = ?`,
                 input.inviteHash,
               )
               .toArray()[0];
@@ -276,7 +259,7 @@ export class League extends DurableObject<Env> {
       if (code.voided_at !== null || now >= code.expires_at) {
         return this.failAttempt(input.ipHash, "reconnect", now, "code_expired");
       }
-      const trainer = this.trainerInGroup(code.trainer_id, code.group_id);
+      const trainer = this.access.trainerInGroup(code.trainer_id, code.group_id);
       if (!trainer) return fail("internal");
 
       if (trainer.status === "left") {
@@ -309,19 +292,21 @@ export class League extends DurableObject<Env> {
 
   me(input: { keyHash: string }): Result<AccountGrant> {
     return this.tx(() => {
-      const actor = this.actorByKey(input.keyHash);
-      if (!actor) return fail("unauthorized");
-      return ok(this.grant(actor.id));
+      const auth = this.access.actor(input.keyHash, "member");
+      if (!auth.ok) return auth;
+      const actor = auth.value;
+      return ok(this.grant(actor.trainer.id));
     });
   }
 
   group(input: { keyHash: string }): Result<{ group: GroupView; members: MemberView[] }> {
     return this.tx(() => {
-      const actor = this.actorByKey(input.keyHash);
-      if (!actor) return fail("unauthorized");
-      const group = this.groupRow(actor.group_id);
+      const auth = this.access.actor(input.keyHash, "member");
+      if (!auth.ok) return auth;
+      const actor = auth.value;
+      const group = this.groupRow(actor.groupId);
       const members = this.sql
-        .exec<TrainerRow>(`SELECT ${TRAINER_COLUMNS} FROM trainers WHERE group_id = ? ORDER BY joined_at, id`, actor.group_id)
+        .exec<TrainerRow>(`SELECT ${TRAINER_COLUMNS} FROM trainers WHERE group_id = ? ORDER BY joined_at, id`, actor.groupId)
         .toArray()
         .map((row) => ({ ...this.trainerView(row, group), joinedAt: row.joined_at }));
       return ok({ group: this.groupView(group), members });
@@ -330,12 +315,13 @@ export class League extends DurableObject<Env> {
 
   audit(input: { keyHash: string }): Result<{ entries: AuditEntry[] }> {
     return this.tx(() => {
-      const actor = this.actorByKey(input.keyHash);
-      if (!actor) return fail("unauthorized");
+      const auth = this.access.actor(input.keyHash, "member");
+      if (!auth.ok) return auth;
+      const actor = auth.value;
       const entries = this.sql
         .exec<AuditRow>(
           "SELECT id, at, kind, actor_id, target_id, invite_id FROM audit WHERE group_id = ? ORDER BY id DESC LIMIT ?",
-          actor.group_id,
+          actor.groupId,
           AUDIT_PAGE,
         )
         .toArray()
@@ -354,36 +340,35 @@ export class League extends DurableObject<Env> {
   createInvite(input: { keyHash: string; inviteHash: string; ttlMs: number; maxUses: number }): Result<InviteView> {
     const now = this.clock();
     return this.tx(() => {
-      const actor = this.actorByKey(input.keyHash);
-      if (!actor) return fail("unauthorized");
-      if (!this.isHost(actor)) return fail("forbidden");
+      const auth = this.access.actor(input.keyHash, "host");
+      if (!auth.ok) return auth;
+      const actor = auth.value;
       const id = newId("inv");
       this.sql.exec(
         `INSERT INTO invites (id, group_id, code_hash, created_by, created_at, expires_at, max_uses, uses)
          VALUES (?, ?, ?, ?, ?, ?, ?, 0)`,
         id,
-        actor.group_id,
+        actor.groupId,
         input.inviteHash,
-        actor.id,
+        actor.trainer.id,
         now,
         now + input.ttlMs,
         input.maxUses,
       );
-      this.addAudit(actor.group_id, now, "invite_created", actor.id, null, id);
-      return ok(this.inviteView(this.inviteInGroup(id, actor.group_id)!));
+      this.addAudit(actor.groupId, now, "invite_created", actor.trainer.id, null, id);
+      return ok(this.inviteView(this.access.inviteInGroup(id, actor.groupId)!));
     });
   }
 
   listInvites(input: { keyHash: string }): Result<{ invites: InviteView[] }> {
     return this.tx(() => {
-      const actor = this.actorByKey(input.keyHash);
-      if (!actor) return fail("unauthorized");
-      if (!this.isHost(actor)) return fail("forbidden");
+      const auth = this.access.actor(input.keyHash, "host");
+      if (!auth.ok) return auth;
+      const actor = auth.value;
       const invites = this.sql
         .exec<InviteRow>(
-          `SELECT id, group_id, created_at, expires_at, max_uses, uses, revoked_at FROM invites
-           WHERE group_id = ? ORDER BY created_at DESC, id`,
-          actor.group_id,
+          `SELECT ${INVITE_COLUMNS} FROM invites WHERE group_id = ? ORDER BY created_at DESC, id`,
+          actor.groupId,
         )
         .toArray()
         .map((row) => this.inviteView(row));
@@ -394,28 +379,29 @@ export class League extends DurableObject<Env> {
   revokeInvite(input: { keyHash: string; inviteId: string }): Result<InviteView> {
     const now = this.clock();
     return this.tx(() => {
-      const actor = this.actorByKey(input.keyHash);
-      if (!actor) return fail("unauthorized");
-      if (!this.isHost(actor)) return fail("forbidden");
-      const invite = this.inviteInGroup(input.inviteId, actor.group_id);
-      if (!invite) return fail("not_found");
+      const auth = this.access.actor(input.keyHash, "host");
+      if (!auth.ok) return auth;
+      const actor = auth.value;
+      const found = this.access.invite(actor, input.inviteId);
+      if (!found.ok) return found;
+      const invite = found.value;
       if (invite.revoked_at === null) {
         this.sql.exec("UPDATE invites SET revoked_at = ? WHERE id = ?", now, invite.id);
-        this.addAudit(actor.group_id, now, "invite_revoked", actor.id, null, invite.id);
+        this.addAudit(actor.groupId, now, "invite_revoked", actor.trainer.id, null, invite.id);
       }
-      return ok(this.inviteView(this.inviteInGroup(invite.id, actor.group_id)!));
+      return ok(this.inviteView(this.access.inviteInGroup(invite.id, actor.groupId)!));
     });
   }
 
   issueReconnectCode(input: { keyHash: string; trainerId: string; codeHash: string }): Result<{ trainerId: string; expiresAt: number }> {
     const now = this.clock();
     return this.tx(() => {
-      const actor = this.actorByKey(input.keyHash);
-      if (!actor) return fail("unauthorized");
-      if (!this.isHost(actor)) return fail("forbidden");
-      if (input.trainerId === actor.id) return fail("cannot_target_self");
-      const target = this.trainerInGroup(input.trainerId, actor.group_id);
-      if (!target) return fail("not_found");
+      const auth = this.access.actor(input.keyHash, "host");
+      if (!auth.ok) return auth;
+      const actor = auth.value;
+      const found = this.access.target(actor, input.trainerId, { activeOnly: false });
+      if (!found.ok) return found;
+      const target = found.value;
 
       this.voidReconnectCodes(target.id, now);
       const expiresAt = now + RECONNECT_TTL_MS;
@@ -423,14 +409,14 @@ export class League extends DurableObject<Env> {
         `INSERT INTO reconnect_codes (id, group_id, trainer_id, code_hash, created_by, created_at, expires_at)
          VALUES (?, ?, ?, ?, ?, ?, ?)`,
         newId("rc"),
-        actor.group_id,
+        actor.groupId,
         target.id,
         input.codeHash,
-        actor.id,
+        actor.trainer.id,
         now,
         expiresAt,
       );
-      this.addAudit(actor.group_id, now, "reconnect_code_issued", actor.id, target.id, null);
+      this.addAudit(actor.groupId, now, "reconnect_code_issued", actor.trainer.id, target.id, null);
       return ok({ trainerId: target.id, expiresAt });
     });
   }
@@ -438,11 +424,12 @@ export class League extends DurableObject<Env> {
   leave(input: { keyHash: string }): Result<{ ok: true }> {
     const now = this.clock();
     return this.tx(() => {
-      const actor = this.actorByKey(input.keyHash);
-      if (!actor) return fail("unauthorized");
-      if (this.isHost(actor)) return fail("host_must_transfer");
-      this.anonymize(actor.id, now);
-      this.addAudit(actor.group_id, now, "member_left", actor.id, actor.id, null);
+      const auth = this.access.actor(input.keyHash, "member");
+      if (!auth.ok) return auth;
+      const actor = auth.value;
+      if (actor.isHost) return fail("host_must_transfer");
+      this.anonymize(actor.trainer.id, now);
+      this.addAudit(actor.groupId, now, "member_left", actor.trainer.id, actor.trainer.id, null);
       return ok({ ok: true as const });
     });
   }
@@ -450,14 +437,14 @@ export class League extends DurableObject<Env> {
   removeMember(input: { keyHash: string; trainerId: string }): Result<{ ok: true }> {
     const now = this.clock();
     return this.tx(() => {
-      const actor = this.actorByKey(input.keyHash);
-      if (!actor) return fail("unauthorized");
-      if (!this.isHost(actor)) return fail("forbidden");
-      if (input.trainerId === actor.id) return fail("cannot_target_self");
-      const target = this.trainerInGroup(input.trainerId, actor.group_id);
-      if (!target || target.status !== "active") return fail("not_found");
+      const auth = this.access.actor(input.keyHash, "host");
+      if (!auth.ok) return auth;
+      const actor = auth.value;
+      const found = this.access.target(actor, input.trainerId, { activeOnly: true });
+      if (!found.ok) return found;
+      const target = found.value;
       this.anonymize(target.id, now);
-      this.addAudit(actor.group_id, now, "member_removed", actor.id, target.id, null);
+      this.addAudit(actor.groupId, now, "member_removed", actor.trainer.id, target.id, null);
       return ok({ ok: true as const });
     });
   }
@@ -465,15 +452,15 @@ export class League extends DurableObject<Env> {
   transferHost(input: { keyHash: string; trainerId: string }): Result<{ group: GroupView }> {
     const now = this.clock();
     return this.tx(() => {
-      const actor = this.actorByKey(input.keyHash);
-      if (!actor) return fail("unauthorized");
-      if (!this.isHost(actor)) return fail("forbidden");
-      if (input.trainerId === actor.id) return fail("cannot_target_self");
-      const target = this.trainerInGroup(input.trainerId, actor.group_id);
-      if (!target || target.status !== "active") return fail("not_found");
-      this.sql.exec("UPDATE groups SET host_trainer_id = ? WHERE id = ?", target.id, actor.group_id);
-      this.addAudit(actor.group_id, now, "host_transferred", actor.id, target.id, null);
-      return ok({ group: this.groupView(this.groupRow(actor.group_id)) });
+      const auth = this.access.actor(input.keyHash, "host");
+      if (!auth.ok) return auth;
+      const actor = auth.value;
+      const found = this.access.target(actor, input.trainerId, { activeOnly: true });
+      if (!found.ok) return found;
+      const target = found.value;
+      this.sql.exec("UPDATE groups SET host_trainer_id = ? WHERE id = ?", target.id, actor.groupId);
+      this.addAudit(actor.groupId, now, "host_transferred", actor.trainer.id, target.id, null);
+      return ok({ group: this.groupView(this.groupRow(actor.groupId)) });
     });
   }
 
@@ -493,32 +480,6 @@ export class League extends DurableObject<Env> {
     const result = this.ctx.storage.transactionSync(fn);
     this.scheduleAttemptCleanup();
     return result;
-  }
-
-  private actorByKey(keyHash: string): TrainerRow | undefined {
-    return this.sql
-      .exec<TrainerRow>(`SELECT ${TRAINER_COLUMNS} FROM trainers WHERE key_hash = ? AND status = 'active'`, keyHash)
-      .toArray()[0];
-  }
-
-  private isHost(actor: TrainerRow): boolean {
-    return this.groupRow(actor.group_id).host_trainer_id === actor.id;
-  }
-
-  private trainerInGroup(trainerId: string, groupId: string): TrainerRow | undefined {
-    return this.sql
-      .exec<TrainerRow>(`SELECT ${TRAINER_COLUMNS} FROM trainers WHERE id = ? AND group_id = ?`, trainerId, groupId)
-      .toArray()[0];
-  }
-
-  private inviteInGroup(inviteId: string, groupId: string): InviteRow | undefined {
-    return this.sql
-      .exec<InviteRow>(
-        "SELECT id, group_id, created_at, expires_at, max_uses, uses, revoked_at FROM invites WHERE id = ? AND group_id = ?",
-        inviteId,
-        groupId,
-      )
-      .toArray()[0];
   }
 
   private groupRow(groupId: string): GroupRow {

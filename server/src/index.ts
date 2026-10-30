@@ -1,3 +1,4 @@
+import { accessKeyHash } from "./access";
 import type { Result } from "./contract";
 import {
   ApiError,
@@ -15,7 +16,6 @@ import {
   INVITE_CODE_LENGTH,
   RECONNECT_CODE_LENGTH,
   RECOVERY_CODE_LENGTH,
-  bearerKey,
   newAccessKey,
   newCode,
   normalizeCode,
@@ -48,12 +48,6 @@ type Handler = (ctx: Context) => Promise<Response>;
 function unwrap<T>(result: Result<T>): T {
   if (!result.ok) throw new ApiError(result.code, result.retryAfter);
   return result.value;
-}
-
-async function keyHashOf(ctx: Context): Promise<string> {
-  const key = bearerKey(ctx.request.headers.get("authorization"));
-  if (key === null) throw new ApiError("unauthorized");
-  return sha256Hex(key);
 }
 
 async function ipHashOf(ctx: Context): Promise<string> {
@@ -135,21 +129,21 @@ const routes: Record<string, Partial<Record<string, Handler>>> = {
   },
 
   "/v1/me": {
-    GET: async (ctx) => json(200, unwrap(await ctx.league.me({ keyHash: await keyHashOf(ctx) }))),
+    GET: async (ctx) => json(200, unwrap(await ctx.league.me({ keyHash: await accessKeyHash(ctx.request) }))),
   },
 
   "/v1/group": {
-    GET: async (ctx) => json(200, unwrap(await ctx.league.group({ keyHash: await keyHashOf(ctx) }))),
+    GET: async (ctx) => json(200, unwrap(await ctx.league.group({ keyHash: await accessKeyHash(ctx.request) }))),
   },
 
   "/v1/audit": {
-    GET: async (ctx) => json(200, unwrap(await ctx.league.audit({ keyHash: await keyHashOf(ctx) }))),
+    GET: async (ctx) => json(200, unwrap(await ctx.league.audit({ keyHash: await accessKeyHash(ctx.request) }))),
   },
 
   "/v1/invites": {
-    GET: async (ctx) => json(200, unwrap(await ctx.league.listInvites({ keyHash: await keyHashOf(ctx) }))),
+    GET: async (ctx) => json(200, unwrap(await ctx.league.listInvites({ keyHash: await accessKeyHash(ctx.request) }))),
     POST: async (ctx) => {
-      const keyHash = await keyHashOf(ctx);
+      const keyHash = await accessKeyHash(ctx.request);
       const body = await readJsonObject(ctx.request);
       const ttlSeconds = optionalInteger(body, "ttlSeconds", HOUR_S, 30 * DAY_S, 7 * DAY_S);
       const maxUses = optionalInteger(body, "maxUses", 1, 100, 30);
@@ -162,7 +156,7 @@ const routes: Record<string, Partial<Record<string, Handler>>> = {
 
   "/v1/invites/revoke": {
     POST: async (ctx) => {
-      const keyHash = await keyHashOf(ctx);
+      const keyHash = await accessKeyHash(ctx.request);
       const inviteId = requireString(await readJsonObject(ctx.request), "inviteId");
       return json(200, { invite: unwrap(await ctx.league.revokeInvite({ keyHash, inviteId })) });
     },
@@ -183,7 +177,7 @@ const routes: Record<string, Partial<Record<string, Handler>>> = {
 
   "/v1/reconnect-codes": {
     POST: async (ctx) => {
-      const keyHash = await keyHashOf(ctx);
+      const keyHash = await accessKeyHash(ctx.request);
       const trainerId = requireString(await readJsonObject(ctx.request), "trainerId");
       const reconnectCode = newCode(RECONNECT_CODE_LENGTH);
       const codeHash = (await codeHashOf(ctx, "reconnect", reconnectCode, RECONNECT_CODE_LENGTH))!;
@@ -209,7 +203,7 @@ const routes: Record<string, Partial<Record<string, Handler>>> = {
 
   "/v1/leave": {
     POST: async (ctx) => {
-      const keyHash = await keyHashOf(ctx);
+      const keyHash = await accessKeyHash(ctx.request);
       await readJsonObject(ctx.request);
       return json(200, unwrap(await ctx.league.leave({ keyHash })));
     },
@@ -217,7 +211,7 @@ const routes: Record<string, Partial<Record<string, Handler>>> = {
 
   "/v1/members/remove": {
     POST: async (ctx) => {
-      const keyHash = await keyHashOf(ctx);
+      const keyHash = await accessKeyHash(ctx.request);
       const trainerId = requireString(await readJsonObject(ctx.request), "trainerId");
       return json(200, unwrap(await ctx.league.removeMember({ keyHash, trainerId })));
     },
@@ -225,7 +219,7 @@ const routes: Record<string, Partial<Record<string, Handler>>> = {
 
   "/v1/host/transfer": {
     POST: async (ctx) => {
-      const keyHash = await keyHashOf(ctx);
+      const keyHash = await accessKeyHash(ctx.request);
       const trainerId = requireString(await readJsonObject(ctx.request), "trainerId");
       return json(200, unwrap(await ctx.league.transferHost({ keyHash, trainerId })));
     },

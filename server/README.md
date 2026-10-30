@@ -8,6 +8,8 @@ access keys, recovery and host reconnect codes. The contract is Appendix B of
   Raw keys and codes never leave it; the Durable Object only receives hashes.
 - `src/league.ts` is the `League` Durable Object (`idFromName("league")`), with synchronous
   SQL and `transactionSync` for every check-then-write.
+- `src/access.ts` is the single authentication and group-permission boundary: bearer key
+  hashing in the Worker, and actor/role/same-group target checks in the League.
 
 ## Commands
 
