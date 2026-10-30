@@ -246,16 +246,20 @@ final class PracticeRecordSessionTests: XCTestCase {
         XCTAssertEqual(session.battle?.phase, .finished); XCTAssertEqual(session.battle?.result?.winner, "p1")
         XCTAssertEqual(session.records, recordTotals(wins: 1, streak: 1, best: 1))
         XCTAssertEqual(session.lastRecord, recordUpdate(.win, streak: 1, best: 1))
-        // Nothing after the end counts it again.
+        // Nothing after the end counts it again: more steps, the result screen, going back.
         clock.now += 100; session.tick(); session.skipToResult(); session.choose(slot: 1)
-        session.markResultSeen(); session.forfeit(); session.backToSelection()
+        session.markResultSeen(); session.backToSelection()
+        XCTAssertNil(session.battle)
         XCTAssertEqual(session.records, recordTotals(wins: 1, streak: 1, best: 1))
-        // A manual choice that ends it.
+        // A manual choice that ends it; giving up afterwards is no loss.
         session.mode = .manual
         session.start()
         XCTAssertNil(session.lastRecord, "a battle in progress has no record yet")
         session.choose(slot: 1)
         XCTAssertEqual(session.battle?.phase, .finished)
+        XCTAssertEqual(session.records, recordTotals(wins: 2, streak: 2, best: 2))
+        XCTAssertEqual(session.lastRecord, recordUpdate(.win, streak: 2, best: 2))
+        session.forfeit()
         XCTAssertEqual(session.records, recordTotals(wins: 2, streak: 2, best: 2))
         XCTAssertEqual(session.lastRecord, recordUpdate(.win, streak: 2, best: 2))
         // A timeout that ends it: the automatic choice plays the turn.
@@ -265,6 +269,12 @@ final class PracticeRecordSessionTests: XCTestCase {
         XCTAssertEqual(session.battle?.phase, .finished)
         XCTAssertEqual(session.records, recordTotals(wins: 3, streak: 3, best: 3))
         XCTAssertEqual(session.lastRecord, recordUpdate(.win, streak: 3, best: 3))
+        // A rematch replaces the finished battle without counting it again, and a release counts nothing either.
+        session.start()
+        XCTAssertEqual(session.records, recordTotals(wins: 3, streak: 3, best: 3))
+        session.choose(slot: 1); session.markResultSeen(); session.releaseIfIdle()
+        XCTAssertNil(session.battle)
+        XCTAssertEqual(session.records, recordTotals(wins: 4, streak: 4, best: 4))
     }
 
     func testALossOrADrawEndsTheStreakAndTheBestStays() throws {
