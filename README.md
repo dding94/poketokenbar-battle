@@ -33,7 +33,7 @@
 | Upstream | [chattymin/PokeTokenBar](https://github.com/chattymin/PokeTokenBar) |
 | 기준 태그 | `v2.5.6` |
 | 기준 커밋 | `77f789d7ccf6e692c805f599abf7dcf0c834c56b` |
-| 기존 기술 | Swift 6 · SwiftUI · macOS 14+ · Swift Package Manager |
+| 기존 기술 | Swift 6 · SwiftUI · macOS 15+ · Swift Package Manager |
 
 기준 버전 소스와 Git 이력을 포함합니다. 원본 저작권과 [MIT LICENSE](LICENSE)를 보존하며, 기존 앱 설명은 [README.upstream.md](README.upstream.md)에 있습니다. upstream의 설치·릴리스 안내는 이 확장판의 배포 안내가 아닙니다.
 
