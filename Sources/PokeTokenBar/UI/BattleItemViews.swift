@@ -175,11 +175,7 @@ struct BattleItemFeedbackCard: View {
         switch feedback {
         case .healed(let kind, let share):
             HStack(spacing: 8) {
-                if artwork {
-                    ItemIconView(kind: kind, size: 22)
-                } else {
-                    Text(kind.fallbackEmoji).font(.system(size: 15)).frame(width: 22, height: 22)
-                }
+                ItemIconView(kind: kind, size: 22, artwork: artwork)
                 Text(l.itemName(kind)).font(.callout.weight(.semibold)).lineLimit(1)
                 Image(systemName: "arrow.right").font(.caption2.weight(.bold)).foregroundStyle(.secondary)
                 BattleHealthLine(share: share, l: l)

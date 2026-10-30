@@ -23,14 +23,15 @@ struct ItemIconView: View {
     @State private var img: NSImage?
 
     /// 스프라이트를 쓰는가 — artwork 이 켜져 있고 PokéAPI 스프라이트가 있는 아이템만.
-    static func loadsSprite(_ kind: ItemKind, artwork: Bool) -> Bool { kind.spriteName != nil }   // RED stub
+    static func loadsSprite(_ kind: ItemKind, artwork: Bool) -> Bool { artwork && kind.spriteName != nil }
 
     init(kind: ItemKind, size: CGFloat = 30, artwork: Bool = true) {
         self.kind = kind
         self.size = size
         self.artwork = artwork
-        // 캐시에 있으면 즉시(동기) 표시 — 재렌더 플래시 방지.
-        _img = State(initialValue: kind.spriteName.flatMap { SpriteLoader.cachedItemImage(name: $0) })
+        // 캐시에 있으면 즉시(동기) 표시 — 재렌더 플래시 방지. artwork 이 꺼져 있으면 캐시도 읽지 않는다.
+        _img = State(initialValue: Self.loadsSprite(kind, artwork: artwork)
+                     ? kind.spriteName.flatMap { SpriteLoader.cachedItemImage(name: $0) } : nil)
     }
 
     var body: some View {
@@ -48,7 +49,7 @@ struct ItemIconView: View {
             }
         }
         .task(id: kind.spriteName ?? "") {
-            guard img == nil, let name = kind.spriteName else { return }
+            guard img == nil, Self.loadsSprite(kind, artwork: artwork), let name = kind.spriteName else { return }
             img = await SpriteLoader.itemImage(name: name)
         }
     }

@@ -20,11 +20,13 @@ struct BagView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 8) {
                         if let feedback {
-                            BattleItemFeedbackCard(feedback: feedback, l: store.l) { self.feedback = nil }
+                            BattleItemFeedbackCard(feedback: feedback, l: store.l, artwork: artwork) { self.feedback = nil }
                                 .id(Self.feedbackID)
                         }
                         ForEach(store.ownedItems, id: \.kind) { item in
-                            ItemCard(store: store, nav: nav, kind: item.kind, count: item.count) { feedback = $0 }
+                            ItemCard(store: store, nav: nav, kind: item.kind, count: item.count, artwork: artwork) {
+                                feedback = $0
+                            }
                         }
                     }
                     .reservesScrollerLane()
@@ -43,7 +45,11 @@ struct BagView: View {
     /// 빈 가방 — 움직이는 잠만보(143) + 안내(특정 아이템명 미언급, 확장 대비).
     private var emptyState: some View {
         VStack(spacing: 10) {
-            SpriteView(speciesID: 143, size: 96, animated: true)   // 잠만보(움직임)
+            if artwork {
+                SpriteView(speciesID: 143, size: 96, animated: true)   // 잠만보(움직임)
+            } else {
+                Image(systemName: "bag").font(.system(size: 40)).foregroundStyle(.tertiary).frame(width: 96, height: 96)
+            }
             Text(store.l.bagEmptyTitle)
                 .font(.callout.weight(.semibold))
             Button(store.l.shop) { nav.tab = .shop }
@@ -65,6 +71,8 @@ private struct ItemCard: View {
     let kind: ItemKind
     let count: Int
     /// 배틀 아이템을 쓴 결과를 가방 맨 위로 넘긴다(PR 03C).
+    /// false 면 아이콘을 이모지로만(`BagView.artwork`).
+    let artwork: Bool
     let onBattleItemUsed: (BattleItemFeedback) -> Void
     @State private var confirming = false
     @State private var candyCount = 1
@@ -82,7 +90,7 @@ private struct ItemCard: View {
         let l = store.l
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .top, spacing: 10) {
-                ItemIconView(kind: kind, size: 30)
+                ItemIconView(kind: kind, size: 30, artwork: artwork)
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
                         Text(l.itemName(kind)).font(.callout.weight(.semibold))

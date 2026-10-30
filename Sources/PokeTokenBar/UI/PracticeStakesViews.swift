@@ -51,13 +51,7 @@ struct PracticeHealControl: View {
     /// One item to use: icon, name and count, and what it does.
     private func row(_ kind: ItemKind, count: Int) -> some View {
         HStack(spacing: 8) {
-            Group {
-                if artwork {
-                    ItemIconView(kind: kind, size: 20)
-                } else {
-                    Text(kind.fallbackEmoji).font(.system(size: 14)).frame(width: 20, height: 20)
-                }
-            }
+            ItemIconView(kind: kind, size: 20, artwork: artwork)
             Text(l.itemName(kind)).font(.caption.weight(.semibold)).lineLimit(1)
             Text("×\(count)").font(.caption2.weight(.bold)).foregroundStyle(.secondary).monospacedDigit()
             Spacer(minLength: 4)
