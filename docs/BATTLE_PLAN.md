@@ -266,20 +266,22 @@
 
 ## 7. 무료 운영 기준
 
-아래 값은 2026-10-29에 공식 문서로 확인했다. 구현 착수와 운영 배포 직전에 다시 확인한다.
+아래 값은 2026-10-29에 공식 문서로 확인했고, PR 04 착수 때(2026-10-30) 다시 확인해 그대로였다. 운영 배포 직전에 한 번 더 확인한다.
 
 | 자원 | 무료 한도·조건 | 적용 |
 |---|---|---|
 | Workers | 계정 합산 100,000요청/일, CPU 10ms/요청, 메모리 128MB, 크기 64MiB(압축 전), 시작 1초, 하위 요청 50/요청, Cron 5개(10ms) | 인증·전달만 수행 |
 | DO 요청 | 100,000/일. HTTP·RPC·수신 WebSocket 메시지·알람 실행 포함. 수신 메시지 20:1 할인이 무료 한도에 적용되는지는 불명확하므로 1:1로 계산 | 턴 중계·결과 대조·전적 |
-| DO CPU | 무료 플랜 값이 문서상 10ms인지 30초인지 불명확. 10ms로 가정 | 메시지 처리 1~2ms 목표 |
+| DO CPU | 무료 플랜 값이 문서상 10ms인지 30초인지 불명확. 10ms로 가정(2026-10-30 재확인: 한도 표는 호출당 기본 30초, FAQ는 Workers와 같은 호출당 한도라고 해 여전히 불명확. PR 05에서 실측) | 메시지 처리 1~2ms 목표 |
 | DO 실행 시간 | 13,000 GB-s/일. Hibernation 가능한 유휴 상태는 과금 없음. 프로토콜 ping과 송신 메시지는 무과금 | 상시 연결은 Hibernation API만 사용 |
-| DO SQL | 읽기 5M행/일, 쓰기 100k행/일(`setAlarm`·삭제 포함). 저장은 계정 5GB, 객체당 1GB로 가정 | 턴당 쓰기 최소화 |
-| WebSocket | DO당 32,768 연결, 수신 메시지 32MiB. 코드 배포 시 모든 연결이 끊김 | 재접속·재생 필수 |
+| DO SQL | 읽기 5M행/일, 쓰기 100k행/일(`setAlarm`·삭제 포함). 저장은 계정 5GB, 객체당 1GB로 가정(2026-10-30: 한도 표는 객체당 10GB, FAQ는 Free 1GB라 문서끼리 어긋남) | 턴당 쓰기 최소화 |
+| WebSocket | DO당 32,768 연결(Hibernation API 문서 기준, 한도 표에는 없음), 수신 메시지 32MiB. 코드 배포 시 모든 연결이 끊김 | 재접속·재생 필수 |
 | 일일 리셋 | 00:00 UTC (한국 09:00) | 한도 안내 문구 |
 | 주소 | 기본 `workers.dev` | 도메인 구입 없음 |
 
 부하 가정(실측 아님): 30명, 하루 100경기, 경기당 수신 메시지 약 50개면 DO 요청 약 1만/일, 행 쓰기 수천/일, 저장 경기당 수 KB다.
+
+Workers Logs는 새 Worker에서 기본으로 켜지고 요청마다 메서드와 전체 URL을 기록한다. 헤더·본문 기록과 가림 처리는 문서에 없다(2026-10-30 확인). 그래서 비밀값을 URL에 넣지 않고, 기록 내용을 실제로 확인하는 PR 05까지 설정에서 명시적으로 끈다. 무료 플랜의 로그 한도는 하루 20만 건, 보관 3일이다.
 
 ### PR 05·06 무료 실측 기준
 
@@ -753,12 +755,12 @@ PR 04는 배포하지 않는다. `server/`의 Worker와 League DO를 로컬 Work
 
 구성:
 
-- Worker(`server/src/index.ts`)가 라우팅·입력 검증·비밀값 처리를 맡고 League DO(`League`, SQLite, `idFromName("league")` 하나)를 RPC로 부른다. API 요청 하나에 DO 호출은 하나다.
+- Worker(`server/src/index.ts`)가 라우팅·입력 검증·비밀값 처리를 맡고 League DO(`League`, SQLite, `idFromName("league")` 하나)를 RPC로 부른다(compatibility_date 2024-04-03 이후). DO 메서드는 동기여도 Worker는 결과를 await한다. API 요청 하나에 DO 호출은 하나다.
 - 원문 비밀값(접속키·복구코드·초대코드·재연결 코드·운영자 비밀값)은 Worker에서만 다룬다. Worker가 새 비밀값을 만들고 해시를 계산해 DO에는 해시만 넘긴다. DO는 원문을 받지도 저장하지도 않는다.
 - DO의 상태 확인과 변경은 await 없이 동기 SQL로 한다. 여러 문장은 `ctx.storage.transactionSync()` 하나로 묶는다. 그래서 같은 초대코드의 마지막 자리 같은 동시 요청도 하나씩 처리된다.
 - 시간은 DO의 시계 하나에서 읽는다. 테스트는 그 시계를 바꿔 만료를 검증한다(실제로 기다리지 않는다).
 - 스키마 버전을 저장하고 이후 PR은 테이블을 추가하는 이전 단계로 확장한다.
-- 설정은 SQLite DO 이전(`new_sqlite_classes`)과 `workers_dev`다. 비밀값은 `OPERATOR_SECRET`, `CODE_PEPPER` 두 개이며 값은 저장소·문서에 쓰지 않는다. 테스트 값은 낮은 엔트로피의 명백한 가짜 값을 쓴다. Workers Logs(observability)는 PR 05에서 실제로 무엇이 기록되는지 확인할 때까지 끈다.
+- 설정은 SQLite DO 이전(`new_sqlite_classes`)과 `workers_dev`다. 비밀값은 `OPERATOR_SECRET`, `CODE_PEPPER` 두 개이며 값은 저장소·문서에 쓰지 않는다. 테스트 값은 낮은 엔트로피의 명백한 가짜 값을 쓴다. Workers Logs(observability)는 PR 05에서 실제로 무엇이 기록되는지 확인할 때까지 끈다. 설정을 생략하면 켜지므로 `observability.enabled = false`를 명시한다.
 
 비밀값 형식과 저장:
 
@@ -768,7 +770,7 @@ PR 04는 배포하지 않는다. `server/`의 Worker와 League DO를 로컬 Work
 | 복구코드 | Crockford base32 16자(80비트), `XXXX-XXXX-XXXX-XXXX` | HMAC-SHA256(`CODE_PEPPER`) |
 | 초대코드 | Crockford base32 12자(60비트), `XXXX-XXXX-XXXX` | HMAC-SHA256(`CODE_PEPPER`) |
 | 재연결 코드 | Crockford base32 16자, 일회용, 24시간 | HMAC-SHA256(`CODE_PEPPER`) |
-| 운영자 비밀값 | 32자 이상. 없거나 짧으면 그룹 생성을 끈다 | 저장하지 않는다(고정 시간 비교) |
+| 운영자 비밀값 | 32자 이상. 없거나 짧으면 그룹 생성을 끈다 | 저장하지 않는다(양쪽 SHA-256 다이제스트를 고정 시간 비교. `timingSafeEqual`은 같은 길이만 받는다) |
 | 요청 IP | `CF-Connecting-IP` | 시도 제한용 HMAC만, 하루 뒤 삭제 |
 
 코드 입력은 대소문자·하이픈·공백을 무시한다. 키·코드는 URL·쿼리·로그·오류 응답에 넣지 않고, 표시 이메일도 로그에 남기지 않는다.
