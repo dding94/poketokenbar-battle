@@ -1,8 +1,8 @@
 name: CI
 
 # Public since 2026-10-29, so standard runners are free. Pushes to feat/** and pull requests run the
-# app jobs, plus determinism when the engine boundary changed (see `changes`); a dispatch picks the
-# scope. Push and PR events have no inputs, hence the `inputs.<name> || <default>` fallbacks.
+# app jobs, plus determinism when the engine boundary or this file changed (see `changes`); a dispatch
+# picks the scope. Push and PR events have no inputs, hence the `inputs.<name> || <default>` fallbacks.
 on:
   push:
     branches: ['feat/**']
@@ -97,8 +97,9 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # Push and PR runs start determinism only when the engine boundary changed: a PR against its base,
-  # a push against the newest green push run it builds on (scripts/changed-since-green.sh says why).
+  # Push and PR runs start determinism only when the engine boundary or this file changed (an edit to
+  # the determinism job, such as its FILTER, has to run it): a PR against its base, a push against the
+  # newest green push run it builds on (scripts/changed-since-green.sh says why).
   changes:
     if: ${{ github.event_name != 'workflow_dispatch' }}
     name: changes
@@ -124,7 +125,7 @@ jobs:
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          ./scripts/changed-since-green.sh engine Package.swift \
+          ./scripts/changed-since-green.sh engine Package.swift .github/workflows/ci.yml \
             'Sources/PokeTokenBar/Core/Battle*.swift' 'Sources/PokeTokenBar/Core/Practice*.swift'
 
   determinism:
