@@ -74,6 +74,13 @@ final class PracticeSession {
     var todayStars: Set<PracticeDailyGoal> {
         records.dailyDay == PracticeDaily.dayKey(now(), calendar: calendar) ? records.dailyStars : []
     }
+    /// HP and growth a battle with stakes changes (PR 03C); nil keeps every battle inside the session.
+    private let effects: (any PracticeBattleEffects)?
+    /// The stakes of the battle that just ended (HP left, XP paid); nil for sparring or before one ends.
+    private(set) var lastStakes: PracticeStakesUpdate?
+    /// The individual's HP share between battles (0 = fainted); nil for wild and today's opponents and without
+    /// `effects`.
+    func healthShare(of candidate: PracticeCandidate) -> Double? { nil }   // contract stub
     /// The battle that just ended, for the result screen; nil until one ends.
     private(set) var lastRecord: PracticeRecordUpdate?
     /// Today's opponent for the current player (`PracticeDaily`); never saved. Its id is "daily-<day>".
@@ -98,10 +105,11 @@ final class PracticeSession {
          drivesAutomatically: Bool = true, wildSource: PracticeWildSource = .live,
          wildSeed: @escaping () -> UInt64 = { UInt64.random(in: .min ... .max) },
          recordStore: PracticeRecordStore = PracticeRecordStore(fileURL: nil),
-         now: @escaping () -> Date = Date.init, calendar: Calendar = .autoupdatingCurrent) {
+         now: @escaping () -> Date = Date.init, calendar: Calendar = .autoupdatingCurrent,
+         effects: (any PracticeBattleEffects)? = nil) {
         self.engineURL = engineURL; self.clock = clock; self.drivesAutomatically = drivesAutomatically
         self.wildSource = wildSource; self.wildSeed = wildSeed
-        self.recordStore = recordStore; self.now = now; self.calendar = calendar
+        self.recordStore = recordStore; self.now = now; self.calendar = calendar; self.effects = effects
         records = recordStore.load()
     }
 

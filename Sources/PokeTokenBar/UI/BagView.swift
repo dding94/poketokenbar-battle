@@ -107,6 +107,7 @@ private struct ItemCard: View {
         case .rareCandy: return store.canUseRareCandy
         case .mint:      return store.canUseMint
         case .shinyCharm: return false   // 보유형 — 사용 개념 없음(상시 효과)
+        case .potion, .hyperPotion, .revive, .ivReroll: return false   // contract stub (PR 03C)
         }
     }
     /// 사용 컨트롤 효과 힌트 ("+XP" / "성격 랜덤 변경").
@@ -115,6 +116,7 @@ private struct ItemCard: View {
         case .rareCandy: return "+\(TokenFormatter.compact(selectedCandyCount * RareCandy.xp)) XP"
         case .mint:      return l.mintEffectHint
         case .shinyCharm: return l.shinyCharmEffectHint
+        case .potion, .hyperPotion, .revive, .ivReroll: return ""   // contract stub (PR 03C)
         }
     }
     private func performUse() {
@@ -122,6 +124,7 @@ private struct ItemCard: View {
         case .rareCandy: _ = store.useRareCandy(count: selectedCandyCount)
         case .mint:      _ = store.useMint()
         case .shinyCharm: break   // 보유형 — 사용 동작 없음
+        case .potion, .hyperPotion, .revive, .ivReroll: break   // contract stub (PR 03C)
         }
     }
 

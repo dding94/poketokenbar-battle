@@ -72,6 +72,8 @@ struct BattleConfig: Codable {
         let set: BattleSet
         /// The engine policy this side's automatic turns run (`PracticeTemperament.policyID`); nil = standard.
         var policy: String? = nil
+        /// HP this side starts with (`config.pN.hp`, 1…max HP, PR 03C); nil = full.
+        var hp: Int? = nil
     }
     let seed: [UInt32]
     let policySeed: UInt32

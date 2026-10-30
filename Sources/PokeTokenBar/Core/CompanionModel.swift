@@ -180,6 +180,12 @@ enum ItemKind: String, Codable, Sendable, CaseIterable {
     case rareCandy
     case mint
     case shinyCharm
+    /// PR 03C battle items: heal an individual's HP between battles, or bring a fainted one back.
+    case potion
+    case hyperPotion
+    case revive
+    /// PR 03C: re-rolls the current Pokémon's six IVs.
+    case ivReroll
 
     /// PokéAPI 아이템 스프라이트 파일명(.../sprites/items/{name}.png). nil = 스프라이트 없음(이모지 폴백만).
     var spriteName: String? {
@@ -187,6 +193,10 @@ enum ItemKind: String, Codable, Sendable, CaseIterable {
         case .rareCandy: return "rare-candy"
         case .mint: return nil   // PokéAPI 에 민트 스프라이트 없음(8세대 아이템) → 이모지 폴백
         case .shinyCharm: return "shiny-charm"
+        case .potion: return "potion"
+        case .hyperPotion: return "hyper-potion"
+        case .revive: return "revive"
+        case .ivReroll: return nil
         }
     }
     /// 스프라이트 로딩 전/미제공/실패 시 폴백 이모지.
@@ -195,6 +205,9 @@ enum ItemKind: String, Codable, Sendable, CaseIterable {
         case .rareCandy: return "🍬"
         case .mint: return "🌿"
         case .shinyCharm: return "✨"
+        case .potion, .hyperPotion: return "🧪"
+        case .revive: return "💠"
+        case .ivReroll: return "🎲"
         }
     }
     /// 상점 판매가(재화 = 사용한 토큰). nil = 상점 미판매.
@@ -203,12 +216,13 @@ enum ItemKind: String, Codable, Sendable, CaseIterable {
         case .rareCandy: return RareCandy.price
         case .mint: return Mint.price
         case .shinyCharm: return ShinyCharm.price
+        case .potion, .hyperPotion, .revive, .ivReroll: return nil   // contract stub: not sold until usable
         }
     }
     /// 보유형(패시브) 아이템 — 소비하지 않고 보유하는 동안 상시 효과. 1회 구매(재구매 불가), 가방엔 "적용 중" 표시.
     var isPassive: Bool {
         switch self {
-        case .rareCandy, .mint: return false
+        case .rareCandy, .mint, .potion, .hyperPotion, .revive, .ivReroll: return false
         case .shinyCharm: return true
         }
     }
@@ -235,6 +249,20 @@ enum Mint {
     /// 사탕(500M)의 1/5로 싸게 둬서 성격을 마음에 들 때까지 굴려보는 가벼운 재미. 성장을 안 줘서
     /// 이중계산 이슈도 없음(가격 = 순수 소비).
     static let price = 100_000_000
+}
+
+/// PR 03C 배틀 아이템 밸런스 상수(2026-10-30 사용자 결정). 가격은 다른 상점 품목처럼 난이도 배율을 받는다.
+enum BattleItem {
+    /// 상처약: 최대 체력의 50% 회복(최대치까지).
+    static let potionPrice = 100_000_000
+    static let potionHeal = 0.5
+    /// 고급상처약: 완전 회복.
+    static let hyperPotionPrice = 300_000_000
+    /// 기력의조각: 기절한 개체를 최대 체력의 50%로 되살린다.
+    static let revivePrice = 400_000_000
+    static let reviveShare = 0.5
+    /// 개체값 재추첨: 현재 포켓몬의 개체값 6개를 다시 뽑는다(더 낮아져도 그대로).
+    static let ivRerollPrice = 400_000_000
 }
 
 /// 이로치 부적 밸런스 상수 — 보유형(1회 구매·영구, 소비 안 됨).

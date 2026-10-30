@@ -63,6 +63,28 @@ struct PracticeRecords: Codable, Equatable, Sendable {
     /// The local day (`PracticeDaily.dayKey`) the stars below belong to; another day starts with none.
     var dailyDay: String?
     var dailyStars: Set<PracticeDailyGoal> = []
+    /// The local day the XP-paying wins below were counted on (PR 03C). Optional so older files still decode.
+    var xpDay: String?
+    var xpWins: Int?
+}
+
+/// PR 03C stakes (2026-10-30): battles against wild opponents and today's opponent cost HP, a loss faints, and a
+/// win grows the current Pokémon. Sparring between your own Pokémon changes nothing.
+enum PracticeStakes {
+    /// Growth XP per win, 1/20 of a Rare Candy.
+    static let winXP = 5_000_000
+    /// Wins per local day that pay XP.
+    static let dailyXPWins = 10
+}
+
+/// What the result screen shows about a battle with stakes (`PracticeSession.lastStakes`).
+struct PracticeStakesUpdate: Equatable, Sendable {
+    /// The player's HP share after the battle (0 = fainted).
+    let healthShare: Double
+    /// XP the current Pokémon got: 0 after a loss, past the daily cap, or without a current Pokémon.
+    let xp: Int
+    /// Wins left today that still pay XP.
+    let xpWinsLeft: Int
 }
 
 extension PracticeRecords {
