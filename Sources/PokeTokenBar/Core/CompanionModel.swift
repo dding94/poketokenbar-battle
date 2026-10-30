@@ -216,7 +216,10 @@ enum ItemKind: String, Codable, Sendable, CaseIterable {
         case .rareCandy: return RareCandy.price
         case .mint: return Mint.price
         case .shinyCharm: return ShinyCharm.price
-        case .potion, .hyperPotion, .revive, .ivReroll: return nil   // contract stub: not sold until usable
+        case .potion: return BattleItem.potionPrice
+        case .hyperPotion: return BattleItem.hyperPotionPrice
+        case .revive: return BattleItem.revivePrice
+        case .ivReroll: return BattleItem.ivRerollPrice
         }
     }
     /// 보유형(패시브) 아이템 — 소비하지 않고 보유하는 동안 상시 효과. 1회 구매(재구매 불가), 가방엔 "적용 중" 표시.

@@ -1186,8 +1186,17 @@ final class CompanionStore {
                 let aDone = a.isPassive && itemCount(a) > 0
                 let bDone = b.isPassive && itemCount(b) > 0
                 if aDone != bDone { return !aDone }
-                return (a.shopPrice ?? 0) < (b.shopPrice ?? 0)   // 나머지는 가격 저렴한 순
+                let aPrice = a.shopPrice ?? 0, bPrice = b.shopPrice ?? 0
+                if aPrice != bPrice { return aPrice < bPrice }   // 나머지는 가격 저렴한 순
+                return Self.listOrder(.item(a)) < Self.listOrder(.item(b))
             }
+    }
+
+    /// 같은 가격(민트·상처약 1억, 기력의조각·개체값 재추첨 4억)은 ItemKind 선언 순서 — 정렬 안정성에 기대지 않는다.
+    /// 알은 아이템과 가격이 겹치지 않아 뒤에 둔다.
+    private static func listOrder(_ entry: ShopEntry) -> Int {
+        guard case .item(let kind) = entry else { return ItemKind.allCases.count }
+        return ItemKind.allCases.firstIndex(of: kind) ?? ItemKind.allCases.count
     }
 
     /// 상점 표시 순서 — 판매 아이템 + 알 3종을 하나의 가격 오름차순 목록으로 병합.
@@ -1209,7 +1218,9 @@ final class CompanionStore {
             let aDone = isPurchasedPassive(a)
             let bDone = isPurchasedPassive(b)
             if aDone != bDone { return !aDone }
-            return price(of: a) < price(of: b)
+            let aPrice = price(of: a), bPrice = price(of: b)
+            if aPrice != bPrice { return aPrice < bPrice }
+            return Self.listOrder(a) < Self.listOrder(b)
         }
     }
 
