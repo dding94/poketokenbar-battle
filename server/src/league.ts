@@ -450,7 +450,8 @@ export class League extends DurableObject<Env> {
     });
   }
 
-  removeMember(input: { keyHash: string; trainerId: string }): Result<{ ok: true }> {
+  /** Removal also revokes every open invite of the group, so a removed person cannot rejoin with one. */
+  removeMember(input: { keyHash: string; trainerId: string }): Result<{ ok: true; revokedInvites: number }> {
     const now = this.clock();
     return this.tx(() => {
       const auth = this.access.actor(input.keyHash, "host");
@@ -461,7 +462,8 @@ export class League extends DurableObject<Env> {
       const target = found.value;
       this.anonymize(target.id, now);
       this.addAudit(actor.groupId, now, "member_removed", actor.trainer.id, target.id, null);
-      return ok({ ok: true as const });
+      const revokedInvites = this.revokeOpenInvites(actor.groupId, actor.trainer.id, now);
+      return ok({ ok: true as const, revokedInvites });
     });
   }
 
@@ -535,6 +537,24 @@ export class League extends DurableObject<Env> {
       trainerId,
     );
     this.voidReconnectCodes(trainerId, now);
+  }
+
+  /** Revokes invites that are not expired, revoked or used up, with one audit entry each. */
+  private revokeOpenInvites(groupId: string, actorId: string, now: number): number {
+    const open = this.sql
+      .exec<{ id: string }>(
+        `SELECT id FROM invites
+         WHERE group_id = ? AND revoked_at IS NULL AND expires_at > ? AND uses < max_uses
+         ORDER BY created_at, id`,
+        groupId,
+        now,
+      )
+      .toArray();
+    for (const invite of open) {
+      this.sql.exec("UPDATE invites SET revoked_at = ? WHERE id = ?", now, invite.id);
+      this.addAudit(groupId, now, "invite_revoked", actorId, null, invite.id);
+    }
+    return open.length;
   }
 
   /** Voids the trainer's older unused codes and stores a new one valid for 24 hours. */

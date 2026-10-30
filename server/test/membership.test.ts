@@ -1,5 +1,20 @@
 import { describe, expect, it } from "vitest";
-import { type Account, call, expectError, setupGroup } from "./helpers";
+import {
+  type Account,
+  HOUR,
+  advanceClock,
+  call,
+  createGroup,
+  expectError,
+  freshEmail,
+  issueInvite,
+  join,
+  joinRaw,
+  setupGroup,
+  useRealClockAfterEach,
+} from "./helpers";
+
+useRealClockAfterEach();
 
 async function members(key: string): Promise<any[]> {
   const res = await call("GET", "/v1/group", { key });
@@ -134,6 +149,64 @@ describe("POST /v1/members/remove", () => {
       404,
       "not_found",
     );
+  });
+});
+
+describe("open invites on removal", () => {
+  async function invites(hostKey: string): Promise<any[]> {
+    return (await call("GET", "/v1/invites", { key: hostKey })).body.invites;
+  }
+
+  it("revokes them so the removed person's old code fails", async () => {
+    const { host, members: [member], inviteCode, inviteId } = await setupGroup(1);
+    const res = await call("POST", "/v1/members/remove", { key: host.accessKey, body: { trainerId: member!.trainerId } });
+    expect(res.status, res.text).toBe(200);
+    expect(res.body).toEqual({ ok: true, revokedInvites: 1 });
+    expectError(await joinRaw(inviteCode, freshEmail()), 410, "invite_revoked");
+
+    const audit = await call("GET", "/v1/audit", { key: host.accessKey });
+    const revoked = audit.body.entries.filter((e: any) => e.kind === "invite_revoked");
+    expect(revoked.map((e: any) => [e.actorTrainerId, e.inviteId])).toEqual([[host.trainerId, inviteId]]);
+  });
+
+  it("lets an invite created after the removal work", async () => {
+    const { host, members: [member] } = await setupGroup(1);
+    await call("POST", "/v1/members/remove", { key: host.accessKey, body: { trainerId: member!.trainerId } });
+    const { inviteCode } = await issueInvite(host.accessKey);
+    expect((await joinRaw(inviteCode, freshEmail())).status).toBe(200);
+  });
+
+  it("are left open by a voluntary leave", async () => {
+    const { host, members: [member], inviteCode, inviteId } = await setupGroup(1);
+    expect((await call("POST", "/v1/leave", { key: member!.accessKey })).body).toEqual({ ok: true });
+    expect((await invites(host.accessKey)).find((i) => i.inviteId === inviteId).revoked).toBe(false);
+    expect((await joinRaw(inviteCode, freshEmail())).status).toBe(200);
+  });
+
+  it("counts only invites that are open: not expired, revoked or used up", async () => {
+    const host = await createGroup();
+    const usedUp = await issueInvite(host.accessKey, { maxUses: 1 });
+    const member = await join(usedUp.inviteCode);
+    const expired = await issueInvite(host.accessKey, { ttlSeconds: 3600 });
+    const revoked = await issueInvite(host.accessKey);
+    await call("POST", "/v1/invites/revoke", { key: host.accessKey, body: { inviteId: revoked.inviteId } });
+    await advanceClock(2 * HOUR);
+    const open = await issueInvite(host.accessKey);
+    const before = await invites(host.accessKey);
+
+    const res = await call("POST", "/v1/members/remove", { key: host.accessKey, body: { trainerId: member.trainerId } });
+    expect(res.body).toEqual({ ok: true, revokedInvites: 1 });
+
+    const after = await invites(host.accessKey);
+    const byId = (list: any[], id: string) => list.find((i) => i.inviteId === id);
+    expect(byId(after, open.inviteId).revoked).toBe(true);
+    expect(byId(after, expired.inviteId)).toEqual(byId(before, expired.inviteId));
+    expect(byId(after, usedUp.inviteId)).toEqual(byId(before, usedUp.inviteId));
+    expect(byId(after, revoked.inviteId)).toEqual(byId(before, revoked.inviteId));
+
+    const audit = await call("GET", "/v1/audit", { key: host.accessKey });
+    const revokedIds = audit.body.entries.filter((e: any) => e.kind === "invite_revoked").map((e: any) => e.inviteId);
+    expect(revokedIds.sort()).toEqual([open.inviteId, revoked.inviteId].sort());
   });
 });
 
