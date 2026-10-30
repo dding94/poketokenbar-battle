@@ -1294,7 +1294,9 @@ final class PracticeScreenRenderingTests: XCTestCase {
             XCTAssertEqual(store.currentInstanceID, "bag-pikachu")
             XCTAssertEqual(store.currentIVs?.speed, 18)
             XCTAssertEqual(store.currentHealthShare, 1, "a fresh save starts at full HP")
-            let host = hostView(BagView(store: store, nav: PopoverNavigation()), width: PopoverMetrics.contentWidth, height: 520)
+            // Artwork off: the item icons stay emoji, so the test never downloads a sprite.
+            let host = hostView(BagView(store: store, nav: PopoverNavigation(), artwork: false),
+                                width: PopoverMetrics.contentWidth, height: 520)
             guard lang == .en else {
                 let (_, bitmap) = try await waitForText(["IV"], in: host)
                 try save(bitmap, as: "practice-03c-bag-ko.png")

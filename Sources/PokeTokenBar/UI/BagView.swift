@@ -5,6 +5,8 @@ import SwiftUI
 struct BagView: View {
     let store: CompanionStore
     let nav: PopoverNavigation
+    /// false 면 아이템 아이콘을 이모지로만 그린다(네트워크 없음) — 연습 화면의 `artwork: false` 와 같은 뜻, 테스트용.
+    var artwork = true
     /// 마지막으로 쓴 배틀 아이템의 결과(회복 후 체력·재추첨한 개체값, PR 03C) — 닫거나 가방을 떠날 때까지 맨 위에.
     /// 그 종류의 마지막 하나를 쓰면 카드가 목록에서 사라지므로 결과는 카드 밖에 둔다.
     @State private var feedback: BattleItemFeedback?

@@ -372,6 +372,16 @@ final class PracticeWordingTests: XCTestCase {
         XCTAssertEqual(en.practiceResultFaintedBlock(en.practiceOtherOpponent), "Use a Revive from New opponent to battle again")
     }
 
+    /// Item icons load PokéAPI sprites only with artwork on, so screens drawn with artwork off (tests) stay offline;
+    /// the reroll has no sprite either way.
+    func testItemIconsLoadSpritesOnlyWithArtwork() {
+        for kind in [ItemKind.potion, .hyperPotion, .revive, .rareCandy] {
+            XCTAssertTrue(ItemIconView.loadsSprite(kind, artwork: true), "\(kind)")
+            XCTAssertFalse(ItemIconView.loadsSprite(kind, artwork: false), "\(kind): artwork off must stay offline")
+        }
+        XCTAssertFalse(ItemIconView.loadsSprite(.ivReroll, artwork: true), "the reroll is an emoji")
+    }
+
     /// Healing from the selection screen uses the item on my entry's individual, never on the current Pokémon.
     func testHealUsesTheItemOnTheEntry() throws {
         let bag = RecordingItemBag([.potion: 1])

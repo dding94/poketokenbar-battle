@@ -18,11 +18,17 @@ let rarityDisplayOrder: [Rarity] = [.legendary, .rare, .uncommon, .common]
 struct ItemIconView: View {
     let kind: ItemKind
     var size: CGFloat = 30
+    /// false 면 이모지만 — 스프라이트를 내려받거나 캐시에서 읽지 않는다(테스트는 네트워크 없이 그린다).
+    var artwork = true
     @State private var img: NSImage?
 
-    init(kind: ItemKind, size: CGFloat = 30) {
+    /// 스프라이트를 쓰는가 — artwork 이 켜져 있고 PokéAPI 스프라이트가 있는 아이템만.
+    static func loadsSprite(_ kind: ItemKind, artwork: Bool) -> Bool { kind.spriteName != nil }   // RED stub
+
+    init(kind: ItemKind, size: CGFloat = 30, artwork: Bool = true) {
         self.kind = kind
         self.size = size
+        self.artwork = artwork
         // 캐시에 있으면 즉시(동기) 표시 — 재렌더 플래시 방지.
         _img = State(initialValue: kind.spriteName.flatMap { SpriteLoader.cachedItemImage(name: $0) })
     }
