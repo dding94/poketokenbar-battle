@@ -1610,13 +1610,14 @@ final class PracticeWildWordingTests: XCTestCase {
 /// The practice side must stay read-only towards the save. `CompanionStore.rollsShiny` is a pure static and the one
 /// allowed use of the store; any other store use, file write, defaults or keychain API in these files is a way to reach
 /// the save. One file writes: `Core/PracticeRecordStore.swift` keeps the practice records in a file of their own, so it
-/// may use the file APIs that takes (the atomic write, and moving a damaged file aside). It still may not delete, copy
-/// or replace a file, nor touch the store, the state paths, save transfers, defaults or the keychain: it can only write
-/// the URL it is given. `PracticeRecordFileTests` checks at run time that this URL is not the save.
+/// may use the file APIs that takes (the atomic write, and moving a damaged file aside). It still may not delete, trash,
+/// copy or replace a file or change its attributes, nor touch the store, the state paths, save transfers, defaults or
+/// the keychain: it can only write the URL it is given. `PracticeRecordFileTests` checks at run time that this URL is
+/// not the save.
 final class PracticeReadOnlyGuardTests: XCTestCase {
     static let writeAPIs = ["FileManager", "UserDefaults", "AppStatePaths", "SaveTransfer", "SaveSnapshot", ".write(to",
                             "createFile", "removeItem", "moveItem", "copyItem", "replaceItem", "FileHandle", "SecItem",
-                            "Keychain", ".save("]
+                            "Keychain", ".save(", "trashItem", "setAttributes"]
     /// The one practice file that may write, and the only file APIs it may use.
     static let recordStorePath = "Core/PracticeRecordStore.swift"
     static let recordStoreAllowed: Set<String> = ["FileManager", ".write(to", "moveItem"]
