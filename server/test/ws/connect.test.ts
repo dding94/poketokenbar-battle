@@ -21,10 +21,14 @@ describe("GET /v1/connect", () => {
   });
 
   it("allows only GET", async () => {
+    // workerd delivers any request carrying "Upgrade: websocket" as a GET, so this checks the
+    // route table without the header.
     const host = await createGroup();
-    const res = await connectRaw({ key: host.accessKey, method: "POST" });
-    await expectRefused(res, 405, "method_not_allowed");
-    expect(res.headers.get("allow")).toBe("GET");
+    for (const method of ["POST", "PUT", "DELETE"]) {
+      const res = await connectRaw({ key: host.accessKey, method, upgrade: null });
+      await expectRefused(res, 405, "method_not_allowed");
+      expect(res.headers.get("allow")).toBe("GET");
+    }
   });
 
   it("refuses a missing, malformed or unknown key with 401 and no upgrade", async () => {

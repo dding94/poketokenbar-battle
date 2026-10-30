@@ -1,4 +1,3 @@
-import { evictAllDurableObjects } from "cloudflare:test";
 import { exports } from "cloudflare:workers";
 import { afterAll, expect } from "vitest";
 import { BASE, freshIp } from "../helpers";
@@ -75,7 +74,7 @@ export class Socket {
     for (const w of waiters) w();
   }
 
-  private async until<T>(probe: () => T | undefined, what: string): Promise<T> {
+  private async wait<T>(probe: () => T | undefined, what: string): Promise<T> {
     const deadline = Date.now() + WAIT_MS;
     for (;;) {
       const value = probe();
@@ -94,22 +93,33 @@ export class Socket {
 
   /** The next unread frame, which must be JSON; fails on timeout. */
   async next(): Promise<ServerMessage> {
-    const frame = await this.until(() => (this.cursor < this.frames.length ? this.frames[this.cursor] : undefined), "a message");
+    const frame = await this.wait(() => (this.cursor < this.frames.length ? this.frames[this.cursor] : undefined), "a message");
     this.cursor += 1;
     expect(frame, "expected a JSON message").not.toBe("pong");
     return JSON.parse(frame) as ServerMessage;
   }
 
+  /** Reads up to and including the first JSON message matching `match`. */
+  async until(match: (message: ServerMessage) => boolean): Promise<ServerMessage> {
+    for (;;) {
+      const frame = await this.wait(() => (this.cursor < this.frames.length ? this.frames[this.cursor] : undefined), "a matching message");
+      this.cursor += 1;
+      if (frame === "pong") continue;
+      const message = JSON.parse(frame) as ServerMessage;
+      if (match(message)) return message;
+    }
+  }
+
   /** Sends `ping` and reads up to its `pong`; every frame before it must have been read already. */
   async sync(): Promise<void> {
     this.ws.send("ping");
-    const frame = await this.until(() => (this.cursor < this.frames.length ? this.frames[this.cursor] : undefined), "pong");
+    const frame = await this.wait(() => (this.cursor < this.frames.length ? this.frames[this.cursor] : undefined), "pong");
     this.cursor += 1;
     expect(frame, "unexpected message before pong").toBe("pong");
   }
 
   async closed(): Promise<CloseInfo> {
-    return this.until(() => this.closeInfo ?? undefined, "close");
+    return this.wait(() => this.closeInfo ?? undefined, "close");
   }
 
   /** Frames not read yet. */
@@ -140,20 +150,22 @@ export async function socketFor(key: string): Promise<Socket> {
 }
 
 /**
- * Closes every socket the file opened. Without this, Miniflare does not shut down after a
- * server-initiated close (found while choosing the test structure for PR 05).
+ * Closes the sockets a file left open and waits for the close handshake, so no socket outlives
+ * its file in the shared "ws" runtime. (Each side must answer the other's close: when neither
+ * did, Miniflare never shut down.)
  */
 export function closeSocketsAfterAll(): void {
   afterAll(async () => {
     for (const socket of open) {
+      if (socket.closeInfo) continue;
       try {
-        socket.ws.close();
+        socket.ws.close(1000, "done");
       } catch {
         // Already closed.
       }
     }
+    await Promise.all([...open].map((socket) => socket.closed().catch(() => undefined)));
     open.clear();
-    await evictAllDurableObjects({ webSockets: "close" });
   });
 }
 

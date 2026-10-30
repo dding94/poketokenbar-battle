@@ -83,7 +83,8 @@ describe("realtime messages, close reasons and logs", () => {
     await leaveGroup(newcomer.accessKey);
     await removeMember(host.accessKey, recovered.trainerId);
     await transferHost(host.accessKey, b.trainerId);
-    await watcher.sync();
+    // host_transfer is the last event, so every earlier message has arrived once it has.
+    await watcher.until((m) => m.type === "group_changed" && m.kind === "host_transfer");
 
     // Every message has only the contract's fields.
     const frames = sockets.flatMap((s) => s.frames.filter((f) => f !== "pong"));

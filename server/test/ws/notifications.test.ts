@@ -147,6 +147,7 @@ describe("revocation closes the trainer's sockets with 4003 after the change com
     const b = members[0]!;
     const socket = await socketFor(b.accessKey);
     const watcher = await socketFor(host.accessKey);
+    expect(await socket.next()).toEqual(presence(host.trainerId, true));
     // A bad recovery code, a bad reconnect code, a refused removal.
     expect((await call("POST", "/v1/recover", { body: { recoveryCode: "ZZZZ-ZZZZ-ZZZZ-ZZZZ" } })).status).toBe(404);
     expect((await reconnectWith("ZZZZ-ZZZZ-ZZZZ-ZZZZ")).status).toBe(404);
@@ -155,5 +156,6 @@ describe("revocation closes the trainer's sockets with 4003 after the change com
     expect(socket.closeInfo).toBeNull();
     await watcher.sync();
     expect(watcher.messages.map((m) => m.type)).toEqual(["hello"]);
+    expect(watcher.closeInfo).toBeNull();
   });
 });
