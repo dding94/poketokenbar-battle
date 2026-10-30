@@ -38,9 +38,16 @@ export function newCode(length: number): string {
   return groups.join("-");
 }
 
-/** Ignores case, hyphens and whitespace. Returns null when the result is not a code of `length`. */
+/**
+ * Ignores case, hyphens and whitespace, and reads the Crockford aliases O as 0 and I, L as 1.
+ * Returns null when the result is not a code of `length`.
+ */
 export function normalizeCode(input: string, length: number): string | null {
-  const compact = input.replace(/[\s-]/g, "").toUpperCase();
+  const compact = input
+    .replace(/[\s-]/g, "")
+    .toUpperCase()
+    .replace(/O/g, "0")
+    .replace(/[IL]/g, "1");
   return compact.length === length && CROCKFORD_CHAR.test(compact) ? compact : null;
 }
 
