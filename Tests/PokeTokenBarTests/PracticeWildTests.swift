@@ -1167,6 +1167,32 @@ final class PracticeDailySessionTests: XCTestCase {
         XCTAssertEqual(session.battle?.phase, .running)
     }
 
+    /// A search while today's opponent is still being made: a quick reroll leaves that search alone, while a new day
+    /// (midnight during the search) starts it over for the new day.
+    func testASearchWhileTodaysOpponentIsBeingMadeKeepsItThatDayAndStartsOverTheNext() async throws {
+        let gate = GatedProvider(WildStub.standard()), today = Today()
+        let session = makeSession(gate, today: today)
+        session.findWildOpponents()
+        let reached = await waitSuspended(gate, count: 2)
+        XCTAssertTrue(reached)
+        let sameDay = session.dailyTask
+        session.findWildOpponents()
+        XCTAssertEqual(session.dailyState, .searching)
+        XCTAssertTrue(session.dailyTask == sameDay, "a reroll on the same day leaves the search for today's opponent alone")
+        today.date += 86_400
+        session.findWildOpponents()
+        XCTAssertEqual(session.dailyState, .searching)
+        XCTAssertFalse(session.dailyTask == sameDay, "a new day starts it over")
+        // Three wild searches and two for today's opponent reach the index.
+        let held = await waitSuspended(gate, count: 5)
+        XCTAssertTrue(held)
+        let tasks = [session.wildTask, session.dailyTask, sameDay]
+        await gate.resume()
+        for task in tasks { await task?.value }
+        XCTAssertEqual(session.dailyState, .ready)
+        XCTAssertEqual(session.dailyCandidate?.id, "daily-2026-10-31", "the old day's search never lands")
+    }
+
     func testANewDayMakesANewOpponentWhenASearchStarts() async throws {
         let today = Today()
         let session = makeSession(WildStub.standard(), today: today)
