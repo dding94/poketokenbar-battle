@@ -158,6 +158,9 @@ final class PracticeSession {
     }
     private func defaultOpponentID() -> String? { roster?.eligible.first { $0.id != playerID }?.id }
 
+    var dailyRefreshDue: Bool { false }   // RED stub
+    func refreshDailyIfStale() {}         // RED stub
+
     /// The local day from the injected wall clock and calendar.
     private var today: String { PracticeDaily.dayKey(now(), calendar: calendar) }
     /// Today's opponent is made, or being made, for `day`.

@@ -1,3 +1,5 @@
+import AppKit
+import SwiftUI
 import XCTest
 @testable import PokeTokenBar
 
@@ -1214,48 +1216,57 @@ final class PracticeDailySessionTests: XCTestCase {
         XCTAssertEqual(session.opponentID, "o", "the new opponent is offered, not selected")
     }
 
-    /// The menu-bar app runs for days and the wild batch survives closing the popover, so no search is due when the
-    /// practice screen reopens on a new day. Preparing the screen makes the new day's opponent instead.
-    func testReopeningOnANewDayMakesTheNewDaysOpponent() async throws {
+    /// The wild batch outlives the popover, so no wild search is due on a new day. The refresh is: `dailyRefreshDue`
+    /// turns true, and `refreshDailyIfStale` drops yesterday's opponent at once and makes today's alone, leaving the
+    /// wild batch as it is. The same day has nothing due.
+    func testANewDayMakesTheRefreshDueAndItReplacesYesterdaysOpponentAlone() async throws {
         let today = Today()
         let session = makeSession(WildStub.standard(), today: today)
         await searchAll(session)
+        let wildIDs = session.wildCandidates.map(\.id), wildTask = session.wildTask
         session.opponentID = try XCTUnwrap(session.dailyCandidate).id
-        session.releaseIfIdle()
-        session.prepare(state: state(), activeName: nil)
-        XCTAssertEqual(session.dailyState, .ready, "the same day starts nothing")
-        XCTAssertEqual(session.opponentID, "daily-2026-10-30")
-        session.releaseIfIdle()
+        XCTAssertFalse(session.dailyRefreshDue, "today's is made")
+        session.refreshDailyIfStale()
+        XCTAssertEqual(session.dailyState, .ready, "nothing to make again on the same day")
         today.date += 86_400
-        session.prepare(state: state(), activeName: nil)
-        XCTAssertEqual(session.dailyState, .searching)
-        XCTAssertNil(session.dailyCandidate)
+        XCTAssertTrue(session.dailyRefreshDue, "yesterday's is on screen")
+        session.refreshDailyIfStale()
+        XCTAssertEqual(session.dailyState, .searching); XCTAssertNil(session.dailyCandidate)
         XCTAssertEqual(session.opponentID, "o", "yesterday's opponent is no longer today's")
-        XCTAssertEqual(session.wildState, .ready, "the wild batch is not tied to a day")
+        XCTAssertFalse(session.dailyRefreshDue, "a search in flight is not due again")
+        XCTAssertEqual(session.wildState, .ready); XCTAssertEqual(session.wildCandidates.map(\.id), wildIDs)
+        XCTAssertTrue(session.wildTask == wildTask, "the wild batch is not searched again")
         await session.dailyTask?.value
         XCTAssertEqual(session.dailyCandidate?.id, "daily-2026-10-31")
+        XCTAssertFalse(session.dailyRefreshDue)
     }
 
-    /// A release (or `start()`) can stop the search for today's opponent while the wild batch stays on screen, so no
-    /// search is due afterwards. Opening the screen again makes it.
-    func testReopeningAfterAnInterruptedSearchMakesTodaysOpponent() async throws {
+    /// `start()` or a release stops the search for today's opponent and leaves nothing, so the refresh is due again;
+    /// it needs a player and an engine, and `prepare` alone makes nothing (the selection screen asks). The stopped
+    /// search never lands.
+    func testAStoppedSearchLeavesTheRefreshDue() async throws {
         let gate = GatedProvider(WildStub.standard()), today = Today()
         let session = makeSession(gate, today: today)
         let found = await completeSearch(session, gate)
         XCTAssertTrue(found)
-        session.releaseIfIdle()
         today.date += 86_400
-        session.prepare(state: state(), activeName: nil)
+        session.refreshDailyIfStale()
         XCTAssertEqual(session.dailyState, .searching)
         let reached = await waitSuspended(gate)
         XCTAssertTrue(reached)
         let stale = session.dailyTask
         session.releaseIfIdle()
         XCTAssertEqual(session.dailyState, .idle); XCTAssertEqual(session.wildState, .ready)
+        XCTAssertTrue(session.dailyRefreshDue)
+        session.refreshDailyIfStale()
+        XCTAssertEqual(session.dailyState, .idle, "released: no player or engine to make it with")
         await gate.resume()
         await stale?.value
         XCTAssertEqual(session.dailyState, .idle, "the stopped search does not land")
         session.prepare(state: state(), activeName: nil)
+        XCTAssertEqual(session.dailyState, .idle, "preparing makes nothing; the selection screen asks")
+        XCTAssertTrue(session.dailyRefreshDue)
+        session.refreshDailyIfStale()
         XCTAssertEqual(session.dailyState, .searching)
         let resumed = await waitSuspended(gate)
         XCTAssertTrue(resumed)
@@ -1263,6 +1274,25 @@ final class PracticeDailySessionTests: XCTestCase {
         await gate.resume()
         await task?.value
         XCTAssertEqual(session.dailyCandidate?.id, "daily-2026-10-31")
+    }
+
+    /// The default calendar follows the system time zone (`.autoupdatingCurrent`); `.current` would keep the zone of
+    /// the moment the session was made. The process's default time zone stands in for the system's here.
+    func testTheDayFollowsATimeZoneChangeAfterLaunch() async throws {
+        let original = NSTimeZone.default
+        defer { NSTimeZone.default = original }
+        NSTimeZone.default = try XCTUnwrap(TimeZone(identifier: "Pacific/Pago_Pago"))   // UTC-11
+        let instant = Date(timeIntervalSince1970: 1_793_400_000)   // 2026-10-30 22:40 UTC
+        let stub = WildStub.standard()
+        let session = PracticeSession(engineURL: engineURL, clock: { 0 }, drivesAutomatically: false,
+                                      wildSource: PracticeWildSource(provider: stub, details: stub), wildSeed: { 11 },
+                                      now: { instant })
+        session.prepare(state: state(), activeName: nil)
+        await searchAll(session)
+        XCTAssertEqual(session.dailyCandidate?.id, "daily-2026-10-30", "the 30th in Pago Pago")
+        XCTAssertFalse(session.dailyRefreshDue)
+        NSTimeZone.default = try XCTUnwrap(TimeZone(identifier: "Pacific/Kiritimati"))   // UTC+14
+        XCTAssertTrue(session.dailyRefreshDue, "the same instant is the 31st in Kiritimati")
     }
 
     func testPrepareKeepsTodaysOpponentSelectedForTheSamePlayerOnly() async throws {
@@ -1282,8 +1312,8 @@ final class PracticeDailySessionTests: XCTestCase {
         XCTAssertEqual(session.opponentID, "o")
     }
 
-    /// A finished battle on screen keeps yesterday's opponent for its rematch; the selection screen gets the new one.
-    func testAResultOnScreenKeepsYesterdaysOpponentUntilTheSelection() async throws {
+    /// A finished battle on screen keeps yesterday's opponent for its rematch: the refresh waits for the selection.
+    func testAResultOnScreenKeepsYesterdaysOpponentForItsRematch() async throws {
         let today = Today()
         let session = makeSession(SplashStub(speciesID: 129), today: today)
         await searchAll(session)
@@ -1292,13 +1322,100 @@ final class PracticeDailySessionTests: XCTestCase {
         XCTAssertEqual(session.battle?.phase, .finished)
         today.date += 86_400
         session.prepare(state: state(), activeName: nil)
+        XCTAssertTrue(session.dailyRefreshDue)
+        session.refreshDailyIfStale()
         XCTAssertEqual(session.dailyState, .ready)
         XCTAssertEqual(session.dailyCandidate?.id, yesterday.id)
         XCTAssertEqual(session.opponentID, yesterday.id)
+        XCTAssertEqual(session.battle?.phase, .finished, "the result is not dropped")
+        session.start()
+        XCTAssertEqual(session.battle?.opponent?.id, yesterday.id, "the rematch is against the same opponent")
+    }
+
+    // MARK: The selection screen (real path)
+
+    /// Hosts the practice screen as the popover does, so the selection screen's own triggers run.
+    private func host(_ session: PracticeSession) -> NSWindow {
+        let view = NSHostingView(rootView: PracticeScreen(session: session, l: L(.en), artwork: false, onClose: {}))
+        view.frame = NSRect(x: 0, y: 0, width: PopoverMetrics.width, height: 640)
+        let window = NSWindow(contentRect: NSRect(x: -10000, y: -10000, width: PopoverMetrics.width, height: 640),
+                              styleMask: .borderless, backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = view
+        window.orderFront(nil)
+        view.layoutSubtreeIfNeeded()
+        return window
+    }
+    /// Lets SwiftUI run its updates until `condition` holds; false after 5 s.
+    private func settle(_ window: NSWindow, until condition: () -> Bool) async -> Bool {
+        for _ in 0..<500 {
+            window.contentView?.layoutSubtreeIfNeeded()
+            if condition() { return true }
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+        return condition()
+    }
+
+    /// `start()` stops a search for today's opponent and leaves it idle, and after a battle against an own opponent no
+    /// wild search runs ("Other opponent" searches only after a wild foe, and the wild trigger watches the wild state
+    /// only). Back on the selection screen, the screen itself makes it again.
+    func testTheSelectionScreenMakesTodaysOpponentAgainAfterABattleStoppedItsSearch() async throws {
+        let gate = GatedProvider(WildStub.standard()), today = Today()
+        let session = makeSession(gate, today: today)
+        let found = await completeSearch(session, gate)
+        XCTAssertTrue(found)
+        let wildIDs = session.wildCandidates.map(\.id)
+        today.date += 86_400
+        let window = host(session)
+        defer { window.orderOut(nil); window.contentView = nil }
+        var searching = await settle(window) { session.dailyState == .searching }
+        XCTAssertTrue(searching, "the selection screen makes the new day's opponent")
+        var held = await waitSuspended(gate)
+        XCTAssertTrue(held)
+        let stopped = session.dailyTask
+        session.opponentID = "o"; session.mode = .automatic
+        session.start()
+        XCTAssertEqual(session.dailyState, .idle, "the battle stopped the search")
+        session.skipToResult()
         XCTAssertEqual(session.battle?.phase, .finished)
+        let resultShown = await settle(window) { session.resultSeen }
+        XCTAssertTrue(resultShown, "precondition: the result screen replaced the selection")
+        // "Other opponent" after an own foe only goes back to the selection.
         session.backToSelection()
-        await searchAll(session)
+        searching = await settle(window) { session.dailyState == .searching }
+        XCTAssertTrue(searching, "back on the selection screen, today's opponent is made again")
+        XCTAssertEqual(session.wildCandidates.map(\.id), wildIDs, "without a wild search")
+        held = await waitSuspended(gate, count: 2)
+        XCTAssertTrue(held)
+        let remade = session.dailyTask
+        await gate.resume()
+        await stopped?.value; await remade?.value
         XCTAssertEqual(session.dailyCandidate?.id, "daily-2026-10-31")
+    }
+
+    /// A battle against an own opponent crosses midnight. "Other opponent" after an own foe only goes back to the
+    /// selection and `prepare` does not run, so the screen itself must replace yesterday's opponent with today's.
+    func testTheSelectionScreenReplacesYesterdaysOpponentAfterMidnight() async throws {
+        let today = Today()
+        let session = makeSession(WildStub.standard(), today: today)
+        await searchAll(session)
+        let yesterday = try XCTUnwrap(session.dailyCandidate)
+        let wildIDs = session.wildCandidates.map(\.id)
+        let window = host(session)
+        defer { window.orderOut(nil); window.contentView = nil }
+        session.opponentID = "o"; session.mode = .automatic
+        session.start(); session.skipToResult()
+        XCTAssertEqual(session.battle?.phase, .finished)
+        let resultShown = await settle(window) { session.resultSeen }
+        XCTAssertTrue(resultShown, "precondition: the result screen replaced the selection")
+        today.date += 86_400
+        XCTAssertEqual(session.dailyCandidate?.id, yesterday.id, "nothing changes under the result screen")
+        session.backToSelection()
+        let replaced = await settle(window) { session.dailyCandidate?.id == "daily-2026-10-31" }
+        XCTAssertTrue(replaced, "the selection screen replaces yesterday's opponent")
+        XCTAssertEqual(session.wildCandidates.map(\.id), wildIDs, "without a wild search")
+        XCTAssertEqual(session.todayStars, [])
+        await session.dailyTask?.value
     }
 
     func testReleaseIfIdleStopsADailySearchAndKeepsAMadeOpponent() async throws {
@@ -1333,8 +1450,9 @@ final class PracticeDailySessionTests: XCTestCase {
         await searchAll(session)
         XCTAssertEqual(session.dailyState, .unavailable); XCTAssertNil(session.dailyCandidate)
         stub.failIndex = false
-        session.prepare(state: state(), activeName: nil)
-        XCTAssertEqual(session.dailyState, .unavailable, "opening the screen again does not retry; a search does")
+        XCTAssertFalse(session.dailyRefreshDue, "a failure is not due, so a screen that is offline cannot loop")
+        session.refreshDailyIfStale()
+        XCTAssertEqual(session.dailyState, .unavailable, "the next search retries it")
         await searchAll(session)
         XCTAssertEqual(session.dailyState, .ready)
         XCTAssertEqual(session.dailyCandidate?.id, "daily-2026-10-30")
@@ -1532,6 +1650,13 @@ final class PracticeReadOnlyGuardTests: XCTestCase {
         XCTAssertEqual(Self.hits(in: "try FileManager.default.removeItem(at: url)", path: store), ["removeItem"])
         XCTAssertEqual(Self.hits(in: "try FileManager.default.copyItem(at: a, to: b)", path: store), ["copyItem"])
         XCTAssertEqual(Self.hits(in: "_ = try FileManager.default.replaceItemAt(a, withItemAt: b)", path: store), ["replaceItem"])
+        // "Never deletes" covers the trash, and the store does not change permissions or dates either.
+        XCTAssertEqual(Self.hits(in: "try FileManager.default.trashItem(at: url, resultingItemURL: nil)", path: store),
+                       ["trashItem"])
+        XCTAssertEqual(Self.hits(in: "try FileManager.default.setAttributes([.posixPermissions: 0o444], ofItemAtPath: p)",
+                                 path: store), ["setAttributes"])
+        XCTAssertEqual(Self.hits(in: "try FileManager.default.trashItem(at: url, resultingItemURL: nil)",
+                                 path: "Core/PracticeSession.swift"), ["FileManager", "trashItem"])
         XCTAssertEqual(Self.hits(in: "let url = AppStatePaths.directory()", path: store), ["AppStatePaths"])
         XCTAssertEqual(Self.hits(in: "CompanionStore.shared.save()", path: store), [".save(", "CompanionStore"])
         XCTAssertEqual(Self.hits(in: "try SaveTransfer.export(state)", path: store), ["SaveTransfer"])
