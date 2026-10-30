@@ -220,8 +220,8 @@ jobs:
       matrix:
         os: ${{ (inputs.macos || 'both') == 'both' && fromJSON('["macos-15","macos-26"]') || fromJSON(format('["{0}"]', inputs.macos)) }}
     runs-on: ${{ matrix.os }}
-    # About 1.5x the slowest green run (566 s on macos-15, 2026-10-30; the corpus alone took 186 s).
-    timeout-minutes: 14
+    # About 1.5x the slowest green run (614 s on macos-15, 2026-10-30; the corpus alone took 186 s).
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v4
