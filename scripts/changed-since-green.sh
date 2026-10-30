@@ -4,7 +4,7 @@
 # green push run of this workflow that it builds on, not with the previous push: a run that a newer
 # push cancelled (cancel-in-progress) or that failed never verified its changes, and comparing with it
 # would let them through unchecked. With no such run (first push, rewritten history, API error) the
-# answer is true.
+# answer is true. Also writes base=<the commit compared with>, empty without one.
 # Usage: changed-since-green.sh <pathspec>...  (needs a full-history checkout and GH_TOKEN)
 set -euo pipefail
 [ $# -gt 0 ] || { echo "usage: $0 <pathspec>..." >&2; exit 2; }
@@ -12,6 +12,7 @@ set -euo pipefail
 answer() {
     echo "::notice::$2"
     echo "changed=$1" >> "$GITHUB_OUTPUT"
+    echo "base=$base" >> "$GITHUB_OUTPUT"
     exit 0
 }
 

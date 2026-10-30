@@ -3,10 +3,13 @@ name: CI
 # Public since 2026-10-29, so standard runners are free. Pushes to feat/** and pull requests run the
 # app jobs, plus determinism when the engine boundary or this file changed (see `changes`); a dispatch
 # picks the scope. Push and PR events have no inputs, hence the `inputs.<name> || <default>` fallbacks.
+# A push or PR that changes only docs (docs/**, *.md) runs nothing: no test or script reads them.
 on:
   push:
     branches: ['feat/**']
+    paths-ignore: ['docs/**', '**/*.md']
   pull_request:
+    paths-ignore: ['docs/**', '**/*.md']
   workflow_dispatch:
     inputs:
       scope:
@@ -129,7 +132,9 @@ jobs:
             "$RUNNER_TEMP/test-logs/rendering.log" "$RUNNER_TEMP/test-logs/rest.log"
 
   secret-scan:
-    if: ${{ (inputs.scope || 'app') == 'app' }}
+    needs: changes
+    # A dispatch skips `changes`; !cancelled() keeps that skipped need from skipping this job too.
+    if: ${{ !cancelled() && (inputs.scope || 'app') == 'app' }}
     name: secret-scan
     runs-on: ubuntu-latest
     timeout-minutes: 3
@@ -143,6 +148,9 @@ jobs:
         uses: gitleaks/gitleaks-action@v3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # A push scans from the commit `changes` compared with, not only its own commits: a push of
+          # only docs runs no CI (paths-ignore), so its commits are scanned with the next run instead.
+          BASE_REF: ${{ github.event_name == 'push' && needs.changes.outputs.base || '' }}
 
   # Push and PR runs start determinism only when the engine boundary or this file changed (an edit to
   # the determinism job, such as its FILTER, has to run it): a PR against its base, a push against the
@@ -158,6 +166,7 @@ jobs:
       actions: read
     outputs:
       engine: ${{ steps.engine.outputs.changed }}
+      base: ${{ steps.engine.outputs.base }}
     steps:
       - uses: actions/checkout@v5
         with:
