@@ -931,4 +931,48 @@ final class PracticeStakesLiveTests: XCTestCase {
         XCTAssertEqual(store.itemCount(.potion), 0)
         XCTAssertEqual(store.healthShare(of: "pika"), min(1, left + BattleItem.potionHeal), accuracy: 1e-9)
     }
+
+    // MARK: Growth between battles
+
+    /// A win whose XP crosses a level shows at once on the selection, which the wild search reads, and the rematch
+    /// fights at the new level. The result keeps the pair that fought.
+    func testAWinThatCrossesALevelRematchesAtTheNewLevel() async throws {
+        var state = pikaState()
+        var profile = try XCTUnwrap(state.active?.profile)
+        profile.level = 5; profile.growthTokens = 0
+        state.active?.profile = profile
+        state.active?.usedAtStage = 12_000_000   // common: 750M over 95 levels, so Lv.6, and Lv.7 after a 5M win
+        let (store, session) = try live(state)
+        let before = try XCTUnwrap(store.state.active?.profile?.level)
+        XCTAssertEqual(session.player?.snapshot?.set.level, before)
+        await stakesSearch(session)
+        stakesFight(session, against: try XCTUnwrap(session.wildCandidates.first).id)
+        XCTAssertEqual(session.battle?.result?.winner, "p1")
+        XCTAssertEqual(session.lastStakes?.xp, PracticeStakes.winXP)
+        let after = try XCTUnwrap(store.state.active?.profile?.level)
+        XCTAssertEqual(after, before + 1, "the win crossed a level")
+        XCTAssertEqual(session.battle?.player?.snapshot?.set.level, before, "the result keeps the pair that fought")
+        XCTAssertEqual(session.player?.snapshot?.set.level, after, "the selection and the wild search see the new level")
+        session.start()
+        XCTAssertEqual(session.battle?.player?.snapshot?.set.level, after, "the rematch fights at the new level")
+        XCTAssertEqual(session.battle?.view?.p1.level, after)
+    }
+
+    /// An IV reroll used from the bag while a battle runs reaches the rematch even when nothing paid XP: the popover's
+    /// `prepare` leaves a running battle's roster alone, so the start takes the pair from the save as it is.
+    func testAnIVRerollDuringABattleReachesTheRematch() throws {
+        let (store, session) = try live(pikaState(items: [.ivReroll: 1]))
+        session.playerID = "pika"; session.opponentID = "m"   // sparring: no stakes, no XP
+        session.mode = .automatic
+        session.start()
+        let fought = try XCTUnwrap(session.battle?.player?.snapshot?.set.ivs)
+        let rerolled = try XCTUnwrap(store.useIVReroll(), "from the bag, while the battle runs")
+        let expected = Dictionary(uniqueKeysWithValues: PokemonStatCalculator.order.map { ($0, rerolled[$0]) })
+        XCTAssertNotEqual(expected, fought, "the reroll drew other IVs")
+        session.prepare(state: store.state, activeName: nil)   // the practice screen comes back mid-battle
+        session.skipToResult()
+        XCTAssertNil(session.lastStakes, "sparring settles nothing")
+        session.start()
+        XCTAssertEqual(session.battle?.player?.snapshot?.set.ivs, expected, "the rematch fights with the new IVs")
+    }
 }
