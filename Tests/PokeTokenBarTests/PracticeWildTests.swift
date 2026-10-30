@@ -1364,7 +1364,7 @@ final class PracticeDailySessionTests: XCTestCase {
         let session = makeSession(gate, today: today)
         let found = await completeSearch(session, gate)
         XCTAssertTrue(found)
-        let wildIDs = session.wildCandidates.map(\.id)
+        let wildIDs = session.wildCandidates.map(\.id), wildTask = session.wildTask
         today.date += 86_400
         let window = host(session)
         defer { window.orderOut(nil); window.contentView = nil }
@@ -1384,7 +1384,7 @@ final class PracticeDailySessionTests: XCTestCase {
         session.backToSelection()
         searching = await settle(window) { session.dailyState == .searching }
         XCTAssertTrue(searching, "back on the selection screen, today's opponent is made again")
-        XCTAssertEqual(session.wildCandidates.map(\.id), wildIDs, "without a wild search")
+        XCTAssertTrue(session.wildTask == wildTask, "without a wild search"); XCTAssertEqual(session.wildCandidates.map(\.id), wildIDs)
         held = await waitSuspended(gate, count: 2)
         XCTAssertTrue(held)
         let remade = session.dailyTask
@@ -1400,7 +1400,7 @@ final class PracticeDailySessionTests: XCTestCase {
         let session = makeSession(WildStub.standard(), today: today)
         await searchAll(session)
         let yesterday = try XCTUnwrap(session.dailyCandidate)
-        let wildIDs = session.wildCandidates.map(\.id)
+        let wildIDs = session.wildCandidates.map(\.id), wildTask = session.wildTask
         let window = host(session)
         defer { window.orderOut(nil); window.contentView = nil }
         session.opponentID = "o"; session.mode = .automatic
@@ -1413,7 +1413,7 @@ final class PracticeDailySessionTests: XCTestCase {
         session.backToSelection()
         let replaced = await settle(window) { session.dailyCandidate?.id == "daily-2026-10-31" }
         XCTAssertTrue(replaced, "the selection screen replaces yesterday's opponent")
-        XCTAssertEqual(session.wildCandidates.map(\.id), wildIDs, "without a wild search")
+        XCTAssertTrue(session.wildTask == wildTask, "without a wild search"); XCTAssertEqual(session.wildCandidates.map(\.id), wildIDs)
         XCTAssertEqual(session.todayStars, [])
         await session.dailyTask?.value
     }
