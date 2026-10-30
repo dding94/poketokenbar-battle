@@ -12,6 +12,7 @@
 #
 # 사용:  ./scripts/test-gate.sh          # 게이트 실행
 #        THRESHOLD=75 ./scripts/test-gate.sh   # 임계값 임시 상향
+#        ./scripts/test-gate.sh --skip '<regex>'   # 인자는 swift test 로 넘긴다(CI rest 샤드)
 #
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -43,8 +44,8 @@ LOGIC_CORE=(
   "Sources/PokeTokenBar/Core/UsageRecap.swift"
 )
 
-echo "▶ swift test (--enable-code-coverage)"
-swift test --enable-code-coverage
+echo "▶ swift test (--enable-code-coverage${*:+ $*})"
+swift test --enable-code-coverage "$@"
 
 PROF=$(find .build -name 'default.profdata' | head -1)
 # dSYM 안에도 같은 이름의 DWARF 바이너리가 있어 head -1 이 그걸 집으면 llvm-cov 가 실패한다 → 제외.

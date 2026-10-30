@@ -29,17 +29,28 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # The suite runs in two shards on parallel runners. `rendering` runs the slowest rendering classes
+  # (RENDERING_TESTS) and the identity guard; `rest` skips exactly that regex and runs everything else
+  # under the coverage gate. test-union checks that the shards ran every listed test once between them.
   build-test:
     if: ${{ (inputs.scope || 'app') == 'app' }}
-    name: build-test
+    name: build-test (${{ matrix.shard }})
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [rendering, rest]
     # macos-15 ships Xcode 16 / Swift 6, which Package.swift requires
     # (swift-tools-version: 6.0, platform macOS 15). Its Swift 6.1 is also the strictest compiler we
     # build with, so isolation errors that newer Swift accepts still fail here.
     runs-on: macos-15
-    # About 1.5x the slowest green run (770 s, 2026-10-29). Runners vary up to ~1.6x on the same commit.
+    # About 1.5x the slower shard (451 s, 2026-10-30). Runners vary up to ~1.6x on the same commit.
     # A job that runs out shows as "cancelled", like a newer run on the same ref would; recheck this
     # budget when a suite is added.
-    timeout-minutes: 20
+    timeout-minutes: 12
+    env:
+      # About 210 s of the 480 s suite on 2026-10-30 (SnapshotHistory ~175 s, DexBack ~35 s). They
+      # leave the coverage gate; PracticeScreenRenderingTests stays in `rest` for the practice files.
+      RENDERING_TESTS: "SnapshotHistoryRenderingTests|DexBackNavigationTests"
     steps:
       - uses: actions/checkout@v5
 
@@ -47,39 +58,75 @@ jobs:
         run: |
           printf 'PTB_STATE_DIR=%s/ptb-battle-ci-state\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
           printf 'PTB_SNAPSHOT_SCREENSHOT_DIR=%s/snapshot-history-renders\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/test-logs"
 
       - name: Show Swift version
         run: swift --version
 
       # check-test-filter.sh fails the step when an alternative ran no test (a renamed class would
       # otherwise drop out silently). An unset `shell` has no pipefail, so it is set here.
-      - name: Fork isolation tests
-        env:
-          FILTER: "AppIdentityTests|SupportMailTests|UpdateCheckerTests|BattleEngineTests|BattleSnapshotTests|PracticeBattleTests|PracticeSessionTests|PracticePlaybackTests|PracticeHintsTests|PracticeWild|PracticeReadOnlyGuardTests|PracticeRecord|PracticeDaily|PracticeTemperament|PracticeStakes|PracticeWordingTests|PracticeScreenRenderingTests|PracticeLaunchTests|PopoverNavigationTests|LocalizedUILiteralTests|ScrollerLaneTests|SwiftUIIsolationTests|LocalizationColumnTests|LocalizationInterpolationTests"
+      - name: Rendering tests
+        if: matrix.shard == 'rendering'
         run: |
           set -o pipefail
-          swift test --filter "$FILTER" 2>&1 | tee "$RUNNER_TEMP/fork-isolation.log"
-          ./scripts/check-test-filter.sh "$FILTER" "$RUNNER_TEMP/fork-isolation.log"
+          swift test --filter "$RENDERING_TESTS" 2>&1 | tee "$RUNNER_TEMP/test-logs/rendering.log"
+          ./scripts/check-test-filter.sh "$RENDERING_TESTS" "$RUNNER_TEMP/test-logs/rendering.log"
 
-      # test-gate.sh runs `swift test --enable-code-coverage` and then enforces a
-      # line-coverage floor on the logic-core files. It replaces a bare `swift test`:
-      # the tests still run, and a coverage regression now fails the build.
+      # test-gate.sh runs `swift test --enable-code-coverage` with these arguments and then enforces a
+      # line-coverage floor on the logic-core files, so a coverage regression fails the build.
       - name: Test + coverage gate
+        if: matrix.shard == 'rest'
         run: |
-          ./scripts/test-gate.sh
+          set -o pipefail
+          ./scripts/test-gate.sh --skip "$RENDERING_TESTS" 2>&1 | tee "$RUNNER_TEMP/test-logs/rest.log"
           ./scripts/battle-coverage.sh
 
+      # The suite as built, for test-union; also after a failure, so test-union still compares.
+      - name: List every test
+        if: ${{ !cancelled() && matrix.shard == 'rendering' }}
+        run: swift test list --skip-build > "$RUNNER_TEMP/test-logs/all-tests.txt"
+
       - name: Prove the fork identity guard rejects an upstream value
+        if: matrix.shard == 'rendering'
         run: bash scripts/test-fork-identity-guard.sh
 
+      - name: Keep the test logs for test-union
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-logs-${{ matrix.shard }}
+          path: ${{ runner.temp }}/test-logs
+          retention-days: 1
+
       - name: Preserve native snapshot-history renders
-        if: always()
+        if: ${{ always() && matrix.shard == 'rendering' }}
         uses: actions/upload-artifact@v4
         with:
           name: snapshot-history-renders
           path: ${{ runner.temp }}/snapshot-history-renders
           if-no-files-found: ignore
           retention-days: 1
+
+  # Fails unless the build-test shards between them ran every test `swift test list` reports, each
+  # exactly once (scripts/check-test-union.sh).
+  test-union:
+    needs: build-test
+    if: ${{ !cancelled() && (inputs.scope || 'app') == 'app' }}
+    name: test-union
+    runs-on: ubuntu-latest
+    # Seconds of work (a checkout, an artifact download, two sorts); 3 minutes like secret-scan.
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: test-logs-*
+          path: ${{ runner.temp }}/test-logs
+          merge-multiple: true
+      - name: Every test ran exactly once
+        run: |
+          ./scripts/check-test-union.sh "$RUNNER_TEMP/test-logs/all-tests.txt" \
+            "$RUNNER_TEMP/test-logs/rendering.log" "$RUNNER_TEMP/test-logs/rest.log"
 
   secret-scan:
     if: ${{ (inputs.scope || 'app') == 'app' }}
@@ -138,8 +185,8 @@ jobs:
       matrix:
         os: ${{ (inputs.macos || 'both') == 'both' && fromJSON('["macos-15","macos-26"]') || fromJSON(format('["{0}"]', inputs.macos)) }}
     runs-on: ${{ matrix.os }}
-    # About 1.5x the slowest run: the Swift boundary took 215 s and the corpus over 170 s on 2026-10-29.
-    timeout-minutes: 12
+    # About 1.5x the slowest green run (566 s on macos-15, 2026-10-30; the corpus alone took 186 s).
+    timeout-minutes: 14
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v4
