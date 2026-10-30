@@ -83,6 +83,7 @@ export type AuditKind =
   | "invite_revoked"
   | "reconnect_code_issued"
   | "reconnect_code_used"
+  | "operator_host_reconnect"
   | "member_left"
   | "member_removed"
   | "host_transferred";

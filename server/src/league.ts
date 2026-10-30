@@ -25,6 +25,8 @@ export const ATTEMPT_WINDOW_MS = 15 * MINUTE;
 export const ATTEMPT_RETENTION_MS = DAY;
 export const RECONNECT_TTL_MS = DAY;
 const AUDIT_PAGE = 200;
+/** created_by for codes the operator issues; trainer ids always start with "tr_". */
+const OPERATOR_ISSUER = "operator";
 
 const SCHEMA_V1 = [
   `CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)`,
@@ -403,21 +405,35 @@ export class League extends DurableObject<Env> {
       if (!found.ok) return found;
       const target = found.value;
 
-      this.voidReconnectCodes(target.id, now);
-      const expiresAt = now + RECONNECT_TTL_MS;
-      this.sql.exec(
-        `INSERT INTO reconnect_codes (id, group_id, trainer_id, code_hash, created_by, created_at, expires_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        newId("rc"),
-        actor.groupId,
-        target.id,
-        input.codeHash,
-        actor.trainer.id,
-        now,
-        expiresAt,
-      );
+      const expiresAt = this.insertReconnectCode(actor.groupId, target.id, input.codeHash, actor.trainer.id, now);
       this.addAudit(actor.groupId, now, "reconnect_code_issued", actor.trainer.id, target.id, null);
       return ok({ trainerId: target.id, expiresAt });
+    });
+  }
+
+  /**
+   * Operator recovery for a host who lost both key and recovery code: a reconnect code for the
+   * group's current host, redeemed through the normal reconnect path.
+   */
+  operatorHostReconnect(input: {
+    ipHash: string;
+    operatorOk: boolean;
+    groupId: string;
+    codeHash: string;
+  }): Result<{ trainerId: string; expiresAt: number }> {
+    const now = this.clock();
+    return this.tx(() => {
+      const limited = this.checkAttempts(input.ipHash, "operator", now);
+      if (limited) return limited;
+      if (!input.operatorOk) return this.failAttempt(input.ipHash, "operator", now, "operator_denied");
+      const group = this.sql
+        .exec<GroupRow>("SELECT id, name, host_trainer_id FROM groups WHERE id = ?", input.groupId)
+        .toArray()[0];
+      if (!group) return fail("not_found");
+      const hostId = group.host_trainer_id;
+      const expiresAt = this.insertReconnectCode(group.id, hostId, input.codeHash, OPERATOR_ISSUER, now);
+      this.addAudit(group.id, now, "operator_host_reconnect", null, hostId, null);
+      return ok({ trainerId: hostId, expiresAt });
     });
   }
 
@@ -519,6 +535,24 @@ export class League extends DurableObject<Env> {
       trainerId,
     );
     this.voidReconnectCodes(trainerId, now);
+  }
+
+  /** Voids the trainer's older unused codes and stores a new one valid for 24 hours. */
+  private insertReconnectCode(groupId: string, trainerId: string, codeHash: string, createdBy: string, now: number): number {
+    this.voidReconnectCodes(trainerId, now);
+    const expiresAt = now + RECONNECT_TTL_MS;
+    this.sql.exec(
+      `INSERT INTO reconnect_codes (id, group_id, trainer_id, code_hash, created_by, created_at, expires_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      newId("rc"),
+      groupId,
+      trainerId,
+      codeHash,
+      createdBy,
+      now,
+      expiresAt,
+    );
+    return expiresAt;
   }
 
   private voidReconnectCodes(trainerId: string, now: number): void {

@@ -78,6 +78,20 @@ describe("League storage", () => {
     const reconnected = await call("POST", "/v1/reconnect", { body: { reconnectCode: used } });
     secrets.push(reconnected.body.accessKey, reconnected.body.recoveryCode);
 
+    const operatorPending = await call("POST", "/v1/operator/host-reconnect", {
+      body: { operatorSecret: operatorSecret(), groupId: host.groupId },
+    });
+    expect(operatorPending.status, operatorPending.text).toBe(200);
+    secrets.push(operatorPending.body.reconnectCode);
+    const operatorUsed = await call("POST", "/v1/operator/host-reconnect", {
+      body: { operatorSecret: operatorSecret(), groupId: host.groupId },
+    });
+    secrets.push(operatorUsed.body.reconnectCode);
+    const hostBack = await call("POST", "/v1/reconnect", { body: { reconnectCode: operatorUsed.body.reconnectCode } });
+    expect(hostBack.status, hostBack.text).toBe(200);
+    secrets.push(hostBack.body.accessKey, hostBack.body.recoveryCode);
+    host.accessKey = hostBack.body.accessKey;
+
     await call("POST", "/v1/leave", { key: leaves.accessKey });
     await call("POST", "/v1/members/remove", { key: host.accessKey, body: { trainerId: removed.trainerId } });
 

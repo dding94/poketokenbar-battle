@@ -84,6 +84,16 @@ function withCredentials<T extends object>(value: T, issued: Issued): Response {
   return json(200, { ...value, accessKey: issued.accessKey, recoveryCode: issued.recoveryCode });
 }
 
+/**
+ * Operator routes are off (operator_disabled) unless OPERATOR_SECRET is set and at least
+ * 32 characters; that check comes before the body is read.
+ */
+async function operatorRequest(ctx: Context): Promise<{ body: Body; configured: string }> {
+  const configured = ctx.env.OPERATOR_SECRET;
+  if (!configured || configured.length < OPERATOR_SECRET_MIN_LENGTH) throw new ApiError("operator_disabled");
+  return { body: await readJsonObject(ctx.request), configured };
+}
+
 function optionalEmail(body: Body) {
   return body.displayEmail === undefined ? null : parseDisplayEmail(body.displayEmail);
 }
@@ -95,9 +105,7 @@ const routes: Record<string, Partial<Record<string, Handler>>> = {
 
   "/v1/groups": {
     POST: async (ctx) => {
-      const configured = ctx.env.OPERATOR_SECRET;
-      if (!configured || configured.length < OPERATOR_SECRET_MIN_LENGTH) throw new ApiError("operator_disabled");
-      const body = await readJsonObject(ctx.request);
+      const { body, configured } = await operatorRequest(ctx);
       const submitted = requireString(body, "operatorSecret");
       const groupName = parseGroupName(body.groupName);
       const email = parseDisplayEmail(body.displayEmail);
@@ -110,6 +118,22 @@ const routes: Record<string, Partial<Record<string, Handler>>> = {
         await ctx.league.createGroup({ ipHash, operatorOk, groupName, email, credentials: issued.hashes }),
       );
       return withCredentials(grant, issued);
+    },
+  },
+
+  "/v1/operator/host-reconnect": {
+    POST: async (ctx) => {
+      const { body, configured } = await operatorRequest(ctx);
+      const submitted = requireString(body, "operatorSecret");
+      const groupId = requireString(body, "groupId");
+      const reconnectCode = newCode(RECONNECT_CODE_LENGTH);
+      const [operatorOk, ipHash, codeHash] = await Promise.all([
+        secretsEqual(submitted, configured),
+        ipHashOf(ctx),
+        codeHashOf(ctx, "reconnect", reconnectCode, RECONNECT_CODE_LENGTH),
+      ]);
+      const issued = unwrap(await ctx.league.operatorHostReconnect({ ipHash, operatorOk, groupId, codeHash: codeHash! }));
+      return json(200, { trainerId: issued.trainerId, reconnectCode, expiresAt: issued.expiresAt });
     },
   },
 

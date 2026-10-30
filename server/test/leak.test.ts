@@ -117,6 +117,22 @@ describe("no secret or email reaches logs or error bodies", () => {
     await track(call("POST", "/v1/host/transfer", { key: host.accessKey, body: { trainerId: member.trainerId } }));
     await track(call("GET", "/v1/group", { key: reconnected.body.accessKey }));
     await track(call("GET", "/v1/audit", { key: reconnected.body.accessKey }));
+    // Operator host reconnect, right and wrong secret.
+    const operatorCode = await track(
+      call("POST", "/v1/operator/host-reconnect", { ip: ip(), body: { operatorSecret: operatorSecret(), groupId: host.groupId } }),
+    );
+    expect(operatorCode.status, operatorCode.text).toBe(200);
+    secrets.push(operatorCode.body.reconnectCode);
+    await track(
+      call("POST", "/v1/operator/host-reconnect", {
+        ip: ip(),
+        body: { operatorSecret: "operator-wrong-value-xxxxxxxxxxxxxxxxx", groupId: host.groupId },
+      }),
+    );
+    const operatorReturn = await track(call("POST", "/v1/reconnect", { ip: ip(), body: { reconnectCode: operatorCode.body.reconnectCode } }));
+    expect(operatorReturn.status, operatorReturn.text).toBe(200);
+    secrets.push(operatorReturn.body.accessKey, operatorReturn.body.recoveryCode);
+
     await track(call("POST", "/v1/leave", { key: host.accessKey }));
 
     // The capture works and the Worker logs at most one line per request.
