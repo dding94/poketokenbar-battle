@@ -251,6 +251,21 @@ final class PracticeStakesStoreTests: XCTestCase {
         XCTAssertEqual(store.healthShare(of: "other"), 0)
     }
 
+    /// Setting the HP an individual already has, as a battle with stakes won or drawn at full HP does, leaves the save
+    /// file alone; a change writes it.
+    func testAnUnchangedHPLeavesTheSaveFileAlone() throws {
+        let folder = try stakesFolder(); defer { try? FileManager.default.removeItem(at: folder) }
+        let url = folder.appendingPathComponent("s.json")
+        let store = try makeStore(makeState(health: ["mon": 0.4]), at: url)
+        try FileManager.default.removeItem(at: url)
+        store.setHealthShare(0.4, of: "mon")
+        store.setHealthShare(1, of: "fresh")
+        store.setHealthShare(1.5, of: "fresh")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path), "nothing changed, so nothing was written")
+        store.setHealthShare(0.5, of: "mon")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: url.path), "a change is written")
+    }
+
     // MARK: Healing items
 
     func testAPotionHealsHalfUpToFullAndOnlyAWoundedPokemon() throws {
