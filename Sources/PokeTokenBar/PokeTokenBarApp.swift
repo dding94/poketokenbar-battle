@@ -66,20 +66,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     nonisolated static let faintedMark = "\u{271A}"
 
     /// The first line's suffix: the practice badge and the fainted mark, in that order; nil when neither.
-    nonisolated static func menuBadge(practice: String?, fainted: Bool) -> String? { practice }   // RED stub
+    nonisolated static func menuBadge(practice: String?, fainted: Bool) -> String? {
+        let parts = [practice, fainted ? faintedMark : nil].compactMap { $0 }
+        return parts.isEmpty ? nil : parts.joined(separator: " ")
+    }
 
     /// The tooltip with the practice line and, while the current Pokémon (`faintedName`) is fainted, how to heal it.
     nonisolated static func menuToolTip(base: String?, badge: String?, resultReady: Bool, faintedName: String?,
                                         l: L) -> String? {
-        guard badge != nil else { return base }
-        let line = resultReady ? l.practiceStatusResult : l.practiceStatusRunning
-        guard let base, !base.isEmpty else { return line }
-        return base + "\n" + line
-    }   // RED stub: no fainted line yet
+        var lines: [String] = []
+        if let base, !base.isEmpty { lines.append(base) }
+        if badge != nil { lines.append(resultReady ? l.practiceStatusResult : l.practiceStatusRunning) }
+        if let faintedName { lines.append(l.menuFaintedLine(faintedName)) }
+        // Nothing to add keeps the base as it was, an empty one included.
+        return lines.isEmpty ? base : lines.joined(separator: "\n")
+    }
 
     /// The menu bar sprite's opacity: dimmed while the Pokémon it shows is the current one and fainted. A chosen
     /// representative is another Pokémon, so it stays bright (the mark and the tooltip still tell).
-    nonisolated static func statusSpriteOpacity(fainted: Bool, showsCurrent: Bool) -> Float { 1 }   // RED stub
+    nonisolated static func statusSpriteOpacity(fainted: Bool, showsCurrent: Bool) -> Float {
+        fainted && showsCurrent ? 0.4 : 1
+    }
 
     // 메뉴바 캐릭터 애니메이션 — 단일 타이머로 프레임 순환.
     // 프레임 = 이미 22px 로 합성된 이미지 + delay. egg/static 은 2프레임 bob, animated 는 GIF 실제 프레임.
@@ -179,6 +186,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         observeDisplaySleep()
         observePowerState()
         observePractice()
+        observeCurrentHealth()
         applyState()
         if Self.launchRequestsPractice(arguments: CommandLine.arguments) {
             // 다음 턴으로 미룬다 — 상태 아이템 버튼이 자리 잡은 뒤에야 팝오버를 붙일 수 있다.
@@ -226,6 +234,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         }
     }
 
+    /// 메뉴바가 보여 줄 기절 상태 — 현재 포켓몬의 체력이 0인지, 메뉴바 스프라이트가 그 포켓몬인지(대표를 고르지 않음).
+    private struct FaintLook: Equatable {
+        let fainted: Bool
+        let showsCurrent: Bool
+    }
+    private var appliedFaintLook: FaintLook?
+    private var currentFaintLook: FaintLook {
+        FaintLook(fainted: (companion.currentHealthShare ?? 1) <= 0,
+                  showsCurrent: companion.representativeSpeciesID == nil)
+    }
+
+    /// 현재 포켓몬의 기절 관찰(PR 03C) — 배틀 결과·회복약·대표 변경으로 바뀌면 표식·툴팁·흐림을 다시 반영한다.
+    /// 세이브의 다른 변경에도 깨어나지만, 메뉴바는 기절 상태가 실제로 바뀔 때만 다시 그린다(2줄 타이틀 재측정이 비싸다).
+    private func observeCurrentHealth() {
+        withObservationTracking {
+            _ = companion.currentHealthShare
+            _ = companion.representativeSpeciesID
+        } onChange: { [weak self] in
+            Task { @MainActor in
+                guard let self else { return }
+                if self.currentFaintLook != self.appliedFaintLook { self.applyState() }
+                self.observeCurrentHealth()
+            }
+        }
+    }
+
     /// 연습전 배지(⚔︎/⚑) 관찰 — 배지가 바뀔 때만 메뉴바를 다시 그린다. 턴 단위 변화는 배지에 안 잡히고,
     /// 2줄 타이틀 재측정(`applyMenuText`)이 비싸서 타이머·턴별 갱신은 두지 않는다.
     private func observePractice() {
@@ -260,9 +294,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         // Recomputed on every refresh, so a tier that moves with the clock redraws even when the text doesn't.
         let badge = practice.statusBadge
         appliedPracticeBadge = badge
-        Self.applyMenuText(Self.menuLines(store.menuLines, badge: badge), to: button, colors: store.menuLimitColorRuns())
-        button.toolTip = Self.menuToolTip(base: store.menuToolTip, badge: badge,
-                                          resultReady: !practice.resultSeen, l: companion.l)
+        // 현재 포켓몬이 기절했으면(PR 03C) 회복할 때까지 첫 줄 끝 표식 + 툴팁 한 줄 + (그 포켓몬을 보여 줄 때) 흐린 스프라이트.
+        let faint = currentFaintLook
+        appliedFaintLook = faint
+        Self.applyMenuText(Self.menuLines(store.menuLines, badge: Self.menuBadge(practice: badge, fainted: faint.fainted)),
+                           to: button, colors: store.menuLimitColorRuns())
+        button.toolTip = Self.menuToolTip(base: store.menuToolTip, badge: badge, resultReady: !practice.resultSeen,
+                                          faintedName: faint.fainted ? companion.displayName : nil, l: companion.l)
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)   // 레이어 속성 변경도 전환 애니메이션 없이(setStatusImage 와 같은 규칙)
+        spriteLayer.opacity = Self.statusSpriteOpacity(fainted: faint.fainted, showsCurrent: faint.showsCurrent)
+        CATransaction.commit()
         needsSpriteLayout = true   // 텍스트 길이가 바뀌면 버튼 폭이 변해 이미지 자리도 움직인다
         // stale 시각 dim 제거 — 슬립/런치 직후 refresh 완료 전 몇 초간 회색으로 보여 '고장/비활성'
         // 으로 오인되던 것 방지(사용자 반복 지적). 데이터가 오래됐다는 신호가 필요하면 팝오버

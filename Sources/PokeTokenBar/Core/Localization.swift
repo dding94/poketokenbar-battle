@@ -1496,7 +1496,12 @@ struct L {
         case .rareCandy: return t("이상한 사탕", "Rare Candy", "ふしぎなアメ", "Caramelo Raro", "Super Bonbon", "Doce Raro", "Sonderbonbon", "Редкая конфета")
         case .mint:      return t("민트", "Mint", "ミント", "Menta", "Menthe", "Menta", "Minze", "Мята")
         case .shinyCharm: return t("이로치 부적", "Shiny Charm", "ひかるおまもり", "Amuleto Iris", "Charme Chroma", "Amuleto Shiny", "Schillerpin", "Шайни-талисман")
-        case .potion, .hyperPotion, .revive, .ivReroll: return kind.rawValue   // contract stub: UI fills the official names
+        // PR 03C: the official names for the three healing items. The IV reroll is the app's own item, so it has a
+        // plain descriptive name of its own rather than anything that reads like an official item.
+        case .potion:      return t("상처약", "Potion", "キズぐすり", "Poción", "Potion", "Poção", "Trank", "Зелье")
+        case .hyperPotion: return t("고급상처약", "Hyper Potion", "すごいキズぐすり", "Hiperpoción", "Hyper Potion", "Hiper Poção", "Hypertrank", "Гиперзелье")
+        case .revive:      return t("기력의조각", "Revive", "げんきのかけら", "Revivir", "Rappel", "Reviver", "Beleber", "Оживитель")
+        case .ivReroll:    return t("개체값 재추첨권", "IV Reroll", "個体値リロール券", "Sorteo de IV", "Relance d'IV", "Sorteio de IVs", "IV-Neuwurf", "Переброс IV")
         }
     }
     func itemDescription(_ kind: ItemKind) -> String {
@@ -1529,23 +1534,93 @@ struct L {
                      "Enquanto estiver na sua bolsa, aumenta a chance de nascer um Pokémon shiny.",
                      "Erhöht im Beutel die Chance, dass ein schillerndes Pokémon schlüpft.",
                      "Пока он у вас, повышает шанс, что вылупится шайни.")
-        case .potion, .hyperPotion, .revive, .ivReroll: return ""   // contract stub: UI fills the descriptions
+        case .potion:
+            let share = battleShare(BattleItem.potionHeal)   // 상수에서 파생(하드코딩 드리프트 방지)
+            return t("포켓몬의 체력을 \(share) 회복해요.",
+                     "Restores \(share) of a Pokémon's HP.",
+                     "ポケモンのHPを\(share)回復します。",
+                     "Restaura el \(share) de los PS de un Pokémon.",
+                     "Restaure \(share) des PV d'un Pokémon.",
+                     "Restaura \(share) do HP de um Pokémon.",
+                     "Füllt \(share) der KP eines Pokémon wieder auf.",
+                     "Восстанавливает \(share) ОЗ покемона.")
+        case .hyperPotion:
+            return t("포켓몬의 체력을 모두 회복해요.",
+                     "Fully restores a Pokémon's HP.",
+                     "ポケモンのHPをすべて回復します。",
+                     "Restaura todos los PS de un Pokémon.",
+                     "Restaure tous les PV d'un Pokémon.",
+                     "Restaura todo o HP de um Pokémon.",
+                     "Füllt die KP eines Pokémon vollständig auf.",
+                     "Полностью восстанавливает ОЗ покемона.")
+        case .revive:
+            let share = battleShare(BattleItem.reviveShare)
+            return t("기절한 포켓몬을 체력 \(share)로 되살려요.",
+                     "Revives a fainted Pokémon with \(share) of its HP.",
+                     "ひんしのポケモンをHP\(share)で元気にします。",
+                     "Reanima a un Pokémon debilitado con el \(share) de sus PS.",
+                     "Ranime un Pokémon K.O. avec \(share) de ses PV.",
+                     "Reanima um Pokémon desmaiado com \(share) do HP.",
+                     "Belebt ein besiegtes Pokémon mit \(share) seiner KP wieder.",
+                     "Возвращает покемона без сознания с \(share) ОЗ.")
+        case .ivReroll:
+            return t("현재 포켓몬의 개체값 6개를 모두 다시 뽑아요. 더 낮아질 수도 있어요.",
+                     "Re-rolls all six IVs of your Pokémon. They may get lower.",
+                     "ポケモンの個体値6つをすべて引き直します。下がることもあります。",
+                     "Vuelve a sortear los seis IV de tu Pokémon. Pueden bajar.",
+                     "Retire au sort les six IV de ton Pokémon. Ils peuvent baisser.",
+                     "Sorteia de novo os seis IVs do seu Pokémon. Eles podem diminuir.",
+                     "Würfelt alle sechs IVs deines Pokémon neu aus. Sie können sinken.",
+                     "Заново определяет все шесть IV покемона. Они могут стать ниже.")
         }
     }
+    /// A `BattleItem` share as the item texts write it: 0.5 → "50%".
+    private func battleShare(_ share: Double) -> String { "\(Int((share * 100).rounded()))%" }
     /// 가방 사용 컨트롤의 효과 힌트 — 민트("성격 랜덤 변경", 사탕의 "+XP" 자리).
     var mintEffectHint: String { t("성격 랜덤 변경", "Random nature", "せいかくランダム変更", "Naturaleza aleatoria", "Nature aléatoire", "Natureza aleatória", "Zufälliges Wesen", "Случайный характер") }
-    // PR 03C battle items and HP (bag, practice screens, menu bar). RED stubs.
-    func battleItemEffectHint(_ kind: ItemKind) -> String { "" }
-    var battleItemFullHealth: String { "" }
-    var battleItemNeedsRevive: String { "" }
-    var battleItemOnlyFainted: String { "" }
-    var battleHP: String { "" }
-    var battleFainted: String { "" }
-    var ivRerollCurrent: String { "" }
-    var ivRerollMayDrop: String { "" }
-    var ivRerollAction: String { "" }
-    var ivRerollNew: String { "" }
-    func menuFaintedLine(_ name: String) -> String { "" }
+    // PR 03C battle items and HP (bag, practice screens, menu bar).
+    /// 가방 사용 컨트롤의 효과 힌트 — 회복 비율은 `BattleItem` 상수에서 파생. 배틀 아이템 4종 밖에서는 빈 문자열.
+    func battleItemEffectHint(_ kind: ItemKind) -> String {
+        switch kind {
+        case .potion:
+            let share = battleShare(BattleItem.potionHeal)
+            return t("체력 +\(share)", "HP +\(share)", "HP +\(share)", "PS +\(share)", "PV +\(share)", "HP +\(share)", "KP +\(share)", "ОЗ +\(share)")
+        case .hyperPotion:
+            return t("체력 완전 회복", "Full HP", "HP全回復", "PS al máximo", "PV au max", "HP cheio", "KP voll", "ОЗ полностью")
+        case .revive:
+            let share = battleShare(BattleItem.reviveShare)
+            return t("기절 → 체력 \(share)", "Fainted → \(share) HP", "ひんし → HP\(share)", "Debilitado → \(share) PS",
+                     "K.O. → \(share) PV", "Desmaiado → \(share) HP", "Besiegt → \(share) KP", "Без сознания → \(share) ОЗ")
+        case .ivReroll:
+            return t("개체값 6개 다시 뽑기", "Re-roll all 6 IVs", "個体値6つを引き直し", "Nuevo sorteo de 6 IV",
+                     "Relance des 6 IV", "Novo sorteio de 6 IVs", "6 IVs neu würfeln", "Переброс 6 IV")
+        case .rareCandy, .mint, .shinyCharm:
+            return ""
+        }
+    }
+    /// 회복약을 못 쓰는 이유 — 체력이 가득함 / 기절해서 기력의조각만 통함 / 기력의조각인데 기절하지 않음.
+    var battleItemFullHealth: String { t("체력이 가득해요", "HP is full", "HPは満タンです", "Tiene los PS al máximo", "Ses PV sont au max", "O HP já está cheio", "Die KP sind voll", "ОЗ полные") }
+    var battleItemNeedsRevive: String { t("기절했어요 · 기력의조각이 필요해요", "Fainted · needs a Revive", "ひんし · げんきのかけらが必要です", "Debilitado · necesita un Revivir", "K.O. · il faut un Rappel", "Desmaiado · precisa de um Reviver", "Besiegt · braucht einen Beleber", "Без сознания · нужен Оживитель") }
+    var battleItemOnlyFainted: String { t("기절했을 때만 쓸 수 있어요", "Only for a fainted Pokémon", "ひんしのときだけ使えます", "Solo para un Pokémon debilitado", "Seulement pour un Pokémon K.O.", "Só para um Pokémon desmaiado", "Nur für ein besiegtes Pokémon", "Только для покемона без сознания") }
+    /// 체력 막대 앞의 짧은 이름과 체력 0 표시(원작의 "기절").
+    var battleHP: String { t("체력", "HP", "HP", "PS", "PV", "HP", "KP", "ОЗ") }
+    var battleFainted: String { t("기절", "Fainted", "ひんし", "Debilitado", "K.O.", "Desmaiado", "Besiegt", "Без сознания") }
+    // 개체값 재추첨 확인 — 지금 개체값과 "더 낮아질 수 있음"을 먼저 보여 주고, 뽑은 뒤 새 개체값을 보여 준다.
+    var ivRerollCurrent: String { t("지금 개체값", "Current IVs", "今の個体値", "IV actuales", "IV actuels", "IVs atuais", "Aktuelle IVs", "Текущие IV") }
+    var ivRerollMayDrop: String { t("더 낮아질 수 있어요", "They may get lower", "下がることもあります", "Pueden bajar", "Ils peuvent baisser", "Podem diminuir", "Sie können sinken", "Могут стать ниже") }
+    var ivRerollAction: String { t("다시 뽑기", "Re-roll", "引き直す", "Volver a sortear", "Relancer", "Sortear de novo", "Neu würfeln", "Перебросить") }
+    var ivRerollNew: String { t("새 개체값", "New IVs", "新しい個体値", "IV nuevos", "Nouveaux IV", "IVs novos", "Neue IVs", "Новые IV") }
+    /// 메뉴바 툴팁 — 현재 포켓몬이 기절했을 때 붙는 줄(회복할 때까지).
+    func menuFaintedLine(_ name: String) -> String {
+        t("\(name) 기절 · 가방에서 기력의조각으로 되살릴 수 있어요",
+          "\(name) fainted · revive it from the bag",
+          "\(name)はひんし · バッグのげんきのかけらで元気にできます",
+          "\(name) está debilitado · reanímalo desde la bolsa",
+          "\(name) est K.O. · ranime-le depuis le sac",
+          "\(name) desmaiou · reanime pela bolsa",
+          "\(name) ist besiegt · belebe es im Beutel wieder",
+          "\(name) без сознания · оживите его из сумки")
+    }
 
     // MARK: 상점 (재화 = 사용한 토큰)
     var shop: String { t("상점", "Shop", "ショップ", "Tienda", "Boutique", "Loja", "Laden", "Магазин") }
@@ -2001,16 +2076,36 @@ extension L {
     func practiceStreakContinued(_ streak: Int) -> String { lang == .ko ? "\(streak)연승!" : "\(streak)-win streak!" }
     func practiceStreakEnded(_ streak: Int) -> String { lang == .ko ? "연승 \(streak)에서 멈췄어요" : "Streak ended at \(streak)" }
     var practiceBestStreak: String { lang == .ko ? "최고 기록" : "Personal best" }
-    // PR 03C stakes: healing my entry, the fainted start block, and the result's XP and HP lines. RED stubs.
-    var practiceHeal: String { "" }
-    var practiceHealNone: String { "" }
-    var practiceFaintedBlock: String { "" }
-    func practiceXPGained(xp: Int, winsLeft: Int) -> String { "" }
-    var practiceXPCapReached: String { "" }
-    var practiceXPNoPokemon: String { "" }
-    var practiceXPLoss: String { "" }
-    var practiceXPDraw: String { "" }
-    func practiceHPCarries(_ percent: Int) -> String { "" }
-    var practiceFaintedTitle: String { "" }
-    var practiceFaintedHint: String { "" }
+    // PR 03C stakes: healing my entry, the fainted start block, and the result's XP and HP lines.
+    var practiceHeal: String { lang == .ko ? "회복" : "Heal" }
+    var practiceHealNone: String {
+        lang == .ko ? "쓸 수 있는 회복약이 없어요 · 상점에서 살 수 있어요" : "No healing item that works · buy one in the shop"
+    }
+    /// The line above Start while a fainted entry faces a wild or today's opponent.
+    var practiceFaintedBlock: String {
+        lang == .ko ? "기절 · 회복해야 야생·오늘의 상대와 싸울 수 있어요" : "Fainted · heal it to fight wild or today's opponents"
+    }
+    /// "+5M XP · 오늘 9번 남음": the current Pokémon's XP and today's paying wins left (`PracticeStakes`).
+    func practiceXPGained(xp: Int, winsLeft: Int) -> String {
+        let gained = "+\(TokenFormatter.compact(xp)) XP"
+        if winsLeft <= 0 { return lang == .ko ? "\(gained) · 오늘은 마지막이에요" : "\(gained) · last one today" }
+        return lang == .ko ? "\(gained) · 오늘 \(winsLeft)번 남음" : "\(gained) · \(winsLeft) more today"
+    }
+    var practiceXPCapReached: String {
+        let wins = PracticeStakes.dailyXPWins
+        return lang == .ko ? "경험치 없음 · 오늘 \(wins)승을 모두 채웠어요" : "No XP · today's limit of \(wins) wins is reached"
+    }
+    var practiceXPNoPokemon: String { lang == .ko ? "경험치 없음 · 키우는 포켓몬이 없어요" : "No XP · no current Pokémon to grow" }
+    var practiceXPLoss: String { lang == .ko ? "진 판은 경험치가 없어요" : "No XP for a loss" }
+    var practiceXPDraw: String { lang == .ko ? "무승부는 경험치가 없어요" : "No XP for a draw" }
+    /// After a battle with stakes the HP stays: "63% · 다음 판까지 남아요".
+    func practiceHPCarries(_ percent: Int) -> String {
+        lang == .ko ? "\(percent)% · 다음 판까지 남아요" : "\(percent)% · stays for your next battle"
+    }
+    var practiceFaintedTitle: String { lang == .ko ? "기절했어요" : "Fainted" }
+    var practiceFaintedHint: String {
+        let revive = itemName(.revive)
+        return lang == .ko ? "\(KoreanParticle.direction.attach(to: revive)) 되살려야 야생과 다시 싸울 수 있어요"
+            : "Use a \(revive) to fight wild opponents again"
+    }
 }

@@ -1159,11 +1159,14 @@ final class PracticeScreenRenderingTests: XCTestCase {
                 try save(bitmap, as: "practice-03c-bag-ko.png")
                 continue
             }
-            let needles = ["Potion", "Hyper Potion", "Revive", "IV Reroll", "HP is full", "Only for a fainted Pokémon",
-                           "Re-roll all 6 IVs"]
+            // The effect hints are tertiary text like the candy's and mint's, too faint to OCR reliably; the reasons
+            // are secondary, and the reroll's readiness is checked as data.
+            let needles = ["Potion", "Hyper Potion", "Revive", "IV Reroll", "HP is full", "Only for a fainted Pokémon"]
             let (text, bitmap) = try await waitForText(needles, in: host)
             try save(bitmap, as: "practice-03c-bag-en.png")
             assertRendered(needles, in: text)
+            XCTAssertEqual(BattleItemUse(.ivReroll, count: store.itemCount(.ivReroll), healthShare: store.currentHealthShare),
+                           .usable, "the reroll is ready for a hatched Pokémon")
         }
     }
 

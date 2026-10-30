@@ -14,6 +14,8 @@ struct PracticeSelectionView: View {
     /// Healing items for my entry (PR 03C); nil hides the Heal control.
     var bag: (any PracticeItemBag)?
     @State private var changingPlayer = false
+    /// The Heal control's item list is open.
+    @State private var healing = false
 
     private var eligible: [PracticeCandidate] { session.roster?.eligible ?? [] }
 
@@ -58,7 +60,8 @@ struct PracticeSelectionView: View {
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
             .keyboardShortcut(.defaultAction)
-            .disabled(session.player == nil || session.opponent == nil)
+            .disabled(!Self.canStart(player: session.player, opponent: session.opponent,
+                                     faintedBlock: progress.faintedBlock))
         }
         // Wild opponents are matched to the entry's level: search whenever one is due — idle with a player —
         // rather than on particular transitions. After a release the same player can come back through
@@ -77,25 +80,42 @@ struct PracticeSelectionView: View {
 
     /// Start needs both sides, and a fainted entry may only spar (`PracticeSelectionProgress.faintedBlock`).
     static func canStart(player: PracticeCandidate?, opponent: PracticeCandidate?, faintedBlock: Bool) -> Bool {
-        player != nil && opponent != nil   // RED stub: ignores the block
+        player != nil && opponent != nil && !faintedBlock
     }
 
     /// Uses a healing item on my entry, the individual it is (`BattleSnapshot.instanceID`). False when nothing
     /// was used: no bag, no entry, or the item does not work on it.
     @discardableResult
-    static func heal(_ kind: ItemKind, entry: PracticeCandidate?, bag: (any PracticeItemBag)?) -> Bool { false }   // RED stub
+    static func heal(_ kind: ItemKind, entry: PracticeCandidate?, bag: (any PracticeItemBag)?) -> Bool {
+        guard let bag, let instanceID = entry?.snapshot?.instanceID else { return false }
+        return bag.useHealingItem(kind, on: instanceID)
+    }
+
+    /// My entry's HP share between battles; nil without stakes (no HP to show).
+    private var entryHealth: Double? { session.player.flatMap { progress.health[$0.id] } }
+
+    /// How many of each healing item the bag holds, for the Heal control.
+    private var healingCounts: [ItemKind: Int] {
+        guard let bag else { return [:] }
+        return Dictionary(uniqueKeysWithValues: [ItemKind.potion, .hyperPotion, .revive].map { ($0, bag.itemCount($0)) })
+    }
 
     // MARK: My entry
 
+    /// My entry: sprite, name and level, types, and with stakes its HP — gray with a "Fainted" tag at 0 — and the
+    /// Heal control below full HP.
     private var playerCard: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        let health = entryHealth
+        return VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 10) {
                 PracticeSpriteTile(set: session.player?.snapshot?.set, size: 44, artwork: artwork)
+                    .practiceFainted((health ?? 1) <= 0)
                 VStack(alignment: .leading, spacing: 3) {
                     Text(l.practicePlayer).font(.caption2).foregroundStyle(.secondary)
                     if let player = session.player, let snapshot = player.snapshot {
                         PracticeNameLevel(name: player.name, level: snapshot.set.level)
                         PracticeTypeBadges(types: snapshot.publicInfo.types, l: l, artwork: artwork)
+                        if let health { BattleHealthLine(share: health, l: l) }
                     } else {
                         Text(l.practiceChoose).font(.callout).foregroundStyle(.secondary)
                     }
@@ -106,6 +126,14 @@ struct PracticeSelectionView: View {
                         .buttonStyle(.borderless)
                         .font(.caption)
                 }
+            }
+            if let health, health < 1, bag != nil {
+                PracticeHealControl(share: health, counts: healingCounts, isOpen: healing, l: l,
+                                    onToggle: { healing.toggle() },
+                                    onUse: { kind in
+                                        if Self.heal(kind, entry: session.player, bag: bag) { healing = false }
+                                    },
+                                    artwork: artwork)
             }
             if changingPlayer {
                 VStack(spacing: 4) {
@@ -132,9 +160,12 @@ struct PracticeSelectionView: View {
 
     private func compactRow(_ candidate: PracticeCandidate) -> some View {
         HStack(spacing: 8) {
+            let fainted = (progress.health[candidate.id] ?? 1) <= 0
             PracticeSpriteTile(set: candidate.snapshot?.set, size: 28, artwork: artwork)
+                .practiceFainted(fainted)
             PracticeNameLevel(name: candidate.name, level: candidate.snapshot?.set.level ?? 0, font: .caption.weight(.semibold))
             PracticeTypeBadges(types: candidate.snapshot?.publicInfo.types ?? [], l: l, artwork: artwork)
+            if fainted { BattleFaintedTag(l: l) }
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 6).padding(.vertical, 4)
@@ -258,7 +289,7 @@ struct PracticeSelectionView: View {
     private func opponentRow(_ candidate: PracticeCandidate, number: Int?) -> some View {
         let selected = candidate.id == session.opponentID
         return PracticeOpponentRow(candidate: candidate, temperament: candidate.temperament, selected: selected,
-                                   number: number, l: l, artwork: artwork,
+                                   number: number, health: progress.health[candidate.id], l: l, artwork: artwork,
                                    onSelect: { session.opponentID = candidate.id }) {
             if selected, let mine = session.player?.snapshot?.publicInfo.stats,
                let theirs = candidate.snapshot?.publicInfo.stats {
@@ -303,8 +334,21 @@ struct PracticeSelectionView: View {
             }
             .pickerStyle(.segmented)
             .labelsHidden()
-            Text(session.mode == .manual ? l.practiceAutoPickHint : l.practiceAutoModeHint)
-                .font(.caption2).foregroundStyle(.secondary)
+            // The line right above Start says why it is off; it takes the mode hint's place, so the pinned area keeps
+            // its height.
+            if progress.faintedBlock {
+                Label {
+                    Text(l.practiceFaintedBlock).foregroundStyle(.primary)
+                } icon: {
+                    Image(systemName: "heart.slash.fill").foregroundStyle(.orange)
+                }
+                .font(.caption2.weight(.semibold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+            } else {
+                Text(session.mode == .manual ? l.practiceAutoPickHint : l.practiceAutoModeHint)
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
         }
     }
 }
@@ -342,6 +386,7 @@ struct PracticeOpponentRow<Detail: View>: View {
                     Image(systemName: selected ? "largecircle.fill.circle" : "circle")
                         .foregroundStyle(selected ? Color.accentColor : Color.secondary)
                     PracticeSpriteTile(set: candidate.snapshot?.set, size: 32, artwork: artwork)
+                        .practiceFainted((health ?? 1) <= 0)
                     VStack(alignment: .leading, spacing: 3) {
                         HStack(spacing: 5) {
                             PracticeNameLevel(name: candidate.name, level: candidate.snapshot?.set.level ?? 0, font: font)
@@ -356,6 +401,8 @@ struct PracticeOpponentRow<Detail: View>: View {
                             tags(compact: false)
                             tags(compact: true)
                         }
+                        // My own Pokémon carry their HP between battles; wild and today's opponents start full.
+                        if let health { BattleHealthLine(share: health, l: l) }
                     }
                     Spacer(minLength: 4)
                     if let number {

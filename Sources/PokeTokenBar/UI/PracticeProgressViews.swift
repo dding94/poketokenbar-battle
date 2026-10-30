@@ -21,12 +21,21 @@ struct PracticeSelectionProgress {
 }
 
 extension PracticeSelectionProgress {
-    /// A fainted entry may only spar: a wild or today's opponent is refused (PR 03C).
-    static func blocksStart(playerShare: Double?, opponent: PracticeCandidate?) -> Bool { false }   // RED stub
+    /// A fainted entry may only spar: a wild or today's opponent is refused (PR 03C). Without stakes (no HP) nothing is.
+    static func blocksStart(playerShare: Double?, opponent: PracticeCandidate?) -> Bool {
+        guard let playerShare, playerShare <= 0, let opponent else { return false }
+        return opponent.origin.wildTraits != nil
+    }
 
     @MainActor init(_ session: PracticeSession) {
+        var health: [String: Double] = [:]
+        for candidate in session.roster?.eligible ?? [] {
+            if let share = session.healthShare(of: candidate) { health[candidate.id] = share }
+        }
+        // Core will report its own start block for a fainted entry; until then the same rule is read off the HP.
+        let blocked = Self.blocksStart(playerShare: session.player.flatMap { health[$0.id] }, opponent: session.opponent)
         self.init(records: session.records, daily: session.dailyCandidate, dailyState: session.dailyState,
-                  todayStars: session.todayStars)
+                  todayStars: session.todayStars, health: health, faintedBlock: blocked)
     }
 }
 
@@ -265,12 +274,29 @@ struct PracticeResultRecord: View {
         case noPokemon
         case loss
         case draw
+
+        /// The current Pokémon got XP.
+        var paid: Bool {
+            if case .gained = self { return true }
+            return false
+        }
     }
 
-    static func xpLine(_ update: PracticeRecordUpdate, _ stakes: PracticeStakesUpdate) -> XPLine { .loss }   // RED stub
+    static func xpLine(_ update: PracticeRecordUpdate, _ stakes: PracticeStakesUpdate) -> XPLine {
+        switch update.outcome {
+        case .loss: return .loss
+        case .draw: return .draw
+        case .win:
+            if stakes.xp > 0 { return .gained(xp: stakes.xp, winsLeft: stakes.xpWinsLeft) }
+            // A win pays nothing past the day's paying wins, or when there is no current Pokémon to grow.
+            return stakes.xpWinsLeft <= 0 ? .capReached : .noPokemon
+        }
+    }
 
     /// Nothing to show: no streak change, not today's opponent and no stakes.
-    static func isEmpty(_ update: PracticeRecordUpdate, stakes: PracticeStakesUpdate?) -> Bool { isEmpty(update) }   // RED stub
+    static func isEmpty(_ update: PracticeRecordUpdate, stakes: PracticeStakesUpdate?) -> Bool {
+        stakes == nil && isEmpty(update)
+    }
 
     enum Streak: Equatable {
         /// A win after a loss, a draw or nothing.
@@ -310,10 +336,72 @@ struct PracticeResultRecord: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             if let streak = Self.streak(update) { streakRow(streak) }
+            if let stakes {
+                xpRow(Self.xpLine(update, stakes))
+                healthRow(stakes.healthShare)
+            }
             if update.daily { starsRow }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .practiceCard(padding: 8)
+    }
+
+    /// What the current Pokémon got: "+5M XP · 9 more today" in full strength, or why nothing in a quiet caption.
+    private func xpRow(_ line: XPLine) -> some View {
+        let paid = line.paid
+        return HStack(spacing: 6) {
+            Image(systemName: "sparkles")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(paid ? Color.accentColor : Color.secondary)
+                .frame(width: 14)
+            Text(words(line))
+                .font(paid ? .callout.weight(.semibold) : .caption)
+                .foregroundStyle(paid ? Color.primary : Color.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
+            Spacer(minLength: 0)
+        }
+    }
+
+    private func words(_ line: XPLine) -> String {
+        switch line {
+        case .gained(let xp, let winsLeft): l.practiceXPGained(xp: xp, winsLeft: winsLeft)
+        case .capReached: l.practiceXPCapReached
+        case .noPokemon: l.practiceXPNoPokemon
+        case .loss: l.practiceXPLoss
+        case .draw: l.practiceXPDraw
+        }
+    }
+
+    /// The HP that stays for the next battle, or the faint, said plainly, with how to heal it.
+    @ViewBuilder
+    private func healthRow(_ share: Double) -> some View {
+        if share <= 0 {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Image(systemName: "heart.slash.fill")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.red)
+                    .frame(width: 14)
+                Text(l.practiceFaintedTitle).font(.callout.weight(.semibold)).foregroundStyle(.red).fixedSize()
+                Text(l.practiceFaintedHint)
+                    .font(.caption).foregroundStyle(.secondary)
+                    .lineLimit(1).minimumScaleFactor(0.75)
+                Spacer(minLength: 0)
+            }
+        } else {
+            HStack(spacing: 6) {
+                Image(systemName: "heart.fill")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.pink)
+                    .frame(width: 14)
+                PracticeHPBar(hp: Int((share * 1000).rounded()), maxHP: 1000, height: 5)
+                    .frame(width: 70)
+                Text(l.practiceHPCarries(BattleHealth.percent(share)))
+                    .font(.caption).foregroundStyle(.secondary)
+                    .lineLimit(1).minimumScaleFactor(0.85)
+                Spacer(minLength: 0)
+            }
+        }
     }
 
     private func streakRow(_ streak: Streak) -> some View {

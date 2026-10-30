@@ -37,8 +37,8 @@ struct PracticeResultView: View {
         VStack(spacing: 10) {
             hero
             // The card takes its room from the log below, which scrolls.
-            if let record, !PracticeResultRecord.isEmpty(record) {
-                PracticeResultRecord(update: record, l: l)
+            if let record, !PracticeResultRecord.isEmpty(record, stakes: stakes) {
+                PracticeResultRecord(update: record, stakes: stakes, l: l)
             }
             if let playback {
                 tiles(playback.summary)
@@ -123,7 +123,8 @@ struct PracticeResultView: View {
             .font(.caption)
             row(l.practiceBigHits, l.practiceHitCounts(superEffective: summary.superEffectiveHits,
                                                        critical: summary.criticalHits))
-            if let mine = playback?.display[.player] {
+            // With stakes the record card says the HP that stays; it is said once.
+            if stakes == nil, let mine = playback?.display[.player] {
                 row(l.practiceRemainingHP, "\(mine.hp)/\(mine.maxHP) · \(l.practicePercent(mine.percent))")
             }
             row(l.practiceMode, battle.mode == .manual ? l.practiceManual : l.practiceAuto)
@@ -169,7 +170,7 @@ struct PracticeResultView: View {
 
     private var summary: some View {
         VStack(alignment: .leading, spacing: 5) {
-            if let mine = battle.view?.p1 {
+            if stakes == nil, let mine = battle.view?.p1 {
                 let percent = mine.maxhp > 0 ? mine.hp * 100 / mine.maxhp : 0
                 row(l.practiceRemainingHP, "\(mine.hp)/\(mine.maxhp) · \(percent)%")
             }
