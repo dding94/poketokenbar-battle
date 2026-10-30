@@ -2171,8 +2171,15 @@ extension CompanionStore: PracticeBattleEffects {
         guard writeHealthShare(share, of: instanceID) else { return }
         save()
     }
+    /// Grows the current Pokémon by `xp` along a Rare Candy's path (`applyUsage`): evolution, graduation and their
+    /// effects as usual, saved with the growth, and never the usage statistics or the wallet. False, with nothing
+    /// changed, without a current Pokémon.
     @discardableResult
-    func grantBattleXP(_ xp: Int) -> Bool { false }                    // contract stub
+    func grantBattleXP(_ xp: Int) -> Bool {
+        guard state.active != nil else { return false }
+        applyUsage(xp)
+        return true
+    }
 
     /// Uses a Potion, Hyper Potion or Revive on one individual. False (nothing spent) when it can't be used:
     /// none in the bag, a Revive on a Pokémon that isn't fainted, a Potion on a fainted or full one.
