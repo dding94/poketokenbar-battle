@@ -779,3 +779,73 @@ final class PracticeStakesFileTests: XCTestCase {
         XCTAssertEqual(try withoutStakes(after), try withoutStakes(before), "nothing else in the save changed")
     }
 }
+
+// MARK: The app's wiring: a real store as the session's effects
+
+/// A real store on its own save, reached by a session as its `effects` the way the app wires them, with the bag used
+/// on the side while a battle runs (PR 03C review).
+@MainActor
+final class PracticeStakesLiveTests: XCTestCase {
+    private var folder: URL!
+    private var suite: String!
+    override func setUp() async throws {
+        folder = try stakesFolder()
+        suite = "PracticeStakesTests-\(UUID().uuidString)"
+    }
+    override func tearDown() async throws {
+        try? FileManager.default.removeItem(at: folder)
+        UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite)
+    }
+
+    /// A save whose current Pokémon is "pika" (Pikachu, Thunderbolt, Lv.50) with Magikarp "m" in the dex.
+    private func pikaState(health: [String: Double] = [:], items: [ItemKind: Int] = [:]) -> CompanionState {
+        var state = stakesState([stakesMagikarp])
+        state.installBaselineSet = true; state.usedSinceInstall = 3_000_000_000; state.lastDate = "d1"
+        state.battleHealth = health
+        state.inventory = Dictionary(uniqueKeysWithValues: items.map { ($0.key.rawValue, $0.value) })
+        state.active = MonState(baseID: 25, pathIDs: [25], stageIndex: 0, usedAtStage: 10_000_000, rarity: .common,
+                                totalForms: 1, nature: .hardy,
+                                profile: stakesProfile("pika", moves: ["thunderbolt"], ability: "static"))
+        return state
+    }
+    /// The store on `state` (growth difficulty at its default, from a fresh defaults suite) and a session wired to it.
+    private func live(_ state: CompanionState, wild: StakesWildStub = StakesWildStub(speciesID: 129, moves: ["splash"]))
+        throws -> (store: CompanionStore, session: PracticeSession) {
+        let saveURL = folder.appendingPathComponent("companion-state.json")
+        try JSONEncoder().encode(state).write(to: saveURL)
+        let store = CompanionStore(provider: StakesLineProvider(), clock: { stakesNow }, fileURL: saveURL,
+                                   rng: StakesRNG(state: 3), dittoDisguiseRollingEnabled: false,
+                                   defaults: try XCTUnwrap(UserDefaults(suiteName: suite)))
+        let session = PracticeSession(engineURL: stakesEngineURL, clock: { 0 }, drivesAutomatically: false,
+                                      wildSource: PracticeWildSource(provider: wild, details: wild), wildSeed: { 11 },
+                                      now: { stakesNow }, calendar: stakesUTC, effects: store)
+        session.prepare(state: store.state, activeName: nil)
+        return (store, session)
+    }
+
+    // MARK: Healing during a battle
+
+    /// The review's repro: a battle with stakes starts at 40% HP, the player goes Back to Home while it runs and
+    /// uses a Potion from the bag. The battle owns that HP until it ends, so the bag refuses and spends nothing; the
+    /// end sets the HP the battle left, and the Potion works then.
+    func testAPotionCannotHealThePokemonOfARunningBattleWithStakes() async throws {
+        let (store, session) = try live(pikaState(health: ["pika": 0.4], items: [.potion: 1]))
+        await stakesSearch(session)
+        session.opponentID = try XCTUnwrap(session.wildCandidates.first).id
+        session.mode = .automatic
+        session.start()
+        XCTAssertEqual(session.battle?.phase, .running)
+        session.setPaused(true, reason: .screenHidden)
+        XCTAssertFalse(store.useHealingItem(.potion, on: "pika"), "the battle owns this HP until it ends")
+        XCTAssertEqual(store.itemCount(.potion), 1, "a refused heal spends nothing")
+        XCTAssertEqual(store.healthShare(of: "pika"), 0.4)
+        session.setPaused(false, reason: .screenHidden)
+        session.skipToResult()
+        XCTAssertEqual(session.battle?.result?.winner, "p1")
+        let left = try XCTUnwrap(session.lastStakes?.healthShare)
+        XCTAssertEqual(store.healthShare(of: "pika"), left, "the HP the battle left")
+        XCTAssertTrue(store.useHealingItem(.potion, on: "pika"), "the battle is over: the Potion works")
+        XCTAssertEqual(store.itemCount(.potion), 0)
+        XCTAssertEqual(store.healthShare(of: "pika"), min(1, left + BattleItem.potionHeal), accuracy: 1e-9)
+    }
+}
