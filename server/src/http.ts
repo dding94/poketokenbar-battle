@@ -90,8 +90,11 @@ export function optionalInteger(body: Body, field: string, min: number, max: num
 }
 
 // Cc: control characters. Cf: format characters such as zero-width and bidi controls,
-// which would let look-alike emails or names pass as distinct.
-const FORBIDDEN_IN_EMAIL = /[\s\p{Cc}\p{Cf}]/u;
+// which would let look-alike emails or names pass as distinct. Emails also refuse
+// default-ignorable code points (Hangul fillers, variation selectors, CGJ, ...) and the
+// blank braille pattern U+2800, which render as nothing. Group names skip that extra check:
+// only the operator sets a name, and emoji need variation selectors.
+const FORBIDDEN_IN_EMAIL = /[\s\p{Cc}\p{Cf}\p{Default_Ignorable_Code_Point}\u2800]/u;
 const FORBIDDEN_IN_NAME = /[\p{Cc}\p{Cf}]/u;
 
 export interface DisplayEmail {

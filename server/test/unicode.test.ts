@@ -4,11 +4,11 @@ import { call, createGroup, expectError, freshEmail, issueInvite, join, joinRaw,
 // Display emails and group names are trimmed, NFKC-normalised, and refused when they hold
 // whitespace, control (Cc) or format (Cf) characters such as zero-width or bidi controls.
 
-const ZWSP = "​";
-const RLO = "‮";
-const BOM = "﻿";
-const ZWJ = "‍";
-const SOFT_HYPHEN = "­";
+const ZWSP = "\u200b";
+const RLO = "\u202e";
+const BOM = "\ufeff";
+const ZWJ = "\u200d";
+const SOFT_HYPHEN = "\u00ad";
 
 /** Full-width form of an ASCII string (NFKC maps it back). */
 function fullWidth(ascii: string): string {
@@ -60,7 +60,49 @@ describe("display email look-alikes", () => {
   });
 });
 
+describe("display email default-ignorable and blank characters", () => {
+  const cases: Array<[string, string]> = [
+    ["U+3164 Hangul filler", "\u3164"],
+    ["U+115F Hangul choseong filler", "\u115f"],
+    ["U+034F combining grapheme joiner", "\u034f"],
+    ["U+FE0F variation selector", "\ufe0f"],
+    ["U+180B Mongolian variation selector", "\u180b"],
+    ["U+17B4 Khmer inherent vowel", "\u17b4"],
+    ["U+2800 braille blank", "\u2800"],
+  ];
+
+  for (const [label, insert] of cases) {
+    it(`rejects ${label} next to an existing email`, async () => {
+      const host = await createGroup();
+      const { inviteCode } = await issueInvite(host.accessKey);
+      const local = `victim${crypto.randomUUID().slice(0, 8)}`;
+      await join(inviteCode, `${local}@example.test`);
+      expectError(await joinRaw(inviteCode, `${local}${insert}@example.test`), 400, "bad_request");
+    });
+  }
+
+  it("still accepts ordinary Hangul and ASCII emails", async () => {
+    const host = await createGroup();
+    const { inviteCode } = await issueInvite(host.accessKey);
+    const tag = crypto.randomUUID().slice(0, 8);
+    for (const email of [`트레이너${tag}@예시.테스트`, `ascii.${tag}+x@example.test`]) {
+      const res = await joinRaw(inviteCode, email);
+      expect(res.status, res.text).toBe(200);
+      expect(res.body.trainer.displayEmail).toBe(email);
+    }
+  });
+});
+
 describe("group name look-alikes", () => {
+  it("still accepts emoji with a variation selector", async () => {
+    const name = "\u2600\ufe0f 팀";
+    const res = await call("POST", "/v1/groups", {
+      body: { operatorSecret: operatorSecret(), groupName: name, displayEmail: freshEmail() },
+    });
+    expect(res.status, res.text).toBe(200);
+    expect(res.body.group.name).toBe(name.normalize("NFKC"));
+  });
+
   for (const [label, insert] of [
     ["ZWSP", ZWSP],
     ["RLO", RLO],
