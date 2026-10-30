@@ -69,6 +69,11 @@ final class PracticeSession {
 
     /// Practice results (`PracticeRecordStore`), loaded at init and kept after every battle that ends.
     private(set) var records = PracticeRecords()
+    /// The stars earned against today's opponent: `records.dailyStars` while they belong to today, none on another
+    /// day. The records keep the last day that earned any, so yesterday's must not show on today's card.
+    var todayStars: Set<PracticeDailyGoal> {
+        records.dailyDay == PracticeDaily.dayKey(now(), calendar: calendar) ? records.dailyStars : []
+    }
     /// The battle that just ended, for the result screen; nil until one ends.
     private(set) var lastRecord: PracticeRecordUpdate?
     /// Today's opponent for the current player (`PracticeDaily`); never saved. Its id is "daily-<day>".

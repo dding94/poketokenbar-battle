@@ -184,7 +184,7 @@ final class PracticeScreenRenderingTests: XCTestCase {
         // is asserted by data and OCR only checks that a level label renders.
         XCTAssertEqual(session.player?.snapshot?.set.level, 50)
         // level label, CTA, manual timer, rules caption
-        let needles = ["Lv.", "Start battle", "\(PracticeSelectionView.manualTurnSeconds)s per turn", "200"]
+        let needles = ["Lv.", "Start battle", "\(PracticeBattle.manualTurnSeconds)s per turn", "200"]
         let (text, bitmap) = try await waitForText(needles, in: host)
         assertRendered(needles, in: text)
         assertPopoverSized(host)

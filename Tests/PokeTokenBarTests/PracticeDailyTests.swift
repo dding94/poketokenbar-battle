@@ -79,4 +79,27 @@ final class PracticeDailyTests: XCTestCase {
         XCTAssertEqual(pokemon(hp: 320, maxhp: 320).hpShare, 1)
         XCTAssertEqual(pokemon(hp: 0, maxhp: 320).hpShare, 0)
     }
+
+    /// The records keep the last day that earned a star, so the card must not show yesterday's stars as today's
+    /// until today earns one: `todayStars` reads them only on their own day (in the session's calendar).
+    func testTodaysStarsAreEmptyUntilTodayEarnsOne() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("practice-stars-\(UUID())")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let store = PracticeRecordStore(fileURL: folder.appendingPathComponent("practice-records.json"))
+        var saved = PracticeRecords()
+        saved.dailyDay = "2026-10-30"; saved.dailyStars = [.win, .quickWin]
+        store.persist(saved)
+        let utc = try calendar(.gregorian, "UTC")
+        func session(at seconds: TimeInterval) -> PracticeSession {
+            PracticeSession(engineURL: nil, drivesAutomatically: false, recordStore: store,
+                            now: { Date(timeIntervalSince1970: seconds) }, calendar: utc)
+        }
+        let sameDay = session(at: 1_793_400_000)   // 2026-10-30 22:40 UTC
+        XCTAssertEqual(sameDay.records.dailyStars, [.win, .quickWin])
+        XCTAssertEqual(sameDay.todayStars, [.win, .quickWin])
+        let nextDay = session(at: 1_793_400_000 + 3 * 3600)   // 2026-10-31 01:40 UTC
+        XCTAssertEqual(nextDay.records.dailyStars, [.win, .quickWin], "the file still has yesterday's")
+        XCTAssertEqual(nextDay.todayStars, [], "today's card starts empty")
+    }
 }

@@ -13,10 +13,6 @@ struct PracticeSelectionView: View {
     let artwork: Bool
     @State private var changingPlayer = false
 
-    /// The manual turn limit the mode picker names: Core's practice limit (03B-5, 15 s). Until Core exposes its
-    /// constant this mirrors it; switch to Core's value when both land.
-    static let manualTurnSeconds = 15
-
     private var eligible: [PracticeCandidate] { session.roster?.eligible ?? [] }
 
     var body: some View {
@@ -140,7 +136,7 @@ struct PracticeSelectionView: View {
     /// Today's opponent with today's stars (the session keeps only today's). It comes from the same search as the
     /// wild opponents, so its retry is that search.
     private var dailySection: some View {
-        PracticeDailyCard(candidate: progress.daily, state: progress.dailyState, stars: progress.records.dailyStars,
+        PracticeDailyCard(candidate: progress.daily, state: progress.dailyState, stars: progress.todayStars,
                           l: l, onRetry: { session.findWildOpponents() }) { candidate in
             opponentRow(candidate, number: nil)
         }
@@ -285,7 +281,7 @@ struct PracticeSelectionView: View {
     private var modeSection: some View {
         VStack(alignment: .leading, spacing: 4) {
             Picker(l.practiceMode, selection: $session.mode) {
-                Text(l.practiceManualPerTurn(Self.manualTurnSeconds)).tag(PracticeBattle.Mode.manual)
+                Text(l.practiceManualPerTurn(PracticeBattle.manualTurnSeconds)).tag(PracticeBattle.Mode.manual)
                 Text(l.practiceAuto).tag(PracticeBattle.Mode.automatic)
             }
             .pickerStyle(.segmented)

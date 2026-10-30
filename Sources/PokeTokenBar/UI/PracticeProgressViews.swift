@@ -11,11 +11,14 @@ struct PracticeSelectionProgress {
     /// Today's opponent (`PracticeSession.dailyCandidate`); nil while it is searched or could not be made.
     var daily: PracticeCandidate?
     var dailyState: PracticeWildState = .idle
+    /// Today's stars only (`PracticeSession.todayStars`): the records keep another day's until today earns one.
+    var todayStars: Set<PracticeDailyGoal> = []
 }
 
 extension PracticeSelectionProgress {
     @MainActor init(_ session: PracticeSession) {
-        self.init(records: session.records, daily: session.dailyCandidate, dailyState: session.dailyState)
+        self.init(records: session.records, daily: session.dailyCandidate, dailyState: session.dailyState,
+                  todayStars: session.todayStars)
     }
 }
 
