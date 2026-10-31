@@ -24,11 +24,14 @@ export interface ConnectOptions {
   /** null sends no Upgrade header. */
   upgrade?: string | null;
   method?: string;
-  headers?: Record<string, string>;
+  /** Extra request headers; a list of pairs can repeat a name. */
+  headers?: Record<string, string> | Array<[string, string]>;
 }
 
-/** The raw response of a /v1/connect request; the socket, if any, is not accepted. */
-export async function connectRaw(opts: ConnectOptions = {}): Promise<Response> {
+// Every /v1/connect response is either turned into an accepted Socket or has its body read
+// here. An unread response body keeps the shared League busy, and a later evictDurableObject
+// then never finishes draining (found by shuffling the ws files).
+async function openConnect(opts: ConnectOptions): Promise<Response> {
   const headers = new Headers(opts.headers);
   headers.set("cf-connecting-ip", freshIp());
   const upgrade = opts.upgrade === undefined ? "websocket" : opts.upgrade;
@@ -36,6 +39,33 @@ export async function connectRaw(opts: ConnectOptions = {}): Promise<Response> {
   if (opts.authorization !== undefined) headers.set("authorization", opts.authorization);
   else if (opts.key !== undefined) headers.set("authorization", `Bearer ${opts.key}`);
   return exports.default.fetch(new Request(`${BASE}/v1/connect`, { method: opts.method ?? "GET", headers }));
+}
+
+export interface Refusal {
+  status: number;
+  headers: Headers;
+  /** Parsed JSON body, or undefined. */
+  body: unknown;
+  /** True when the server upgraded although a refusal was expected; the socket is closed. */
+  upgraded: boolean;
+}
+
+/** A /v1/connect request expected to be refused. Always consumes the response. */
+export async function connectRefused(opts: ConnectOptions = {}): Promise<Refusal> {
+  const res = await openConnect(opts);
+  const upgraded = res.webSocket !== null;
+  if (upgraded) {
+    res.webSocket!.accept();
+    res.webSocket!.close(1000, "unexpected upgrade");
+  }
+  const text = await res.text();
+  let body: unknown;
+  try {
+    body = JSON.parse(text);
+  } catch {
+    body = undefined;
+  }
+  return { status: res.status, headers: res.headers, body, upgraded };
 }
 
 export class Socket {
@@ -134,12 +164,14 @@ export class Socket {
 
 const open = new Set<Socket>();
 
-/** Opens an accepted socket for `key` and reads its hello. */
-export async function connect(key: string): Promise<{ socket: Socket; hello: ServerMessage }> {
-  const res = await connectRaw({ key });
-  expect(res.status, `connect status`).toBe(101);
-  expect(res.webSocket).toBeTruthy();
-  const socket = new Socket(res.webSocket!);
+/** Opens an accepted socket (for `key`, or with `opts`) and reads its hello. */
+export async function connect(keyOrOpts: string | ConnectOptions): Promise<{ socket: Socket; hello: ServerMessage }> {
+  const res = await openConnect(typeof keyOrOpts === "string" ? { key: keyOrOpts } : keyOrOpts);
+  if (res.status !== 101 || res.webSocket === null) {
+    const text = await res.text();
+    expect.fail(`connect: expected 101 with a socket, got ${res.status} ${text}`);
+  }
+  const socket = new Socket(res.webSocket);
   const hello = await socket.next();
   expect(hello.type).toBe("hello");
   return { socket, hello };
@@ -164,8 +196,10 @@ export function closeSocketsAfterAll(): void {
         // Already closed.
       }
     }
-    await Promise.all([...open].map((socket) => socket.closed().catch(() => undefined)));
+    const sockets = [...open];
     open.clear();
+    // A socket that never finishes its close handshake fails the file instead of lingering.
+    await Promise.all(sockets.map((socket) => socket.closed()));
   });
 }
 

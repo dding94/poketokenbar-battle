@@ -12,7 +12,7 @@ import {
   setupGroup,
   transferHost,
 } from "../helpers";
-import { closeSocketsAfterAll, connectRaw, groupChanged, presence, socketFor } from "./socket";
+import { closeSocketsAfterAll, connectRefused, groupChanged, presence, socketFor } from "./socket";
 
 closeSocketsAfterAll();
 
@@ -139,7 +139,7 @@ describe("revocation closes the trainer's sockets with 4003 after the change com
       expect(await s.next()).toEqual(groupChanged("remove"));
     }
     expect(socket.messages.map((m) => m.type)).toEqual(["hello"]);
-    expect((await connectRaw({ key: b.accessKey })).status).toBe(401);
+    expect((await connectRefused({ key: b.accessKey })).status).toBe(401);
   });
 
   it("not when the operation fails", async () => {

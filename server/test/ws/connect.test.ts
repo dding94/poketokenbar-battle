@@ -1,23 +1,23 @@
 import { describe, expect, it } from "vitest";
 import { createGroup, recoverAccount, leaveGroup, setupGroup } from "../helpers";
 import { sha256Hex } from "../../src/secrets";
-import { closeSocketsAfterAll, connect, connectRaw, socketFor } from "./socket";
+import { type Refusal, closeSocketsAfterAll, connect, connectRefused, socketFor } from "./socket";
 
 closeSocketsAfterAll();
 
-async function expectRefused(res: Response, status: number, code: string): Promise<void> {
-  expect(res.webSocket, "no upgrade on refusal").toBeNull();
+function expectRefused(res: Refusal, status: number, code: string): void {
+  expect(res.upgraded, "no upgrade on refusal").toBe(false);
   expect(res.status).toBe(status);
-  expect(await res.json()).toEqual({ error: { code } });
+  expect(res.body).toEqual({ error: { code } });
   expect(res.headers.get("cache-control")).toBe("no-store");
 }
 
 describe("GET /v1/connect", () => {
   it("answers a request without an Upgrade header with 426 upgrade_required", async () => {
     const host = await createGroup();
-    await expectRefused(await connectRaw({ key: host.accessKey, upgrade: null }), 426, "upgrade_required");
-    await expectRefused(await connectRaw({ upgrade: null }), 426, "upgrade_required");
-    await expectRefused(await connectRaw({ key: host.accessKey, upgrade: "h2c" }), 426, "upgrade_required");
+    expectRefused(await connectRefused({ key: host.accessKey, upgrade: null }), 426, "upgrade_required");
+    expectRefused(await connectRefused({ upgrade: null }), 426, "upgrade_required");
+    expectRefused(await connectRefused({ key: host.accessKey, upgrade: "h2c" }), 426, "upgrade_required");
   });
 
   it("allows only GET", async () => {
@@ -25,33 +25,33 @@ describe("GET /v1/connect", () => {
     // route table without the header.
     const host = await createGroup();
     for (const method of ["POST", "PUT", "DELETE"]) {
-      const res = await connectRaw({ key: host.accessKey, method, upgrade: null });
-      await expectRefused(res, 405, "method_not_allowed");
+      const res = await connectRefused({ key: host.accessKey, method, upgrade: null });
+      expectRefused(res, 405, "method_not_allowed");
       expect(res.headers.get("allow")).toBe("GET");
     }
   });
 
   it("refuses a missing, malformed or unknown key with 401 and no upgrade", async () => {
-    await expectRefused(await connectRaw(), 401, "unauthorized");
-    await expectRefused(await connectRaw({ authorization: "Bearer nope" }), 401, "unauthorized");
-    await expectRefused(await connectRaw({ authorization: "Basic abc" }), 401, "unauthorized");
-    await expectRefused(await connectRaw({ key: `ptbk_${"Q".repeat(43)}` }), 401, "unauthorized");
+    expectRefused(await connectRefused(), 401, "unauthorized");
+    expectRefused(await connectRefused({ authorization: "Bearer nope" }), 401, "unauthorized");
+    expectRefused(await connectRefused({ authorization: "Basic abc" }), 401, "unauthorized");
+    expectRefused(await connectRefused({ key: `ptbk_${"Q".repeat(43)}` }), 401, "unauthorized");
   });
 
   it("refuses a replaced key and a left account's key", async () => {
     const { members } = await setupGroup(2);
     const [replaced, leaver] = [members[0]!, members[1]!];
     await recoverAccount(replaced);
-    await expectRefused(await connectRaw({ key: replaced.accessKey }), 401, "unauthorized");
+    expectRefused(await connectRefused({ key: replaced.accessKey }), 401, "unauthorized");
     expect((await leaveGroup(leaver.accessKey)).status).toBe(200);
-    await expectRefused(await connectRaw({ key: leaver.accessKey }), 401, "unauthorized");
+    expectRefused(await connectRefused({ key: leaver.accessKey }), 401, "unauthorized");
   });
 
   it("does not trust a client-sent key hash header", async () => {
     const host = await createGroup();
     const hash = await sha256Hex(host.accessKey);
     for (const name of ["x-ptb-key-hash", "x-key-hash", "x-access-key-hash"]) {
-      await expectRefused(await connectRaw({ headers: { [name]: hash } }), 401, "unauthorized");
+      expectRefused(await connectRefused({ headers: { [name]: hash } }), 401, "unauthorized");
     }
   });
 
@@ -68,10 +68,8 @@ describe("GET /v1/connect", () => {
 
   it("accepts the Bearer scheme in any case", async () => {
     const host = await createGroup();
-    const res = await connectRaw({ authorization: `bEaReR ${host.accessKey}` });
-    expect(res.status).toBe(101);
-    res.webSocket!.accept();
-    res.webSocket!.close();
+    const { hello } = await connect({ authorization: `bEaReR ${host.accessKey}` });
+    expect(hello.trainerId).toBe(host.trainerId);
   });
 });
 

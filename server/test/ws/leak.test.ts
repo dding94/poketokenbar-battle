@@ -14,7 +14,7 @@ import {
   setupGroup,
   transferHost,
 } from "../helpers";
-import { type Socket, closeSocketsAfterAll, connectRaw, socketFor } from "./socket";
+import { type Socket, closeSocketsAfterAll, connectRefused, socketFor } from "./socket";
 
 closeSocketsAfterAll();
 
@@ -64,9 +64,9 @@ describe("realtime messages, close reasons and logs", () => {
     dSocket.ws.send("unexpected"); // 4400
     const connects = 5;
 
-    const refused = await connectRaw({ key: `ptbk_${"Q".repeat(43)}` });
+    const refused = await connectRefused({ key: `ptbk_${"Q".repeat(43)}` });
     expect(refused.status).toBe(401);
-    const plain = await connectRaw({ key: host.accessKey, upgrade: null });
+    const plain = await connectRefused({ key: host.accessKey, upgrade: null });
     expect(plain.status).toBe(426);
 
     const newcomerEmail = freshEmail("leak-newcomer");

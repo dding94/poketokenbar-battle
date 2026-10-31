@@ -18,10 +18,7 @@ async function hibernate(): Promise<void> {
   expect(marked, "the League instance survived eviction").toBeUndefined();
 }
 
-// evictDurableObject waits for in-flight work to drain, with a timeout. About one run in fifteen
-// the first eviction in this file waited the full ~5 s before evicting, which is the test
-// default timeout; the eviction itself still happened. Allow for that wait.
-describe("after hibernation", { timeout: 15_000 }, () => {
+describe("after hibernation", () => {
   it("keeps presence for hello, GET /v1/group and peers", async () => {
     const { host, members } = await setupGroup(2);
     const [b, c] = [members[0]!, members[1]!];
