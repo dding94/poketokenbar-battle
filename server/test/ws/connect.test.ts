@@ -48,10 +48,23 @@ describe("GET /v1/connect", () => {
   });
 
   it("does not trust a client-sent key hash header", async () => {
-    const host = await createGroup();
-    const hash = await sha256Hex(host.accessKey);
-    for (const name of ["x-ptb-key-hash", "x-key-hash", "x-access-key-hash"]) {
-      expectRefused(await connectRefused({ headers: { [name]: hash } }), 401, "unauthorized");
+    // A valid key for A plus B's key hash in the header the Worker uses to tell the League who
+    // connects. The Worker must overwrite it: in any case, sent once or repeated.
+    const { host: a, members } = await setupGroup(1);
+    const b = members[0]!;
+    const hashB = await sha256Hex(b.accessKey);
+    const smuggled: Array<Array<[string, string]>> = [
+      [["X-Ptb-Key-Hash", hashB]],
+      [
+        ["X-PTB-KEY-HASH", hashB],
+        ["x-ptb-key-hash", hashB],
+      ],
+    ];
+    for (const headers of smuggled) {
+      const { socket, hello } = await connect({ key: a.accessKey, headers });
+      expect(hello.trainerId).toBe(a.trainerId);
+      socket.close();
+      expect((await socket.closed()).code).toBe(1000);
     }
   });
 
