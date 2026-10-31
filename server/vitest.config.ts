@@ -20,6 +20,11 @@ export default defineConfig({
     }),
   ],
   test: {
+    // Test files run in a random order, so a "ws" file that leaks state into the next one (they
+    // share one runtime) fails visibly instead of passing in a lucky order. Vitest has one file
+    // sequencer for all projects, so this is set here, not on "ws". The run prints its seed;
+    // replay an order with --sequence.seed=<seed>.
+    sequence: { shuffle: { files: true, tests: false } },
     projects: [
       {
         // HTTP API and pure tests: one Miniflare (and League storage) per test file.
