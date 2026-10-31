@@ -46,16 +46,25 @@ the repository. Workers Logs/observability stays explicitly off in both environm
 ## Measurement script
 
 `scripts/measure.mjs` (Node 24, no dependencies) produces the PR 05 load against a deployed
-environment. The operator secret comes only from the environment:
+environment. The operator secret comes only from the environment. Read it without echo, so it
+never reaches the shell history or the terminal, then export it for the script:
 
 ```sh
-OPERATOR_SECRET=… node server/scripts/measure.mjs https://ptb-battle-league-dev.<subdomain>.workers.dev \
+read -rs OPERATOR_SECRET; export OPERATOR_SECRET
+node server/scripts/measure.mjs https://ptb-battle-league-dev.<subdomain>.workers.dev \
   [--members 30] [--hold-minutes 10] [--churn 5] [--redeploy-wait-minutes 0] [--ping-seconds 30] [--cleanup]
+unset OPERATOR_SECRET
 ```
+
+Do not put the secret on the command line (`OPERATOR_SECRET=… node …`): the shell history
+keeps it. `--members` is at most 99.
 
 1. Creates one group named `measure <time>` (host `host@measure.invalid`), issues a one-hour
    invite, joins `--members` fake members (`m01@measure.invalid`, …) and revokes the invite.
-2. Opens one WebSocket per member; each sends `ping` every `--ping-seconds`.
+   If setup fails or is interrupted partway, the script revokes the invite and makes the
+   members that already joined leave.
+2. Opens one WebSocket per member; each sends `ping` every `--ping-seconds`. A connect that has
+   not opened after 15 s counts as a failure and is retried.
 3. Holds for `--hold-minutes`, then closes and reopens `--churn` sockets one by one to produce
    presence traffic.
 4. With `--redeploy-wait-minutes`, asks on stderr for a redeploy and waits. Dropped sockets
@@ -68,8 +77,11 @@ OPERATOR_SECRET=… node server/scripts/measure.mjs https://ptb-battle-league-de
 stdout gets a JSON summary: HTTP statuses and latencies per route, connects, message counts by
 type, pings and pong round trips, closes by phase and code, unexpected drops with how long the
 socket had been up, reconnect delays and outage lengths (overall and for the redeploy phase),
-and error counts by kind. Progress goes to stderr. Keys, codes, the operator secret and emails
-stay in memory: they are never printed, written to a file or put in a URL. CPU, DO requests,
+and error counts by kind. Progress goes to stderr. Ctrl-C at any point (setup included) stops
+the run, cleans up as above and still prints the summary; a second Ctrl-C exits at once. Keys,
+codes, the operator secret and emails stay in memory: they are never printed, written to a file
+or put in a URL. The summary names the target only by the Worker's first host label
+(`ptb-battle-league-dev`), never the account's workers.dev subdomain. CPU, DO requests,
 row writes and GB-s come from the Cloudflare dashboard and analytics, not from the script.
 For the idle-disconnect time, run with a `--ping-seconds` longer than the expected cutoff and
 read `unexpectedDrops.connectedForMs`.
