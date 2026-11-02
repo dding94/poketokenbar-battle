@@ -7,7 +7,7 @@
 - 인수 시 `feat/local-practice-battle`·origin 모두 `d21935b`, 작업 트리 깨끗함. 원격 origin은 포크, upstream은 원본 참조/푸시 금지 상태를 확인했다.
 - 구현 전 앱 계약을 BATTLE_PLAN 부록 E에 작성·커밋했다(`274bfc2`). 통신/키, 결정적 재생/원자 효과 원장, 팝오버/통합의 세 단계다. 공통 DTO와 RED 주소 테스트를 `86746bf`로 통합했으며 아직 의도한 stub이 남아 있다. **PR 07 GREEN/완료가 아니다.**
 - 네트워크·상태 파일·UI 경계 조사를 완료했다. 효과는 후보 상태의 HP·XP credit·경기 receipt를 한 번 저장한 뒤 기존 성장 경로로 소비한다. 실제 사용자 파일과 키체인은 읽지 않았다.
-- 사용자 답변 대기: disableKeychainAccess의 배틀 적용, 무료 한도 보완을 PR 07에 포함할지, 두 번째 맥 사용 가능 여부. 답변에 의존하는 정책은 구현하지 않는다. 설치·개발 배포·두 맥 E2E 승인은 아직 받지 않았다.
+- 사용자 답변(2026-11-02): disableKeychainAccess를 배틀 키에도 적용(조회/저장/온라인 연결 중단), 무료 한도 보완은 PR 13 전 별도 처리. 두 번째 맥은 지인에게 부탁할 수 있으나 아직 준비/실행 확인 전이다. 설치·개발 배포·두 맥 E2E 승인은 아직 받지 않았다. 부록 E를 먼저 수정하고 앱 설정 연결을 진행한다.
 - Xcode 27.2(27B52) 설치 확인. 명령별 DEVELOPER_DIR를 사용하며 시스템 xcode-select는 CLT 그대로다. 별도 worktree에서 RED→GREEN→REFACTOR 구현 후 독립 리뷰·통합·CI를 진행한다. 요청한 모델 이름은 현재 도구에 없어 Core/리뷰는 Astra high, UI는 Sol high, 조사는 Sol medium으로 역할을 대체한다고 사용자에게 알렸다.
 - RED 증거: 별도 통신 worktree에서 `swift test --disable-sandbox --jobs 2 --filter OnlineBattleTransportTests` 종료 **1**, 2건 실행·단언 실패 6·skip 0(주소 정규화/금지 입력), 컴파일 성공. 효과 worktree의 `--filter OnlineBattleEffectsTests` 종료 **1**, 9건 실행·단언 실패 34·unexpected/skip 0, RED 커밋 `ed2340e`(미통합). 두 실행 모두 임시 PTB_STATE_DIR·CLANG_MODULE_CACHE_PATH와 명령별 DEVELOPER_DIR를 사용했다. 최초 모듈 캐시 권한 실패(테스트 0건)는 RED 증거가 아니다.
 - CI 준비 `c0c0d40`: OnlineBattle 파일의 커버리지/결정성 경계, resolver 필터, 양쪽 shard 화면 이미지 보존, workflow 변경 시 server 검사, server timeout 2분(기존 37초)을 반영했다. `bash -n`·Ruby YAML 파싱·`git diff --check` 모두 종료 0. 새 resolver 테스트 파일은 아직 별도 worktree에서 구현 중이며 원격 CI는 실행 전이다.
@@ -328,6 +328,7 @@ PR 05 실측의 재접속 표본 0·전수 CPU·계정 DO 오류 원인·회사 
 
 ## 사용자 결정을 다시 묻지 않을 것
 
+- PR 07(2026-11-02): disableKeychainAccess를 배틀에도 적용한다. 무료 한도 보완은 이번 앱 연결 범위에서 제외하고 PR 13 전에 별도 처리한다. 두 번째 맥은 지인에게 부탁할 수 있다는 답변이며 실제 준비·E2E 실행 승인을 대신하지 않는다.
 - PR 06(2026-11-02): 시작 전 도전 24시간, 첫 보고 후 상대 보고 72시간, 보고 없이 시작 후 72시간이면 VOID·출전 잠금 해제. 시간 초과는 서버 사실 기록 → 양쪽 앱 자동 선택으로 처리한다(부록 D).
 
 - 전투는 두 맥이 계산하고 서버는 중계와 기록만 맡는다(2026-10-30부터 소유권 원장 없음). 서버 운영비 0원이 중요하다. 회사 IP나 개인 맥북을 서버로 쓰지 않는다.
@@ -364,7 +365,7 @@ PR 05 실측의 재접속 표본 0·전수 CPU·계정 DO 오류 원인·회사 
 
 ## 아직 정하지 않은 세부값 (제안 기본값)
 
-- `disableKeychainAccess` 설정을 배틀 키에도 적용할지(PR 07).
+- 무료 한도 대응의 구체적 방법(턴당 쓰기 최적화·일일 경기 상한)은 PR 13 전 별도 결정한다(PR 07에서 제외 승인).
 - 엔진이 바뀐 뒤 과거 경기 재생 방식(구버전 엔진 보관 또는 상세 로그 저장, PR 11).
 - 포크의 문제 리포트 수신처(`AppIdentity.supportEmail`, 현재 nil이라 리포트 행 숨김).
 - 원본 앱이 함께 실행 중일 때 경고할지(두 앱이 같은 토큰 로그로 각자 개체를 키운다).
