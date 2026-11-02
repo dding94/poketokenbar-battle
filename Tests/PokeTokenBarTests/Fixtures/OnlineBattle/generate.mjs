@@ -25,6 +25,7 @@ for(const [name,p1set,p2set,tokens] of specs){
  const battleId=`fixture-${name}`, readyToken=`ready-${name}`;
  const snapshot=(s,i)=>{const info=call('describeSet',s);return{instanceId:i,set:s,public:info,hp:info.stats.hp};};
  const p1=snapshot(p1set,'instance-one'),p2=snapshot(p2set,'instance-two');
+ if(name==='draw'){p1.hp=100;p2.hp=75;}
  const engineConfig={seed:[1,2,3,4],policySeed:42,p1:{name:'p1',set:p1set,hp:p1.hp,policy:'standard'},p2:{name:'p2',set:p2set,hp:p2.hp,policy:'standard'}};
  const config={readyToken,engineHash:readFileSync('engine/dist/battle-engine.sha256','utf8').split(/\s/)[0],rulesVersion:'gen9-notera-noitems-v1',policyVersion:'auto-v2',relayVersion:'relay-v1',...engineConfig};
  const {id}=call('createBattle',engineConfig),journal=[];
@@ -50,5 +51,5 @@ for(const [name,p1set,p2set,tokens] of specs){
  const battle={battleId,state:'COMPLETED',revision:2,mode:name==='auto'||name==='draw'?'auto':'manual',p1:{trainerId:'trainer-one',snapshot:p1},p2:{trainerId:'trainer-two',snapshot:p2},createdAt:0,expiresAt:86400000,startedAt:1,reportedAt:100,confirmed:true,config,roundSeq:journal.length,deadline:null,ownChoice:null,journal,result:report,reason:null,rematchOf:null};
  fixtures.push({name,battle,journalBytes:bytes,inputLog:r.inputLog,rejectionCount,forcedCount});call('destroy',id);
 }
-writeFileSync('Tests/PokeTokenBarTests/Fixtures/OnlineBattle/golden.json',JSON.stringify(fixtures,null,2)+'\n');
+writeFileSync('Tests/PokeTokenBarTests/Fixtures/OnlineBattle/golden.json','[\n'+fixtures.map(x=>JSON.stringify(x)).join(',\n')+'\n]\n');
 console.log(fixtures.map(x=>({name:x.name,rounds:x.battle.journal.length,winner:x.battle.result.winner,rejections:x.rejectionCount,forced:x.forcedCount})));

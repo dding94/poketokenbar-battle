@@ -14,7 +14,7 @@ final class OnlineBattleResolverTests: XCTestCase {
         let forcedCount: Int
     }
     private func fixtures() throws -> [Fixture] {
-        try JSONDecoder().decode([Fixture].self, from: Data(contentsOf: root.appendingPathComponent("Tests/PokeTokenBarTests/Fixtures/OnlineBattle/golden.json")))
+        try JSONDecoder().decode([Fixture].self, from: Data(contentsOf: XCTUnwrap(Bundle.module.url(forResource: "golden", withExtension: "json", subdirectory: "OnlineBattle"))))
     }
     @MainActor private func engine() throws -> BattleEngine {
         try BattleEngine(url: root.appendingPathComponent("engine/dist/battle-engine.js"))
@@ -22,7 +22,7 @@ final class OnlineBattleResolverTests: XCTestCase {
     @MainActor func testNodeCorpusProducesIdenticalTerminalReports() throws {
         for fixture in try fixtures() {
             let resolver = try OnlineBattleResolver(battle: fixture.battle, localTrainerID: "trainer-one", engine: engine())
-            try resolver.consume(journal: fixture.battle.journal)
+            XCTAssertNoThrow(try resolver.consume(journal: fixture.battle.journal))
             XCTAssertEqual(try resolver.terminalReport(), fixture.battle.result, fixture.name)
         }
     }
@@ -33,7 +33,7 @@ final class OnlineBattleResolverTests: XCTestCase {
                 let engine = try engine()
                 let resolver = try OnlineBattleResolver(battle: fixture.battle, localTrainerID: trainer, engine: engine)
                 defer { resolver.close() }
-                try resolver.consume(journal: fixture.battle.journal)
+                XCTAssertNoThrow(try resolver.consume(journal: fixture.battle.journal))
                 XCTAssertEqual(try BattleJSON.encode(resolver.result?.inputLog), try BattleJSON.encode(Optional(fixture.inputLog)), fixture.name)
                 let proof = try resolver.verifyCompleted(fixture.battle)
                 XCTAssertEqual(proof.localSide, trainer == "trainer-one" ? .p1 : .p2)
@@ -41,7 +41,7 @@ final class OnlineBattleResolverTests: XCTestCase {
                 XCTAssertEqual(proof.battleID, fixture.battle.battleId)
                 XCTAssertEqual(proof.resultHash.count, 64)
                 let expectedHP = trainer == "trainer-one" ? fixture.battle.result!.finalHp.p1 : fixture.battle.result!.finalHp.p2
-                let maxHP = trainer == "trainer-one" ? fixture.battle.p1.snapshot!.hp : fixture.battle.p2.snapshot!.hp
+                let maxHP = trainer == "trainer-one" ? fixture.battle.p1.snapshot!.publicInfo.stats["hp"]! : fixture.battle.p2.snapshot!.publicInfo.stats["hp"]!
                 XCTAssertEqual(proof.remainingHPShare, Double(expectedHP) / Double(maxHP))
                 let ownView = try XCTUnwrap(resolver.view)
                 XCTAssertEqual(trainer == "trainer-one" ? ownView.p1.hp : ownView.p2.hp, expectedHP)
@@ -66,7 +66,11 @@ final class OnlineBattleResolverTests: XCTestCase {
         let resolver = try OnlineBattleResolver(battle: room, localTrainerID: "trainer-two", engine: engine())
         defer { resolver.close() }
         XCTAssertNil(try resolver.terminalReport())
+        XCTAssertEqual(resolver.view?.p1.moves, [])
+        XCTAssertNil(resolver.view?.p1.ability)
+        XCTAssertEqual(resolver.view?.p2.moves, ["tackle", "splash"])
         try resolver.consume(journal: Array(room.journal.prefix(1)))
+        XCTAssertEqual(resolver.view?.p1.moves, ["quickattack"])
         XCTAssertNil(try resolver.terminalReport())
         let logHash = resolver.result?.logHash, count = resolver.result?.inputLog.choices.count
         let logs = resolver.logs
@@ -95,6 +99,8 @@ final class OnlineBattleResolverTests: XCTestCase {
             XCTAssertThrowsError(try resolver.terminalReport())
             XCTAssertThrowsError(try resolver.consume(journal: room.journal))
         }
+        let gap = try OnlineBattleResolver(battle: room, localTrainerID: "trainer-one", engine: engine())
+        XCTAssertThrowsError(try gap.consume(journal: [room.journal[1]])) { XCTAssertEqual($0 as? OnlineBattleResolver.Failure, .needsRefetch) }
         let fresh = try OnlineBattleResolver(battle: room, localTrainerID: "trainer-one", engine: engine())
         defer { fresh.close() }
         try fresh.consume(journal: room.journal)
@@ -197,7 +203,7 @@ final class OnlineBattleResolverTests: XCTestCase {
             defer { resolver.close() }
             try resolver.consume(journal: Array(fixture.battle.journal.prefix(name == "recharge" ? 1 : 8)))
             XCTAssertEqual(resolver.request.kind, name == "recharge" ? "move" : "forced")
-            try resolver.consume(journal: fixture.battle.journal)
+            XCTAssertNoThrow(try resolver.consume(journal: fixture.battle.journal))
             XCTAssertEqual(try resolver.terminalReport(), fixture.battle.result)
         }
         let imprisoned = try XCTUnwrap(fixtures.first { $0.name == "imprison" })
