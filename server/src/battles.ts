@@ -1,3 +1,4 @@
+import { battleView } from "./battle-view";
 import { BattleRelay } from "./battle-relay";
 import { permitsRoomAction } from "./battle-policy";
 import { GroupAccess, type Actor } from "./access";
@@ -14,28 +15,28 @@ export class Battles {
   dispatch(actor: Actor, id: string | null, action: BattleAction | "get" | "list", input: BattleInput, now: number, after: BattleEffect[], before = Number.MAX_SAFE_INTEGER): Result<unknown> {
     if (action === "list") {
       const rows = this.store.list(actor.trainer.id, before), page = rows.slice(0, 100);
-      return ok({ battles: page.map(r => this.view(JSON.parse(r.data), actor.trainer.id)), before: rows.length > 100 ? String(page[99]!.seq) : null });
+      return ok({ battles: page.map(r => battleView(this.store, JSON.parse(r.data), actor.trainer.id)), before: rows.length > 100 ? String(page[99]!.seq) : null });
     }
     if (action === "create") return this.create(actor, input, now, after);
     const b = id ? this.store.get(id) : null;
     if (!b || b.groupId !== actor.groupId || (b.p1 !== actor.trainer.id && b.p2 !== actor.trainer.id)) return fail("not_found");
-    if (action === "get") return ok(this.view(b, actor.trainer.id));
+    if (action === "get") return ok(battleView(this.store, b, actor.trainer.id));
     const side: Side = b.p1 === actor.trainer.id ? "p1" : "p2";
     // Successful update/accept retry uses its ORIGINAL revision, before stale checks.
-    if ((action === "update" || action === "accept") && this.store.receipt(b, actor.trainer.id, action, input.revision!, input)) return ok(this.view(b, actor.trainer.id));
+    if ((action === "update" || action === "accept") && this.store.receipt(b, actor.trainer.id, action, input.revision!, input)) return ok(battleView(this.store, b, actor.trainer.id));
     if (input.revision !== undefined && input.revision !== b.revision) return fail("stale_revision");
-    if (action === "decline" && b.state === "DECLINED" && side === "p2" || action === "cancel" && b.state === "CANCELLED") return ok(this.view(b, actor.trainer.id));
+    if (action === "decline" && b.state === "DECLINED" && side === "p2" || action === "cancel" && b.state === "CANCELLED") return ok(battleView(this.store, b, actor.trainer.id));
     if (action === "choices") {
       const result = this.relay.choice(b, side, input.roundSeq!, input.choice!, now, after);
       if (!result.ok) return result;
       if (result.value) this.store.put(b);
-      return ok(this.view(b, actor.trainer.id));
+      return ok(battleView(this.store, b, actor.trainer.id));
     }
     if (action === "advance") {
       const result = this.relay.advance(b, input.processedRoundSeq!, now, after);
       if (!result.ok) return result;
       if (result.value) { this.store.put(b); after.push(battleChanged(b)); }
-      return ok(this.view(b, actor.trainer.id));
+      return ok(battleView(this.store, b, actor.trainer.id));
     }
     if (!ACTIVE.has(b.state)) return fail("invalid_state");
     let changed = true;
@@ -62,18 +63,18 @@ export class Battles {
       const result = this.start(b, side, input, now, after); if (!result.ok) return result; changed = result.value;
     } else return fail("invalid_state");
     if (changed) { this.store.put(b); after.push(battleChanged(b)); }
-    return ok(this.view(b, actor.trainer.id));
+    return ok(battleView(this.store, b, actor.trainer.id));
   }
   private create(actor: Actor, input: BattleInput, now: number, after: BattleEffect[]): Result<unknown> {
     const payload = canonical(input);
     const previous = this.store.sql.exec<{ payload: string; battle_id: string }>("SELECT payload,battle_id FROM battle_requests WHERE trainer_id=? AND request_id=?", actor.trainer.id, input.requestId!).toArray()[0];
-    if (previous) return previous.payload === payload ? ok(this.view(this.store.get(previous.battle_id)!, actor.trainer.id)) : fail("idempotency_conflict");
+    if (previous) return previous.payload === payload ? ok(battleView(this.store, this.store.get(previous.battle_id)!, actor.trainer.id)) : fail("idempotency_conflict");
     const target = this.access.target(actor, input.targetTrainerId!, { activeOnly: true }); if (!target.ok) return target;
     if (this.store.busy(actor.trainer.id, input.snapshot!.instanceId)) return fail("instance_busy");
     const b: Battle = { battleId: `bt_${crypto.randomUUID().replaceAll("-", "")}`, groupId: actor.groupId, p1: actor.trainer.id, p2: target.value.id, state: "PENDING", revision: 1, mode: input.mode!, createdAt: now, expiresAt: now + CHALLENGE_MS, startedAt: null, reportedAt: null, confirmed: false, snapshots: { p1: input.snapshot!, p2: null }, ready: {}, starts: {}, config: null, roundSeq: 0, result: null, reason: null, rematchOf: null };
     this.store.put(b);
     this.store.sql.exec("INSERT INTO battle_requests(trainer_id,request_id,payload,battle_id) VALUES(?,?,?,?)", actor.trainer.id, input.requestId!, payload, b.battleId);
-    after.push(battleChanged(b)); return ok(this.view(b, actor.trainer.id));
+    after.push(battleChanged(b)); return ok(battleView(this.store, b, actor.trainer.id));
   }
   private ready(b: Battle, side: Side, input: BattleInput): Result<boolean> {
     if (!b.confirmed) return fail("not_ready");
@@ -118,13 +119,5 @@ export class Battles {
   }
   participantLeft(id: string, after: BattleEffect[]): void {
     for (const b of this.store.forTrainer(id)) { b.state = PRESTART.has(b.state) ? "CANCELLED" : "VOID"; b.reason = "participant_left"; this.store.unlock(b.battleId); this.store.put(b); after.push(battleChanged(b)); }
-  }
-  view(b: Battle, viewer: string): unknown {
-    const player = (side: Side) => {
-      const s = b.snapshots[side]; if (!s) return { trainerId: b[side] };
-      return b.config || viewer === b[side] ? { trainerId: b[side], snapshot: s } : { trainerId: b[side], public: s.public, hpPercent: s.hp / s.public.stats.hp * 100 };
-    };
-    const current = this.store.round(b.battleId, b.roundSeq), side: Side = viewer === b.p1 ? "p1" : "p2";
-    return { battleId: b.battleId, state: b.state, revision: b.revision, mode: b.mode, p1: player("p1"), p2: player("p2"), createdAt: b.createdAt, expiresAt: b.expiresAt, startedAt: b.startedAt, reportedAt: b.reportedAt, confirmed: b.confirmed, config: b.config, roundSeq: b.roundSeq, deadline: current?.pair === null ? current.deadline : null, ownChoice: current?.pair === null && current[side] !== null ? `move ${current[side]}` : null, journal: this.store.journal(b.battleId), result: b.result, reason: b.reason, rematchOf: b.rematchOf };
   }
 }
