@@ -91,12 +91,12 @@
 이 개정을 정하기 위한 조사 증거이며 PR 체크박스를 대신하지 않는다. 재현 가능한 테스트와 CI는 PR 01에서 저장소에 추가한다.
 
 - 엔진: `@pkmn/sim` 0.10.12(Pokémon Showdown 시뮬레이터 추출본, MIT)를 esbuild 0.28.2로 단일 IIFE 번들로 만들었다. macOS 26.5의 Swift `JSContext`에서 보조 코드 없이 실행됐다.
-- 결정성: `gen5customgame` 무작위 1:1 2,500판과 200턴 제한을 노린 장기전 200판을 Node 24.14.0과 JavaScriptCore(JIT 켬·끔)에서 실행했다. 정규화 로그(`|t:|` 줄 제외)·승자·inputLog 불일치는 0건이었다.
+- 결정성: `gen5customgame` 무작위 1:1 2,500판과 200턴 제한을 노린 장기전 200판을 Node 24.14.0과 JavaScriptCore(JIT 켬·끔)에서 실행했다. 정규화 로그(`\|t:\|` 줄 제외)·승자·inputLog 불일치는 0건이었다.
 - 재생: inputLog만으로 다시 실행한 2,700판이 모두 같았다. 3턴 시점 상태 직렬화 왕복도 1,692판 모두 같은 결과였다.
 - 성능: JavaScriptCore(JIT) 경기당 평균 1.2ms, 첫 실행은 번들 평가 약 200ms, 장기전 약 17ms였다. JIT가 없으면 경기당 약 7.8ms였다.
 - 번들: 최소화 6.6MB(gzip 1.0MB). 미최소화 11.0MB 중 약 8.7MB가 전 세대 학습 기술 데이터로, 전투에는 필요 없을 것으로 보이나 제거는 검증하지 않았다.
 - macOS 26.5에서 `JSContext`의 JIT는 `com.apple.security.cs.allow-jit` entitlement로 서명해야 켜졌다.
-- 비결정 요소: `Date.now`는 `|t:|` 줄에만, `Math.random`은 seed를 주지 않을 때만 쓰인다.
+- 비결정 요소: `Date.now`는 `\|t:\|` 줄에만, `Math.random`은 seed를 주지 않을 때만 쓰인다.
 - 주의: Showdown의 `BattleStream`은 `>eval` 명령을 받는다. 중계받은 텍스트를 스트림에 넣지 않고 검증한 선택 토큰만 `choose()`로 넘긴다. 숨은 정보 때문에 `choose()`가 거절될 수 있으며 거절도 결정적이다.
 - 데이터 차이(`@pkmn/dex` 0.10.12, 9세대와 5세대 비교, 1~649번): 일반 특성 24종(그중 13종은 5세대에 없는 특성), 숨겨진 특성 23종, 타입 22종, 종족값 55종이 다르다. 9세대 규칙을 고른 근거다. Showdown 9세대 데이터는 PokéAPI 최신값의 대용이며 직접 대조는 PR 02에서 한다.
 - 미검증: 9세대 규칙의 결정성·기술 동작, 다른 macOS 버전의 JavaScriptCore, 실제 두 맥 대전, 학습 기술 데이터 제거.
@@ -644,7 +644,7 @@ SQL 쓰기에는 색인이 이미 포함돼 있다. 보수적 쓰기 산정은 S
 - 독립 전체 검증은 당시 299건 + 별도 4건 = 303건 통과, 마지막 상태 수정 관련 34건 통과, 마지막 조회 수정·HTTP 103경기 페이지 검증 15건 통과(각 종료 0). 미해결 차단 지적은 없으며 탈퇴/제거 조회의 선형 읽기는 위에 명시했다.
 - 예상한 SQL `test_fault` 스택은 결과 확정 중 실패를 주입해 보고·전적·잠금이 모두 rollback되고 재시도가 한 번만 확정하는 테스트다. 종료 때의 `read end of pipe was aborted` 진단은 변경 전 `986aec9`에서도 같은 의존성으로 재현됐다(22파일 241건 통과·종료 0). 테스트 실패·소켓 정리 실패는 없었으며 PR 06이 새로 만든 진단으로 분류하지 않는다.
 - 엔진 scratch 대조: Node 24.14.0에서 기존 2,200 + 집중 3경기, 45,757pair, 200턴 무승부 200경기, 승인 입력 재생 2,204회 불일치 0. 기존 `node --test --test-name-pattern='PP exhaustion and recharge|hidden Imprison' tests/policy.test.cjs` 2건도 통과. 이번 JavaScriptCore·Swift·두 맥 E2E는 미실행이며 PR 07 범위다.
-- 원격 CI는 통합본 푸시 후 확인한다. 개발 Worker 추가 배포·실제 운영 비밀값 읽기·앱/세이브 변경은 하지 않았다. 다음 ci.yml 수정 때 server timeout 10분을 줄이는 메모는 유지한다.
+- 원격 [CI 41372533717](https://github.com/dding94/poketokenbar-battle/actions/runs/41372533717), 검증 커밋 `9109f9f`: **성공**. Linux server 작업 37초, `npm ci`·typecheck·test 모두 성공, 30파일 318건 통과·실패/skip 0, 취약점 0. secret-scan 31개 커밋 검사·발견 0. `gh run view 41372533717 --repo dding94/poketokenbar-battle --json status,conclusion,jobs`와 server/secret-scan 로그 조회는 각각 종료 0이었다. Swift·결정성·test-union은 서버 변경 경계에 따라 건너뛰었으며 성공으로 세지 않는다. 이후 수정은 문서뿐이다. 개발 Worker 추가 배포·실제 운영 비밀값 읽기·앱/세이브 변경은 하지 않았다. 다음 ci.yml 수정 때 server timeout 10분을 줄이는 메모는 유지한다.
 
 <details>
 <summary>결함 주입 명령과 결과 (필터 제외는 통과로 계산하지 않음)</summary>
@@ -852,14 +852,14 @@ npm run test:acceptance
 | `describeSet(set)` | 검증한 SET의 공개 정보 `{speciesNum,species,level,types,stats}`. 9세대 폼/EV 0 능력치를 계산하며 기술·특성은 반환하지 않음(PR 02 추가) |
 | `describeMoves(ids)` | 기술 slug/id 1~8개 → `{"moves":[{id,name,type,category,basePower,accuracy(항상 명중이면 null),priority,pp,fixedDamage,variableType}]}`. `fixedDamage`는 레벨·고정량·HP 기반 피해와 일격필살(상성은 면역만 판단, 자속 없음), `variableType`은 전투 중 타입이 바뀌는 기술(잠재파워·웨더볼 등)이다. 9세대 데이터의 순수 조회이며 전투 상태·난수를 쓰지 않는다. 알 수 없는 기술은 `invalid_moves`(PR 03B-3 추가) |
 | `typeChart()` | `{"types":[18종],"damage":{공격:{방어:배수}}}`. 타입만으로 계산하고(부유·볼트흡수 같은 특성 면역은 공개 전 정보라 제외) 테라스탈 전용 Stellar는 뺀다(PR 03B-3 추가) |
-| `createBattle(config)` | config = `{"seed","policySeed","p1":{"name","set":SET,"policy","hp"},"p2":{...}}` → `{"ok":true,"id"}`. `policy`는 선택 항목으로, 그 진영의 자동 선택 정책 `standard`·`aggressive`·`tactical`·`erratic` 중 하나다(생략 = `standard`, PR 03B-5 추가). 그 밖의 값은 `invalid_policy`. `hp`는 선택 항목으로, 그 진영의 시작 체력이다(PR 03C 추가). 1 이상 그 SET의 최대 체력(`describeSet`의 `stats.hp`) 이하 정수이며 생략하면 가득 찬 채 시작한다. 그 밖의 값과 최대 체력 초과는 맞춰 주지 않고 `invalid_hp`로 거절한다. 시작 체력은 등장(`|switch|`) 전에 넣으므로 등장 줄과 `state`에 다른 체력처럼 보이고(`request`에는 체력이 없다), 상대와 관전자에게는 체력 막대 비율만 보인다. 그 밖의 키는 `invalid_player`. 알 수 없는 종·폼·기술·특성은 오류 코드로 거절 |
+| `createBattle(config)` | config = `{"seed","policySeed","p1":{"name","set":SET,"policy","hp"},"p2":{...}}` → `{"ok":true,"id"}`. `policy`는 선택 항목으로, 그 진영의 자동 선택 정책 `standard`·`aggressive`·`tactical`·`erratic` 중 하나다(생략 = `standard`, PR 03B-5 추가). 그 밖의 값은 `invalid_policy`. `hp`는 선택 항목으로, 그 진영의 시작 체력이다(PR 03C 추가). 1 이상 그 SET의 최대 체력(`describeSet`의 `stats.hp`) 이하 정수이며 생략하면 가득 찬 채 시작한다. 그 밖의 값과 최대 체력 초과는 맞춰 주지 않고 `invalid_hp`로 거절한다. 시작 체력은 등장(`\|switch\|`) 전에 넣으므로 등장 줄과 `state`에 다른 체력처럼 보이고(`request`에는 체력이 없다), 상대와 관전자에게는 체력 막대 비율만 보인다. 그 밖의 키는 `invalid_player`. 알 수 없는 종·폼·기술·특성은 오류 코드로 거절 |
 | `request(id, side)` | `{"kind":"move"·"wait"·"forced"·"none","moves":[{"slot","id","name","type","pp","maxpp","disabled"}]}` |
 | `choose(id, side, choice)` | choice = `{"type":"move","slot":1~4}` 또는 `{"type":"auto"}` → `{"ok":true,"resolved":bool}`. Showdown 거절은 `{"ok":false,"error":"rejected"}`(결정적). 그 밖의 입력은 거절 |
 | `autoChoice(id, side)` | `{"slot":n}`, 적용하지 않음 |
 | `state(id, viewer)` | viewer = `p1`·`p2`·`spectator`. 양쪽 VIEW: 종·레벨·타입·HP는 항상, 상대 기술은 이미 쓴 것만, 특성은 로그로 드러난 뒤에만 |
 | `drainEvents(id, viewer)` | viewer별 최초 기술·특성 공개 이벤트 `{kind,side,id,turn}` 배열(PR 03 추가). 중복 없이 별도 커서로 읽음 |
-| `drainLog(id, viewer)` | 그 viewer가 볼 새 프로토콜 줄. 상대의 정확한 HP를 노출하지 않고 `|t:|` 줄을 뺀다 |
-| `result(id)` | `{"ended","winner","turns","logHash","inputLog"}`. logHash = `|t:|`를 뺀 전체 로그의 SHA-256 |
+| `drainLog(id, viewer)` | 그 viewer가 볼 새 프로토콜 줄. 상대의 정확한 HP를 노출하지 않고 `\|t:\|` 줄을 뺀다 |
+| `result(id)` | `{"ended","winner","turns","logHash","inputLog"}`. logHash = `\|t:\|`를 뺀 전체 로그의 SHA-256 |
 | `replay(inputLog)` | 입력 기록으로 다시 실행해 `{"winner","logHash"}`. 검증한 선택 토큰으로 다시 구성하며 `>eval` 같은 스트림 명령을 통과시키지 않는다. 정책 버전이 `auto-v2`가 아니면 `invalid_replay`, 기록 속 config의 정책·시작 체력도 `createBattle`처럼 검증한다 |
 | `destroy(id)` | 정리 |
 
