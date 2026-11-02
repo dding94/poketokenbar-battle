@@ -777,6 +777,8 @@ struct CompanionState: Codable, Sendable {
         onlineBattleReceipts = try c.contains(.onlineBattleReceipts) ? c.decode([OnlineBattleEffectReceipt].self, forKey: .onlineBattleReceipts) : []
         onlineBattleHolds = try c.contains(.onlineBattleHolds) ? c.decode([OnlineBattleHold].self, forKey: .onlineBattleHolds) : []
         onlineLedgerTrusted = try c.contains(.onlineLedgerTrusted) ? c.decode(Bool.self, forKey: .onlineLedgerTrusted) : true
+        onlineBattleReceipts = try OnlineBattleLedger.merged(onlineBattleReceipts, [])
+        try OnlineBattleLedger.validate(holds: onlineBattleHolds)
     }
 
     /// 졸업 기록 또는 현재 개체가 실제로 도달한 단계에 이 종이 포함되는가.

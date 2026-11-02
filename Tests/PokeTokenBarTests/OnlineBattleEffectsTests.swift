@@ -75,9 +75,9 @@ final class OnlineBattleEffectsTests: XCTestCase {
         let store = try make(); try store.holdOnlineBattle(key: key(), instanceID: "entrant")
         let failing = open(writer: { _, _ in throw Failure.disk })
         let disk = try Data(contentsOf: folder.appendingPathComponent("save"))
-        let memory = try JSONEncoder().encode(failing.state)
+        let memory = try canonical(failing.state)
         XCTAssertThrowsError(try failing.applyVerifiedOnlineBattleEffect(effect()))
-        XCTAssertEqual(try JSONEncoder().encode(failing.state), memory)
+        XCTAssertEqual(try canonical(failing.state), memory)
         XCTAssertEqual(try Data(contentsOf: folder.appendingPathComponent("save")), disk)
         XCTAssertTrue(failing.isHeldForBattle(instanceID: "entrant"))
     }
@@ -166,6 +166,86 @@ final class OnlineBattleEffectsTests: XCTestCase {
             _ = try recovered.applyVerifiedOnlineBattleEffect(effect(name))
             XCTAssertEqual(recovered.state.onlineBattleReceipts.count, 1)
         }
+    }
+
+    private func canonical(_ value: CompanionState) throws -> Data {
+        let encoder = JSONEncoder(); encoder.outputFormatting = .sortedKeys
+        return try encoder.encode(value)
+    }
+    func testIndependentScopeKeysAndPracticeRewardsDoNotConsumeOnlineQuota() throws {
+        let store = try make()
+        XCTAssertTrue(store.grantBattleXP(5_000_000))
+        _ = try store.applyVerifiedOnlineBattleEffect(effect())
+        for scope in [OnlineBattleScope(originHash: "other", groupID: "group", trainerID: "trainer"),
+                      OnlineBattleScope(originHash: "origin", groupID: "other", trainerID: "trainer"),
+                      OnlineBattleScope(originHash: "origin", groupID: "group", trainerID: "other")] {
+            let input = try VerifiedOnlineBattleEffect(key: .init(scope: scope, battleID: "battle"), resultHash: "hash",
+                localInstanceID: "entrant", remainingHPShare: 1, outcome: .win)
+            XCTAssertEqual(try store.applyVerifiedOnlineBattleEffect(input).grantedXP, 10_000_000)
+        }
+        XCTAssertEqual(store.state.onlineBattleReceipts.count, 4)
+        XCTAssertEqual(store.state.active?.usedAtStage, 46_000_000)
+        XCTAssertEqual(store.healthShare(of: "entrant"), 1)
+        XCTAssertNil(store.state.battleHealth["entrant"])
+    }
+    func testHoldConflictsFaintedAndCancellationOnlyReleaseTheirOwnKey() throws {
+        let store = try make()
+        try store.holdOnlineBattle(key: key(), instanceID: "entrant")
+        try store.holdOnlineBattle(key: key(), instanceID: "entrant")
+        XCTAssertEqual(store.state.onlineBattleHolds.count, 1)
+        XCTAssertThrowsError(try store.holdOnlineBattle(key: key(), instanceID: "another"))
+        XCTAssertThrowsError(try store.holdOnlineBattle(key: key("different"), instanceID: "entrant"))
+        XCTAssertThrowsError(try store.applyVerifiedOnlineBattleEffect(effect("different")))
+        let wrongInstance = try VerifiedOnlineBattleEffect(key: key(), resultHash: "hash", localInstanceID: "another",
+            remainingHPShare: 0.5, outcome: .win)
+        XCTAssertThrowsError(try store.applyVerifiedOnlineBattleEffect(wrongInstance))
+        try store.releaseOnlineBattle(key: key("unknown"))
+        XCTAssertTrue(store.isHeldForBattle(instanceID: "entrant"))
+        let before = store.state
+        try store.releaseOnlineBattle(key: key())
+        XCTAssertEqual(store.state.battleHealth, before.battleHealth)
+        XCTAssertEqual(store.state.onlineBattleReceipts, [])
+        XCTAssertEqual(store.state.active?.usedAtStage, before.active?.usedAtStage)
+        store.setHealthShare(0, of: "entrant")
+        XCTAssertThrowsError(try store.holdOnlineBattle(key: key(), instanceID: "entrant"))
+        store.setInBattle("current")
+        XCTAssertThrowsError(try store.holdOnlineBattle(key: key(), instanceID: "current"))
+        let practiceConflict = try VerifiedOnlineBattleEffect(key: key(), resultHash: "hash", localInstanceID: "current",
+            remainingHPShare: 0.2, outcome: .draw)
+        XCTAssertThrowsError(try store.applyVerifiedOnlineBattleEffect(practiceConflict))
+        store.setInBattle(nil)
+        _ = try store.applyVerifiedOnlineBattleEffect(effect())
+        try store.holdOnlineBattle(key: key(), instanceID: "entrant")
+        XCTAssertFalse(store.isHeldForBattle(instanceID: "entrant"))
+    }
+    func testLegacyMissingLedgerAcceptsButMalformedAndNullLedgerReject() throws {
+        XCTAssertTrue(try JSONDecoder().decode(CompanionState.self, from: Data("{}".utf8)).onlineLedgerTrusted)
+        for json in [#"{"onlineBattleReceipts":null}"#, #"{"onlineBattleHolds":"bad"}"#,
+                     #"{"onlineLedgerTrusted":null}"#, #"{"onlineBattleReceipts":[{}]}"#] {
+            XCTAssertThrowsError(try JSONDecoder().decode(CompanionState.self, from: Data(json.utf8)))
+        }
+        var untrusted = state(); untrusted.onlineLedgerTrusted = false
+        let store = try make(untrusted)
+        let envelope = try SaveTransfer.decode(SaveTransfer.encode(state: state(), appVersion: "test", deviceName: "test", now: now))
+        try store.applySave(envelope, todayTokensByProvider: [:], todayDate: "day", hasUsageData: false)
+        XCTAssertFalse(store.state.onlineLedgerTrusted)
+        XCTAssertThrowsError(try store.holdOnlineBattle(key: key(), instanceID: "entrant"))
+        XCTAssertThrowsError(try store.applyVerifiedOnlineBattleEffect(effect()))
+    }
+    func testInvalidTypedInputsAndLedgerContentsFailClosed() throws {
+        for hp in [-0.1, 1.1, Double.nan, Double.infinity] { XCTAssertThrowsError(try effect(hp: hp)) }
+        XCTAssertThrowsError(try effect("")); XCTAssertThrowsError(try effect(hash: ""))
+        let receipt = OnlineBattleEffectReceipt(key: key(), resultHash: "hash", localInstanceID: "entrant",
+            appliedHPShare: 0.2, grantedXP: 1, recipientInstanceID: "current", rewardDate: "2026-10-31")
+        var malformed = state(); malformed.onlineBattleReceipts = [receipt]
+        XCTAssertThrowsError(try JSONDecoder().decode(CompanionState.self, from: JSONEncoder().encode(malformed)))
+        let hold = OnlineBattleHold(key: key(), instanceID: "entrant")
+        malformed = state(); malformed.onlineBattleHolds = [hold, hold]
+        XCTAssertThrowsError(try JSONDecoder().decode(CompanionState.self, from: JSONEncoder().encode(malformed)))
+        let emptyKey = OnlineBattleReceiptKey(scope: .init(originHash: "", groupID: "g", trainerID: "t"), battleID: "b")
+        XCTAssertThrowsError(try OnlineBattleLedger.validate(key: emptyKey, instanceID: "entrant"))
+        let store = try make()
+        XCTAssertThrowsError(try store.holdOnlineBattle(key: key(), instanceID: ""))
     }
 
 }

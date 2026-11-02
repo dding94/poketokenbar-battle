@@ -9,8 +9,8 @@ import Foundation
 /// 봉투의 `format`/`schema` 는 관대 디코딩 대상이 아니라(기본값 없음) 이 오인을 먼저 차단한다.
 struct SaveEnvelope: Codable, Sendable {
     static let formatID = "poketokenbar.save"
-    /// v2 adds persistent generated Pokémon profiles (IVs, gender, ability, level and moves).
-    static let schemaVersion = 2
+    /// v3 adds the strict online result ledger; older importers must not silently discard receipts.
+    static let schemaVersion = 3
 
     var format: String
     var schema: Int

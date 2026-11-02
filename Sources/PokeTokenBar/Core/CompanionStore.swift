@@ -1282,6 +1282,7 @@ final class CompanionStore {
         // 새 알 구매는 `hasActive` 에 막혀 되돌릴 수단이 없다. 가격만 계산되면 값이 빠져나가므로
         // 판매 목록을 여기서 강제한다(호출부 하나가 실수하면 토큰이 통째로 사라진다).
         guard FreshEgg.shopTiers.contains(tier) else { return false }
+        if let id = currentInstanceID, state.onlineBattleHolds.contains(where: { $0.instanceID == id }) { return false }
         return hasActive && availableTokens >= price(of: .egg(tier))
     }
 
@@ -1873,12 +1874,17 @@ final class CompanionStore {
     /// 그 약속을 못 지키는 채로 덮어쓰면 사용자는 되돌릴 수단 없이 진행을 잃는다.
     func applySave(_ envelope: SaveEnvelope, todayTokensByProvider: [String: Int], todayDate: String,
                    hasUsageData: Bool) throws {
-        try backupStateBeforeImport()
-        state = SaveTransfer.rebasedForThisDevice(envelope.state,
+        guard state.onlineBattleHolds.isEmpty else { throw OnlineBattleEffectError.individualHeld }
+        let receipts = try OnlineBattleLedger.merged(state.onlineBattleReceipts, envelope.state.onlineBattleReceipts)
+        var candidate = SaveTransfer.rebasedForThisDevice(envelope.state,
                                                   current: state,
                                                   todayTokensByProvider: todayTokensByProvider,
                                                   todayDate: todayDate,
                                                   hasUsageData: hasUsageData)
+        candidate.onlineBattleReceipts = receipts
+        candidate.onlineLedgerTrusted = state.onlineLedgerTrusted && envelope.state.onlineLedgerTrusted
+        try backupStateBeforeImport()
+        try commitOnlineState(candidate)
         // 이전 개체 기준으로 진행 중이던 비동기·연출을 전부 무효화한다. activeGeneration 을 올리지
         // 않으면 먼저 떠 있던 라인 로드가 완료되며 새로 불러온 개체를 덮어쓴다.
         activeGeneration += 1
@@ -2131,7 +2137,13 @@ final class CompanionStore {
 
     // MARK: 영속
     private func load() {
-        guard let data = try? Data(contentsOf: fileURL) else { return }   // 파일 없음 = 신규 설치
+        guard let data = try? Data(contentsOf: fileURL) else {
+            // A failed fallback write must not turn a previously corrupt ledger into a fresh trusted one.
+            if FileManager.default.fileExists(atPath: fileURL.appendingPathExtension("corrupt").path) {
+                state.onlineLedgerTrusted = false
+            }
+            return
+        }
         guard let s = try? JSONDecoder().decode(CompanionState.self, from: data) else {
             // 디코드 실패(전면 손상/미래 스키마) → 원본을 .corrupt 로 백업 후 유효한 스냅샷으로 복구 시도.
             let backup = fileURL.appendingPathExtension("corrupt")
@@ -2145,10 +2157,13 @@ final class CompanionStore {
 
             if let recovered = SaveSnapshotManager.loadLatestValidSnapshot(for: fileURL) {
                 state = SaveTransfer.sanitized(recovered)
+                state.onlineLedgerTrusted = false
                 AppLog.write("automatically recovered companion state from snapshot")
                 save()
             } else {
                 state = CompanionState()
+                state.onlineLedgerTrusted = false
+                save()
                 AppLog.write("no snapshot available, starting fresh")
             }
             return
@@ -2210,7 +2225,7 @@ extension CompanionStore: PracticeBattleEffects {
         case .rareCandy, .mint, .shinyCharm, .ivReroll: return .notHealing
         }
         if itemCount(kind) <= 0 { return .noneLeft }
-        if instanceID == inBattleInstanceID { return .inBattle }
+        if isHeldForBattle(instanceID: instanceID) { return .inBattle }
         return byHealth
     }
 
@@ -2262,11 +2277,67 @@ extension CompanionStore: PracticeBattleEffects {
 
 
 extension CompanionStore: OnlineBattleEffects {
+    @discardableResult
     func applyVerifiedOnlineBattleEffect(_ effect: VerifiedOnlineBattleEffect) throws -> OnlineBattleEffectReceipt {
-        OnlineBattleEffectReceipt(key: effect.key, resultHash: effect.resultHash, localInstanceID: effect.localInstanceID,
-                                  appliedHPShare: 1, grantedXP: 0, recipientInstanceID: nil, rewardDate: "")
+        guard state.onlineLedgerTrusted else { throw OnlineBattleEffectError.untrustedLedger }
+        if let receipt = state.onlineBattleReceipts.first(where: { $0.key == effect.key }) {
+            guard receipt.resultHash == effect.resultHash else { throw OnlineBattleEffectError.conflictingResult }
+            return receipt
+        }
+        guard !state.onlineBattleHolds.contains(where: {
+            ($0.key == effect.key && $0.instanceID != effect.localInstanceID)
+                || ($0.instanceID == effect.localInstanceID && $0.key != effect.key)
+        }), inBattleInstanceID != effect.localInstanceID else { throw OnlineBattleEffectError.individualHeld }
+        var candidate = state
+        let hp = effect.outcome == .loss ? 0 : effect.remainingHPShare
+        candidate.battleHealth[effect.localInstanceID] = hp < 1 ? hp : nil
+        let day = OnlineBattleLedger.day(clock())
+        let paidToday = candidate.onlineBattleReceipts.filter { $0.rewardDate == day && $0.grantedXP > 0 }.count
+        let recipient = candidate.active?.profile?.instanceID
+        let xp = effect.outcome == .win && recipient != nil && paidToday < 10 ? 10_000_000 : 0
+        if xp > 0 { candidate.active!.usedAtStage += xp }
+        let receipt = OnlineBattleEffectReceipt(key: effect.key, resultHash: effect.resultHash,
+            localInstanceID: effect.localInstanceID, appliedHPShare: hp, grantedXP: xp,
+            recipientInstanceID: xp > 0 ? recipient : nil, rewardDate: day)
+        candidate.onlineBattleReceipts.append(receipt)
+        candidate.onlineBattleHolds.removeAll { $0.key == effect.key }
+        try commitOnlineState(candidate)
+        // Growth consumes the already-durable credit. Derived saves may fail without refunding this receipt.
+        if xp > 0 { applyUsage(0); kickLineLoadIfNeeded() }
+        return receipt
     }
-    func holdOnlineBattle(key: OnlineBattleReceiptKey, instanceID: String) throws {}
-    func releaseOnlineBattle(key: OnlineBattleReceiptKey) throws {}
-    func isHeldForBattle(instanceID: String) -> Bool { false }
+
+    func holdOnlineBattle(key: OnlineBattleReceiptKey, instanceID: String) throws {
+        guard state.onlineLedgerTrusted else { throw OnlineBattleEffectError.untrustedLedger }
+        try OnlineBattleLedger.validate(key: key, instanceID: instanceID)
+        if let existing = state.onlineBattleHolds.first(where: { $0.key == key }) {
+            guard existing.instanceID == instanceID else { throw OnlineBattleEffectError.individualHeld }
+            return
+        }
+        // A delayed duplicate start notification must not re-acquire a completed battle.
+        guard !state.onlineBattleReceipts.contains(where: { $0.key == key }) else { return }
+        guard !isHeldForBattle(instanceID: instanceID) else { throw OnlineBattleEffectError.individualHeld }
+        guard healthShare(of: instanceID) > 0 else { throw OnlineBattleEffectError.faintedIndividual }
+        var candidate = state
+        candidate.onlineBattleHolds.append(OnlineBattleHold(key: key, instanceID: instanceID))
+        try commitOnlineState(candidate)
+    }
+
+    func releaseOnlineBattle(key: OnlineBattleReceiptKey) throws {
+        guard state.onlineBattleHolds.contains(where: { $0.key == key }) else { return }
+        var candidate = state
+        candidate.onlineBattleHolds.removeAll { $0.key == key }
+        try commitOnlineState(candidate)
+    }
+
+    func isHeldForBattle(instanceID: String) -> Bool {
+        instanceID == inBattleInstanceID || state.onlineBattleHolds.contains { $0.instanceID == instanceID }
+    }
+
+    private func commitOnlineState(_ candidate: CompanionState) throws {
+        let data = try JSONEncoder().encode(candidate)
+        try onlineStateWriter(data, fileURL)
+        state = candidate
+        refreshRepresentativeSubject()
+    }
 }

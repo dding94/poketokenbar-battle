@@ -20,4 +20,9 @@ protocol PracticeBattleEffects: AnyObject {
     /// rebuilds its roster from, so growth, an evolution or an IV reroll since the practice screen opened reaches the
     /// next battle. nil from a stand-in that keeps no save; the roster `prepare` built then stays.
     func companionState() -> (state: CompanionState, activeName: String?)?
+    func isHeldForBattle(instanceID: String) -> Bool
+}
+
+extension PracticeBattleEffects {
+    func isHeldForBattle(instanceID: String) -> Bool { false }
 }

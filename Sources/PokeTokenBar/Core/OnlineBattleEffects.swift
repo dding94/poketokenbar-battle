@@ -50,5 +50,51 @@ protocol OnlineBattleEffects: PracticeBattleEffects {
     @discardableResult func applyVerifiedOnlineBattleEffect(_ effect: VerifiedOnlineBattleEffect) throws -> OnlineBattleEffectReceipt
     func holdOnlineBattle(key: OnlineBattleReceiptKey, instanceID: String) throws
     func releaseOnlineBattle(key: OnlineBattleReceiptKey) throws
-    func isHeldForBattle(instanceID: String) -> Bool
+}
+
+/// Strict ledger validation intentionally differs from the legacy save's lenient display fields.
+enum OnlineBattleLedger {
+    static func day(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.string(from: date)
+    }
+
+    static func validate(key: OnlineBattleReceiptKey, instanceID: String) throws {
+        guard !key.scope.originHash.isEmpty, !key.scope.groupID.isEmpty, !key.scope.trainerID.isEmpty,
+              !key.battleID.isEmpty, !instanceID.isEmpty else { throw OnlineBattleEffectError.invalidEffect }
+    }
+
+    static func merged(_ first: [OnlineBattleEffectReceipt], _ second: [OnlineBattleEffectReceipt]) throws -> [OnlineBattleEffectReceipt] {
+        var result: [OnlineBattleEffectReceipt] = []
+        var seen: [OnlineBattleReceiptKey: OnlineBattleEffectReceipt] = [:]
+        for receipt in first + second {
+            try validate(key: receipt.key, instanceID: receipt.localInstanceID)
+            guard !receipt.resultHash.isEmpty, receipt.appliedHPShare.isFinite,
+                  (0...1).contains(receipt.appliedHPShare),
+                  receipt.grantedXP == 0 || receipt.grantedXP == 10_000_000,
+                  (receipt.grantedXP == 0 && receipt.recipientInstanceID == nil)
+                    || (receipt.grantedXP > 0 && !(receipt.recipientInstanceID ?? "").isEmpty),
+                  receipt.rewardDate.range(of: #"^\d{4}-\d{2}-\d{2}$"#, options: .regularExpression) != nil
+            else { throw OnlineBattleEffectError.invalidEffect }
+            if let old = seen[receipt.key] {
+                guard old == receipt else { throw OnlineBattleEffectError.conflictingResult }
+            } else {
+                seen[receipt.key] = receipt; result.append(receipt)
+            }
+        }
+        return result
+    }
+
+    static func validate(holds: [OnlineBattleHold]) throws {
+        var keys = Set<OnlineBattleReceiptKey>(), individuals = Set<String>()
+        for hold in holds {
+            try validate(key: hold.key, instanceID: hold.instanceID)
+            guard keys.insert(hold.key).inserted, individuals.insert(hold.instanceID).inserted else {
+                throw OnlineBattleEffectError.individualHeld
+            }
+        }
+    }
 }
