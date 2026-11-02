@@ -111,4 +111,6 @@ final class OnlineBattleSession {
             : "온라인 정보를 확인하지 못했어요. 연결을 확인하고 다시 시도해 주세요."
     }
     func configureServer(_ value: String) async {}
+    func perform(_ action: OnlineBattleUIAction) async {}
+    func tick() async {}
 }
