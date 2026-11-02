@@ -65,6 +65,8 @@ final class OnlineBattlePresentation {
         switch action {
         case .setPopoverVisible:
             break
+        case .backToLobby:
+            return
         case .selectEntry(let id):
             guard let entry = roster.first(where: { $0.id == id }), entryIsEligible(entry) else { return }
             selectedEntryID = id
@@ -113,5 +115,5 @@ enum OnlineBattleUIAction {
     case setPopoverVisible(Bool)
     case selectEntry(String), selectOpponent(String), setMode(OnlineBattleMode)
     case challenge, openBattle(String), accept, confirm, prepareBattle, decline, cancel
-    case chooseMove(Int), dismissResult
+    case chooseMove(Int), dismissResult, backToLobby
 }

@@ -8,6 +8,9 @@ struct OnlineBattleScreen: View {
     var artwork = true
     let onClose: () -> Void
 
+    var showsGroupBack: Bool { false }
+    func returnToGroup() {}
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {

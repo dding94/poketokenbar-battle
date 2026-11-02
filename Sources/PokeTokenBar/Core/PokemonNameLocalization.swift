@@ -37,7 +37,7 @@ enum PokemonNameLocalization {
 }
 
 struct PokemonNameResource: Hashable, Sendable {
-    enum Kind: String, Sendable { case type, ability, move, pokemonForm = "pokemon-form" }
+    enum Kind: String, Sendable { case type, ability, move, pokemonForm = "pokemon-form", pokemonSpecies = "pokemon-species" }
     let kind: Kind
     let name: String
 
