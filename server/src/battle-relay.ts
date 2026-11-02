@@ -1,4 +1,4 @@
-import type { BattleEffect } from "./battles";
+import type { BattleEffect } from "./battle-effects";
 import { BattleStore, TURN_MS, type Battle, type Pair, type RelayToken, type Round } from "./battle-store";
 import { fail, ok, type Result } from "./contract";
 import type { Side } from "./battle-input";

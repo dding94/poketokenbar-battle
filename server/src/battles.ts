@@ -1,3 +1,4 @@
+import { battleChanged, type BattleEffect } from "./battle-effects";
 import { BattleResults } from "./battle-results";
 import { battleView } from "./battle-view";
 import { BattleRelay } from "./battle-relay";
@@ -7,8 +8,6 @@ import { canonical, POLICY_VERSION, RELAY_VERSION, RULES_VERSION, type BattleAct
 import { ACTIVE, BattleStore, CHALLENGE_MS, PRESTART, REPORT_MS, type Battle } from "./battle-store";
 import { fail, ok, type Result } from "./contract";
 import type { Realtime } from "./realtime";
-export interface BattleEffect { recipients: string[]; groupId?: string; message: Record<string, unknown> }
-export function battleChanged(b: Battle): BattleEffect { return { recipients: [b.p1, b.p2], message: { type: "battle_changed", battleId: b.battleId, state: b.state, revision: b.revision } }; }
 export class Battles {
   readonly store: BattleStore;
   private readonly relay: BattleRelay;

@@ -1,6 +1,6 @@
 import { canonical, type Report, type Side } from "./battle-input";
 import { BattleStore, type Battle } from "./battle-store";
-import { battleChanged, type BattleEffect } from "./battles";
+import { battleChanged, type BattleEffect } from "./battle-effects";
 import { fail, ok, type Result } from "./contract";
 /** Caller owns one transaction encompassing reports, room, records and lock release. */
 export class BattleResults {

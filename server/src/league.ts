@@ -1,4 +1,5 @@
-import { Battles, type BattleEffect } from "./battles";
+import { Battles } from "./battles";
+import type { BattleEffect } from "./battle-effects";
 import { BATTLE_SCHEMA } from "./battle-store";
 import type { BattleAction, BattleInput } from "./battle-input";
 import { DurableObject } from "cloudflare:workers";
