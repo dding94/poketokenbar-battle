@@ -37,6 +37,9 @@ final class OnlineBattleSession {
     private var popoverOpen = false
     private var views: [String: OnlineBattleView] = [:]
     private var resolvers: [String: OnlineBattleResolver] = [:]
+    private var resultByBattleID: [String: OnlineBattleUIResult] = [:]
+    private var prefersLobby = false
+    private var navigationRevision: UInt64 = 0
     private var selectedBattleID: String?
     private var checkedDeadlines: [String: Double] = [:]
     private struct ChallengeIntent {
@@ -73,7 +76,7 @@ final class OnlineBattleSession {
         authenticated = false; reconciled = false; bootstrapped = false; actionInFlight = false
         pendingGrant = nil; challengeIntent = nil; prepared = [:]; acknowledgedStarts = []; submittedReports = []
         for resolver in resolvers.values { resolver.close() }; resolvers = [:]; views = [:]
-        selectedBattleID = nil; checkedDeadlines = [:]; nextRecoveryRead = nil
+        selectedBattleID = nil; resultByBattleID = [:]; prefersLobby = false; checkedDeadlines = [:]; nextRecoveryRead = nil
         presentation.account = nil; presentation.members = []; presentation.battles = []
         presentation.room = nil; presentation.arena = nil; presentation.request = nil
         presentation.recoveryCode = nil; presentation.result = nil; presentation.canRetryCredentialSave = false
@@ -112,7 +115,7 @@ final class OnlineBattleSession {
             refreshTask?.cancel(); refreshTask = nil; ticker?.cancel(); ticker = nil
             let old = connection; connection = nil
             for resolver in resolvers.values { resolver.close() }
-            resolvers = [:]; views = [:]; selectedBattleID = nil; checkedDeadlines = [:]
+            resolvers = [:]; views = [:]; selectedBattleID = nil; resultByBattleID = [:]; prefersLobby = false; checkedDeadlines = [:]
             api = nil; origin = nil; pendingGrant = nil; challengeIntent = nil
             authenticated = false; reconciled = false; actionInFlight = false
             refreshAgain = false; prepared = [:]; acknowledgedStarts = []; submittedReports = []; nextRecoveryRead = nil
@@ -176,12 +179,29 @@ final class OnlineBattleSession {
     }
     private func obtainGrant(_ request: (OnlineBattleAPI) async throws -> OnlineBattleGrant) async {
         guard onlineAllowed, let api, pendingGrant == nil else { return }
-        let epoch = generation
+        var epoch = generation
         do {
             let grant = try await request(api); try current(epoch)
+            // A grant replaces credentials even at the same origin. Retire all work before any await.
+            generation &+= 1; epoch = generation
+            refreshTask?.cancel(); refreshTask = nil; refreshAgain = false
+            ticker?.cancel(); ticker = nil
+            let old = connection; connection = nil
+            authenticated = false; reconciled = false
+            for resolver in resolvers.values { resolver.close() }
+            resolvers = [:]; views = [:]; resultByBattleID = [:]
+            selectedBattleID = nil; prefersLobby = false; checkedDeadlines = [:]; nextRecoveryRead = nil
+            prepared = [:]; acknowledgedStarts = []; submittedReports = []; challengeIntent = nil
+            presentation.account = nil; presentation.members = []; presentation.battles = []
+            presentation.room = nil; presentation.arena = nil; presentation.request = nil
+            presentation.result = nil; presentation.recoveryCode = nil; presentation.canStart = false
+            presentation.phase = .setup
             pendingGrant = grant; presentation.canRetryCredentialSave = true
+            await api.setAccessKey(nil); try current(epoch)
+            await old?.stop(); try current(epoch)
             await retryCredentialSave()
         } catch { await handle(error, epoch: epoch) }
+        if epoch == generation { actionInFlight = false; presentation.isBusy = false }
     }
     func retryCredentialSave() async {
         guard onlineAllowed, let grant = pendingGrant, let origin else { return }
@@ -273,7 +293,7 @@ final class OnlineBattleSession {
                 try effects.releaseOnlineBattle(key: key)
                 resolvers.removeValue(forKey: room.battleId)?.close()
                 if room.state == .void {
-                    presentation.result = .init(title: "경기 무효", detail: "체력과 경험치는 바뀌지 않았어요.", xpAwarded: 0, hpApplied: false, isVoid: true)
+                    resultByBattleID[room.battleId] = .init(title: "경기 무효", detail: "체력과 경험치는 바뀌지 않았어요.", xpAwarded: 0, hpApplied: false, isVoid: true)
                 }
                 publish(); return
             }
@@ -357,7 +377,7 @@ final class OnlineBattleSession {
         showResult(receipt, outcome: outcome)
     }
     private func showResult(_ receipt: OnlineBattleEffectReceipt, outcome: OnlineBattleOutcome) {
-        presentation.result = .init(title: outcome == .win ? "승리" : outcome == .loss ? "패배" : "무승부",
+        resultByBattleID[receipt.key.battleID] = .init(title: outcome == .win ? "승리" : outcome == .loss ? "패배" : "무승부",
             detail: "양쪽의 전투 결과가 일치해 반영했어요.", xpAwarded: Int64(receipt.grantedXP), hpApplied: true, isVoid: false)
     }
     private func rebuildRoster() throws {
@@ -390,8 +410,11 @@ final class OnlineBattleSession {
     }
     private func publish() {
         presentation.battles = views.values.sorted { $0.createdAt > $1.createdAt }
-        let room = selectedBattleID.flatMap { views[$0] } ?? presentation.battles.first(where: { $0.state.isActive }) ?? presentation.battles.first
+        let room = prefersLobby ? nil : (selectedBattleID.flatMap { views[$0] } ?? presentation.battles.first(where: { $0.state.isActive }) ?? presentation.battles.first)
         presentation.room = room
+        presentation.result = room.flatMap { resultByBattleID[$0.battleId] }
+        presentation.arena = nil; presentation.request = nil; presentation.deadline = nil
+        presentation.choiceSubmitted = false
         presentation.moveSlugs = [:]; presentation.abilitySlugs = [:]
         guard let room, let account = presentation.account else { presentation.phase = authenticated ? .lobby : .setup; return }
         presentation.localSide = room.side(for: account.trainer.trainerId) ?? .p1
@@ -429,7 +452,7 @@ final class OnlineBattleSession {
         case .selectOpponent(let id): presentation.selectedOpponentID = id; challengeIntent = nil; return
         case .setMode(let mode): presentation.mode = mode; challengeIntent = nil; return
         case .acknowledgeRecoveryCode: presentation.recoveryCode = nil; return
-        case .dismissResult: selectedBattleID = nil; presentation.result = nil; presentation.phase = .lobby; return
+        case .dismissResult: prefersLobby = true; navigationRevision &+= 1; selectedBattleID = nil; publish(); return
         case .configureServer(let value): await configureServer(value); return
         default: break
         }
@@ -443,13 +466,14 @@ final class OnlineBattleSession {
         case .reconnect(let code): await obtainGrant { try await $0.reconnect(reconnectCode: code) }
         case .retryCredentialSave: await retryCredentialSave()
         case .refresh: await refresh()
-        case .openBattle(let id): selectedBattleID = id; publish()
+        case .openBattle(let id): prefersLobby = false; navigationRevision &+= 1; selectedBattleID = id; publish()
         default:
             do { try await battleAction(action, epoch: epoch) }
             catch { publish(); await handle(error, epoch: epoch) }
         }
     }
     private func battleAction(_ action: OnlineBattleUIAction, epoch: UInt64) async throws {
+        let navigation = navigationRevision
         if case .challenge = action { await refresh(); try current(epoch) }
         if case .accept = action { await refresh(); try current(epoch) }
         guard onlineAllowed, authenticated, reconciled, let api, let account = presentation.account else { throw OnlineBattleFailure.invalidRequest }
@@ -518,7 +542,7 @@ final class OnlineBattleSession {
             }
             try current(epoch)
         }
-        selectedBattleID = result.battleId
+        if navigation == navigationRevision { prefersLobby = false; selectedBattleID = result.battleId }
         try await process(result, account: account, api: api, epoch: epoch)
         try rebuildRoster(); publish()
     }
