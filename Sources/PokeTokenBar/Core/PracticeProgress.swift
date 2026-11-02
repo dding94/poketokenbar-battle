@@ -94,6 +94,7 @@ extension PracticeRecords {
 enum PracticeStartBlock: Equatable, Sendable {
     /// The player fainted: no battle against a wild or today's opponent until it is healed. Sparring stays open.
     case fainted
+    case inBattle
 }
 
 /// What the result screen shows about a battle with stakes (`PracticeSession.lastStakes`).

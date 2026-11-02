@@ -61,7 +61,7 @@ struct PracticeSelectionView: View {
             .controlSize(.large)
             .keyboardShortcut(.defaultAction)
             .disabled(!Self.canStart(player: session.player, opponent: session.opponent,
-                                     faintedBlock: progress.faintedBlock))
+                                     faintedBlock: progress.faintedBlock) || session.startBlock == .inBattle)
         }
         // Wild opponents are matched to the entry's level: search whenever one is due — idle with a player —
         // rather than on particular transitions. After a release the same player can come back through
@@ -339,7 +339,9 @@ struct PracticeSelectionView: View {
             .labelsHidden()
             // The line right above Start says why it is off; it takes the mode hint's place, so the pinned area keeps
             // its height.
-            if progress.faintedBlock {
+            if session.startBlock == .inBattle {
+                Text(l.battleItemInBattle).font(.caption2.weight(.semibold)).foregroundStyle(.orange)
+            } else if progress.faintedBlock {
                 Label {
                     Text(l.practiceFaintedBlock).foregroundStyle(.primary)
                 } icon: {

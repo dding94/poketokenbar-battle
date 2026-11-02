@@ -1,4 +1,5 @@
 import XCTest
+import CryptoKit
 @testable import PokeTokenBar
 
 private actor SessionCredentials: OnlineBattleCredentialStoring {
@@ -81,7 +82,14 @@ final class OnlineBattleSessionTests: XCTestCase {
     private var engineURL: URL { URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("engine/dist/battle-engine.js") }
     private struct Fixture: Decodable { let battle: OnlineBattleView }
     private func battle(_ index: Int = 0) throws -> OnlineBattleView {
-        try JSONDecoder().decode([Fixture].self, from: Data(contentsOf: XCTUnwrap(Bundle.module.url(forResource: "golden", withExtension: "json", subdirectory: "OnlineBattle"))))[index].battle
+        let fixture = try JSONDecoder().decode([Fixture].self, from: Data(contentsOf: XCTUnwrap(Bundle.module.url(forResource: "golden", withExtension: "json", subdirectory: "OnlineBattle"))))[index].battle
+        // Resolver fixtures intentionally have arbitrary IDs; HTTP requires the server's bt_ namespace.
+        let id = "bt_" + fixture.battleId.replacingOccurrences(of: "-", with: "_")
+        let bytes = try OnlineBattleResolver.journalBytes(battleID: id, readyToken: fixture.config!.readyToken, journal: fixture.journal)
+        let hash = SHA256.hash(data: Data(bytes.utf8)).map { String(format: "%02x", $0) }.joined()
+        var result = try JSONSerialization.jsonObject(with: JSONEncoder().encode(fixture.result)) as! [String: Any]
+        result["journalHash"] = hash
+        return try changed(fixture, ["battleId": id, "result": result])
     }
     private func roster(_ battle: OnlineBattleView) -> [PracticeCandidate] {
         [battle.p1.snapshot!, battle.p2.snapshot!].map { value in
@@ -190,7 +198,8 @@ final class OnlineBattleSessionTests: XCTestCase {
         await http.route("/v1/battles", try JSONEncoder().encode(OnlineBattlePage(battles: [terminal], before: nil)))
         await session.refresh()
         let reports = await http.bodies("/v1/battles/\(final.battleId)/report")
-        XCTAssertEqual(reports.count, 2); XCTAssertEqual(reports.first, reports.last)
+        XCTAssertEqual(reports.count, 2)
+        if reports.count == 2 { XCTAssertEqual(try JSONDecoder().decode(OnlineBattleReport.self, from: reports[0]), try JSONDecoder().decode(OnlineBattleReport.self, from: reports[1])) }
         XCTAssertEqual(effects.applications, 1)
         let choices = await http.bodies("/v1/battles/\(final.battleId)/choices")
         XCTAssertEqual(choices.count, 1)
@@ -224,7 +233,8 @@ final class OnlineBattleSessionTests: XCTestCase {
         session.presentation.selectedOpponentID = "trainer-two"
         await session.perform(.challenge); await session.perform(.challenge)
         let bodies = await http.bodies("/v1/battles")
-        XCTAssertEqual(bodies.count, 2); XCTAssertEqual(bodies.first, bodies.last)
+        XCTAssertEqual(bodies.count, 2)
+        if bodies.count == 2 { XCTAssertEqual(try JSONSerialization.jsonObject(with: bodies[0]) as? NSDictionary, try JSONSerialization.jsonObject(with: bodies[1]) as? NSDictionary) }
         XCTAssertEqual(effects.state.onlineBattleHolds.first?.instanceID, "instance-one")
     }
     func testPrepareValidatesBothSetsAndUsesCurrentConnectionOnly() async throws {

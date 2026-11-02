@@ -90,6 +90,9 @@ final class PracticeSession {
     /// Why `start()` would do nothing for the current selection: a fainted player can't face a wild or today's
     /// opponent until it is healed. Sparring stays open. nil when it can start.
     var startBlock: PracticeStartBlock? {
+        // Online holds are durable and distinct from this session's own practice hold.
+        if let player, effects?.companionState()?.state.onlineBattleHolds.contains(where: { $0.instanceID == player.id }) == true { return .inBattle }
+        if let opponent, effects?.companionState()?.state.onlineBattleHolds.contains(where: { $0.instanceID == opponent.id }) == true { return .inBattle }
         guard let player, let opponent, PracticeStakes.hold(against: opponent), healthShare(of: player) == 0 else { return nil }
         return .fainted
     }
