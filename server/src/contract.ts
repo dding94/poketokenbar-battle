@@ -1,6 +1,20 @@
 // Fixed error codes the app translates (Appendix B), with their HTTP status.
 export const ERROR_STATUS = {
   bad_request: 400,
+  invalid_snapshot: 400,
+  invalid_choice: 400,
+  invalid_state: 409,
+  stale_revision: 409,
+  engine_mismatch: 409,
+  version_mismatch: 409,
+  instance_busy: 409,
+  fainted: 409,
+  not_ready: 409,
+  stale_round: 409,
+  choice_conflict: 409,
+  report_conflict: 409,
+  idempotency_conflict: 409,
+
   cannot_target_self: 400,
   unauthorized: 401,
   forbidden: 403,

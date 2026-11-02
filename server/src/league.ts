@@ -1,3 +1,6 @@
+import { Battles, type BattleEffect } from "./battles";
+import { BATTLE_SCHEMA } from "./battle-store";
+import type { BattleAction, BattleInput } from "./battle-input";
 import { DurableObject } from "cloudflare:workers";
 import { GroupAccess, INVITE_COLUMNS, type InviteRow, TRAINER_COLUMNS, type TrainerRow } from "./access";
 import {
@@ -19,7 +22,7 @@ import { type GroupChange, KEY_HASH_HEADER, Realtime } from "./realtime";
 
 // The League never sees a raw key or code: every *Hash argument is computed by the Worker.
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 const MINUTE = 60_000;
 const DAY = 24 * 60 * MINUTE;
 export const ATTEMPT_LIMIT = 10;
@@ -127,7 +130,7 @@ export interface Email {
 }
 
 /** Realtime work that runs only after its transaction has committed. */
-type Effect = { kind: "revoke"; trainerId: string } | { kind: "group_changed"; groupId: string; change: GroupChange };
+type Effect = { kind: "battle"; effect: BattleEffect } | { kind: "revoke"; trainerId: string } | { kind: "group_changed"; groupId: string; change: GroupChange };
 
 export class League extends DurableObject<Env> {
   /** Single clock for every time check. Tests replace it through runInDurableObject. */
@@ -136,6 +139,7 @@ export class League extends DurableObject<Env> {
   private readonly sql: SqlStorage;
   private readonly access: GroupAccess;
   private readonly realtime: Realtime;
+  private readonly battles: Battles;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -143,6 +147,7 @@ export class League extends DurableObject<Env> {
     this.access = new GroupAccess(this.sql);
     this.realtime = new Realtime(ctx);
     this.migrate();
+    this.battles = new Battles(this.sql, this.access, this.realtime);
   }
 
   // ---- schema ----
@@ -157,6 +162,7 @@ export class League extends DurableObject<Env> {
     if (version >= SCHEMA_VERSION) return;
     this.ctx.storage.transactionSync(() => {
       if (version < 1) for (const statement of SCHEMA_V1) this.sql.exec(statement);
+      if (version < 2) for (const statement of BATTLE_SCHEMA) this.sql.exec(statement);
       this.sql.exec(
         "INSERT INTO meta (key, value) VALUES ('schema_version', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
         String(SCHEMA_VERSION),
@@ -192,6 +198,18 @@ export class League extends DurableObject<Env> {
 
   override webSocketError(ws: WebSocket, _error: unknown): void {
     this.realtime.departed(ws);
+  }
+
+  battle(input: { keyHash: string; id: string | null; action: BattleAction | "get" | "list"; body: BattleInput; before?: number }): Result<unknown> {
+    return this.tx((after) => {
+      const auth = this.access.actor(input.keyHash, "member");
+      if (!auth.ok) return auth;
+      const effects: BattleEffect[] = [];
+      this.battles.expire(this.clock(), effects);
+      const result = this.battles.dispatch(auth.value, input.id, input.action, input.body, this.clock(), effects, input.before);
+      after.push(...effects.map(effect => ({ kind: "battle" as const, effect })));
+      return result;
+    });
   }
 
   // ---- RPC: credential-less entry points ----
@@ -489,6 +507,7 @@ export class League extends DurableObject<Env> {
       if (!auth.ok) return auth;
       const actor = auth.value;
       if (actor.isHost) return fail("host_must_transfer");
+      this.cancelBattles(actor.trainer.id, after);
       this.anonymize(actor.trainer.id, now);
       this.addAudit(actor.groupId, now, "member_left", actor.trainer.id, actor.trainer.id, null);
       after.push({ kind: "revoke", trainerId: actor.trainer.id }, { kind: "group_changed", groupId: actor.groupId, change: "leave" });
@@ -506,6 +525,7 @@ export class League extends DurableObject<Env> {
       const found = this.access.target(actor, input.trainerId, { activeOnly: true });
       if (!found.ok) return found;
       const target = found.value;
+      this.cancelBattles(target.id, after);
       this.anonymize(target.id, now);
       this.addAudit(actor.groupId, now, "member_removed", actor.trainer.id, target.id, null);
       const revokedInvites = this.revokeOpenInvites(actor.groupId, actor.trainer.id, now);
@@ -530,33 +550,40 @@ export class League extends DurableObject<Env> {
     });
   }
 
-  /** Deletes attempt records once they are a day old. */
+  /** All persisted deadlines share the DO's single alarm. */
   override alarm(): void {
-    const now = this.clock();
-    this.ctx.storage.transactionSync(() => {
+    this.tx((after) => {
       this.sql.exec("DELETE FROM meta WHERE key = 'attempts_alarm_at'");
-      this.purgeAttempts(now);
+      this.purgeAttempts(this.clock());
+      const effects: BattleEffect[] = [];
+      this.battles.expire(this.clock(), effects);
+      after.push(...effects.map(effect => ({ kind: "battle" as const, effect })));
+      return ok(null);
     });
-    this.scheduleAttemptCleanup();
   }
 
   // ---- internals ----
 
-  /**
-   * Runs `fn` in one transaction. Realtime effects it queues run only after a successful commit:
-   * a thrown error rolls back and skips them, and so does a failed Result.
+  /** A failed Result does NOT roll back SQL. Validate before writes; throw to roll back.
+   * Notifications describe committed transitions (including expiry before a rejected action).
    */
   private tx<T>(fn: (after: Effect[]) => Result<T>): Result<T> {
     const after: Effect[] = [];
     const result = this.ctx.storage.transactionSync(() => fn(after));
-    this.scheduleAttemptCleanup();
-    if (result.ok) {
-      for (const effect of after) {
-        if (effect.kind === "revoke") this.realtime.revoke(effect.trainerId);
-        else this.realtime.groupChanged(effect.groupId, effect.change);
-      }
+    this.scheduleAlarm();
+    for (const effect of after) {
+      if (effect.kind === "revoke") this.realtime.revoke(effect.trainerId);
+      else if (effect.kind === "group_changed") this.realtime.groupChanged(effect.groupId, effect.change);
+      else if (effect.effect.groupId) this.realtime.sendToGroup(effect.effect.groupId, effect.effect.message);
+      else this.realtime.sendToTrainers(effect.effect.recipients, effect.effect.message);
     }
     return result;
+  }
+
+  private cancelBattles(trainerId: string, after: Effect[]): void {
+    const effects: BattleEffect[] = [];
+    this.battles.participantLeft(trainerId, effects);
+    after.push(...effects.map(effect => ({ kind: "battle" as const, effect })));
   }
 
   private groupRow(groupId: string): GroupRow {
@@ -721,14 +748,18 @@ export class League extends DurableObject<Env> {
     this.sql.exec("DELETE FROM attempts WHERE at <= ?", now - ATTEMPT_RETENTION_MS);
   }
 
-  /** Keeps one alarm pending while attempt records exist, so they go away a day later without traffic. */
-  private scheduleAttemptCleanup(): void {
-    const scheduled = this.sql.exec("SELECT value FROM meta WHERE key = 'attempts_alarm_at'").toArray().length > 0;
-    if (scheduled) return;
+  /** Schedule the earliest battle or attempt deadline; SQL metadata avoids redundant writes. */
+  private scheduleAlarm(): void {
     const oldest = this.sql.exec<{ at: number | null }>("SELECT MIN(at) AS at FROM attempts").toArray()[0]?.at ?? null;
-    if (oldest === null) return;
-    const at = oldest + ATTEMPT_RETENTION_MS + 1000;
-    this.sql.exec("INSERT INTO meta (key, value) VALUES ('attempts_alarm_at', ?)", String(at));
-    void this.ctx.storage.setAlarm(at);
+    const attempt = oldest === null ? null : oldest + ATTEMPT_RETENTION_MS + 1000;
+    const battle = this.battles.store.earliest();
+    const at = attempt === null ? battle : battle === null ? attempt : Math.min(attempt, battle);
+    const stored = this.sql.exec<{ value: string }>("SELECT value FROM meta WHERE key='attempts_alarm_at'").toArray()[0]?.value;
+    if (at === null) {
+      if (stored !== undefined) { this.sql.exec("DELETE FROM meta WHERE key='attempts_alarm_at'"); void this.ctx.storage.deleteAlarm(); }
+    } else if (stored !== String(at)) {
+      this.sql.exec("INSERT INTO meta(key,value) VALUES('attempts_alarm_at',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", String(at));
+      void this.ctx.storage.setAlarm(at);
+    }
   }
 }

@@ -1,3 +1,4 @@
+import { parseBattleInput, type BattleAction } from "./battle-input";
 import { accessKeyHash } from "./access";
 import type { Result } from "./contract";
 import {
@@ -267,6 +268,26 @@ const routes: Record<string, Partial<Record<string, Handler>>> = {
 const LOGGED_METHODS = new Set(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]);
 
 async function route(request: Request, env: Env, path: string): Promise<Response> {
+  const battleMatch = /^\/v1\/battles(?:\/(bt_[A-Za-z0-9_-]+)(?:\/(update|accept|confirm|decline|cancel|ready|start|choices|advance|report|rematch))?)?$/.exec(path);
+  if (battleMatch) {
+    const [, id, action] = battleMatch;
+    const allowed = action ? ["POST"] : id ? ["GET"] : ["GET", "POST"];
+    if (!allowed.includes(request.method)) return errorResponse("method_not_allowed", { allow: allowed.join(", ") });
+    try {
+      const keyHash = await accessKeyHash(request);
+      const league = env.LEAGUE.get(env.LEAGUE.idFromName("league"));
+      const selected = request.method === "GET" ? id ? "get" : "list" : (action ?? "create") as BattleAction;
+      const query = new URL(request.url).searchParams;
+      if ([...query.keys()].some(k => k !== "before") || query.getAll("before").length > 1 || query.has("before") && selected !== "list") throw new ApiError("bad_request");
+      const cursor = query.get("before");
+      if (cursor !== null && (!/^[1-9][0-9]*$/.test(cursor) || !Number.isSafeInteger(Number(cursor)))) throw new ApiError("bad_request");
+      const body = selected === "get" || selected === "list" ? {} : parseBattleInput(selected, await readJsonObject(request));
+      return json(200, unwrap(await league.battle({ keyHash, id: id ?? null, action: selected, body, before: cursor === null ? undefined : Number(cursor) })));
+    } catch (error) {
+      if (error instanceof ApiError) return errorResponse(error.code, {}, error.retryAfter);
+      return errorResponse("internal");
+    }
+  }
   const methods = Object.hasOwn(routes, path) ? routes[path] : undefined;
   if (!methods) return errorResponse("not_found");
   const handler = methods[request.method];

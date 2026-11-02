@@ -20,6 +20,7 @@ export interface Attachment {
   trainerId: string;
   groupId: string;
   connectedAt: number;
+  connectionId: string;
   /** Set once the socket has left presence (closed by the server or by the client). */
   closed?: true;
 }
@@ -64,10 +65,23 @@ export class Realtime {
     const wasOnline = this.isOnline(trainerId);
     const older = this.liveSockets(trainerTag(trainerId));
     this.ctx.acceptWebSocket(server, [trainerTag(trainerId), groupTag(groupId)]);
-    server.serializeAttachment({ trainerId, groupId, connectedAt: now } satisfies Attachment);
+    const connectionId = crypto.randomUUID();
+    server.serializeAttachment({ trainerId, groupId, connectedAt: now, connectionId } satisfies Attachment);
     this.close(older, "replaced");
     if (!wasOnline) this.sendToGroup(groupId, { type: "presence", trainerId, online: true }, trainerId);
-    server.send(JSON.stringify({ v: 1, type: "hello", trainerId, groupId, online: this.onlineIn(groupId) }));
+    server.send(JSON.stringify({ v: 1, type: "hello", trainerId, groupId, connectionId, online: this.onlineIn(groupId) }));
+  }
+
+  connectionId(trainerId: string): string | null {
+    const ws = this.liveSockets(trainerTag(trainerId))[0];
+    return ws ? attachmentOf(ws)?.connectionId ?? null : null;
+  }
+
+  sendToTrainers(trainerIds: string[], message: Record<string, unknown>): void {
+    const text = JSON.stringify({ v: 1, ...message });
+    for (const id of trainerIds) for (const ws of this.liveSockets(trainerTag(id))) {
+      try { ws.send(text); } catch { /* A concurrent close is recoverable through GET. */ }
+    }
   }
 
   isOnline(trainerId: string): boolean {
@@ -136,7 +150,7 @@ export class Realtime {
   }
 
   /** Only to live sockets of this group, never to `exceptTrainerId`. */
-  private sendToGroup(groupId: string, message: Record<string, unknown>, exceptTrainerId?: string): void {
+  sendToGroup(groupId: string, message: Record<string, unknown>, exceptTrainerId?: string): void {
     const text = JSON.stringify({ v: 1, ...message });
     for (const ws of this.liveSockets(groupTag(groupId))) {
       if (attachmentOf(ws)!.trainerId === exceptTrainerId) continue;
