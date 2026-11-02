@@ -1,3 +1,4 @@
+import { BattleResults } from "./battle-results";
 import { battleView } from "./battle-view";
 import { BattleRelay } from "./battle-relay";
 import { permitsRoomAction } from "./battle-policy";
@@ -11,7 +12,8 @@ export function battleChanged(b: Battle): BattleEffect { return { recipients: [b
 export class Battles {
   readonly store: BattleStore;
   private readonly relay: BattleRelay;
-  constructor(sql: SqlStorage, private readonly access: GroupAccess, private readonly realtime: Realtime) { this.store = new BattleStore(sql); this.relay = new BattleRelay(this.store); }
+  private readonly results: BattleResults;
+  constructor(sql: SqlStorage, private readonly access: GroupAccess, private readonly realtime: Realtime) { this.store = new BattleStore(sql); this.relay = new BattleRelay(this.store); this.results = new BattleResults(this.store); }
   dispatch(actor: Actor, id: string | null, action: BattleAction | "get" | "list", input: BattleInput, now: number, after: BattleEffect[], before = Number.MAX_SAFE_INTEGER): Result<unknown> {
     if (action === "list") {
       const rows = this.store.list(actor.trainer.id, before), page = rows.slice(0, 100);
@@ -22,6 +24,14 @@ export class Battles {
     if (!b || b.groupId !== actor.groupId || (b.p1 !== actor.trainer.id && b.p2 !== actor.trainer.id)) return fail("not_found");
     if (action === "get") return ok(battleView(this.store, b, actor.trainer.id));
     const side: Side = b.p1 === actor.trainer.id ? "p1" : "p2";
+    if (action === "report") {
+      const result = this.results.report(b, side, input.report!, now, after);
+      return result.ok ? ok(battleView(this.store, b, actor.trainer.id)) : result;
+    }
+    if (action === "rematch") {
+      if (b.state !== "COMPLETED") return fail("invalid_state");
+      return this.create(actor, { ...input, targetTrainerId: side === "p1" ? b.p2 : b.p1, mode: b.mode }, now, after, b.battleId);
+    }
     // Successful update/accept retry uses its ORIGINAL revision, before stale checks.
     if ((action === "update" || action === "accept") && this.store.receipt(b, actor.trainer.id, action, input.revision!, input)) return ok(battleView(this.store, b, actor.trainer.id));
     if (input.revision !== undefined && input.revision !== b.revision) return fail("stale_revision");
@@ -65,13 +75,13 @@ export class Battles {
     if (changed) { this.store.put(b); after.push(battleChanged(b)); }
     return ok(battleView(this.store, b, actor.trainer.id));
   }
-  private create(actor: Actor, input: BattleInput, now: number, after: BattleEffect[]): Result<unknown> {
-    const payload = canonical(input);
+  private create(actor: Actor, input: BattleInput, now: number, after: BattleEffect[], rematchOf: string | null = null): Result<unknown> {
+    const payload = canonical({ ...input, rematchOf });
     const previous = this.store.sql.exec<{ payload: string; battle_id: string }>("SELECT payload,battle_id FROM battle_requests WHERE trainer_id=? AND request_id=?", actor.trainer.id, input.requestId!).toArray()[0];
     if (previous) return previous.payload === payload ? ok(battleView(this.store, this.store.get(previous.battle_id)!, actor.trainer.id)) : fail("idempotency_conflict");
     const target = this.access.target(actor, input.targetTrainerId!, { activeOnly: true }); if (!target.ok) return target;
     if (this.store.busy(actor.trainer.id, input.snapshot!.instanceId)) return fail("instance_busy");
-    const b: Battle = { battleId: `bt_${crypto.randomUUID().replaceAll("-", "")}`, groupId: actor.groupId, p1: actor.trainer.id, p2: target.value.id, state: "PENDING", revision: 1, mode: input.mode!, createdAt: now, expiresAt: now + CHALLENGE_MS, startedAt: null, reportedAt: null, confirmed: false, snapshots: { p1: input.snapshot!, p2: null }, ready: {}, starts: {}, config: null, roundSeq: 0, result: null, reason: null, rematchOf: null };
+    const b: Battle = { battleId: `bt_${crypto.randomUUID().replaceAll("-", "")}`, groupId: actor.groupId, p1: actor.trainer.id, p2: target.value.id, state: "PENDING", revision: 1, mode: input.mode!, createdAt: now, expiresAt: now + CHALLENGE_MS, startedAt: null, reportedAt: null, confirmed: false, snapshots: { p1: input.snapshot!, p2: null }, ready: {}, starts: {}, config: null, roundSeq: 0, result: null, reason: null, rematchOf };
     this.store.put(b);
     this.store.sql.exec("INSERT INTO battle_requests(trainer_id,request_id,payload,battle_id) VALUES(?,?,?,?)", actor.trainer.id, input.requestId!, payload, b.battleId);
     after.push(battleChanged(b)); return ok(battleView(this.store, b, actor.trainer.id));
