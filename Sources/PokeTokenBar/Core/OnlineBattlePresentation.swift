@@ -28,6 +28,10 @@ final class OnlineBattlePresentation {
     /// Only the resolver's view, whose opponent moves/ability are already revealed.
     var arena: BattleView?
     var request: BattleRequest?
+    /// Exact original slugs for IDs already exposed by resolver.view (and my own request).
+    /// These maps must never enumerate the opponent's undisclosed set.
+    var moveSlugs: [OnlineBattleSide: [String: String]] = [:]
+    var abilitySlugs: [OnlineBattleSide: [String: String]] = [:]
     var deadline: Date?
     var choiceSubmitted = false
     /// Transient onboarding output only; never an access key or persisted UI state.

@@ -13,7 +13,7 @@ final class OnlineBattleScreenRenderingTests: XCTestCase {
         .init(schemaVersion: 1, instanceID: id, engineHash: "synthetic", rulesVersion: BattleSnapshot.rules,
               policyVersion: BattleSnapshot.policy,
               set: .init(speciesNum: 25, form: nil, level: 50, gender: .male, nature: "Hardy", ability: "static",
-                         moves: ["thunderbolt"], ivs: [:], shiny: false),
+                         moves: ["thunderbolt", "quick-attack"], ivs: [:], shiny: false),
               publicInfo: .init(speciesNum: 25, species: "피카츄", level: 50, types: ["Electric"],
                                 stats: ["hp": 110, "atk": 75, "def": 60, "spa": 70, "spd": 70, "spe": 110]))
     }
@@ -43,9 +43,11 @@ final class OnlineBattleScreenRenderingTests: XCTestCase {
     static func arena(_ model: OnlineBattlePresentation) {
         model.phase = .arena; model.room = room()
         model.deadline = Date().addingTimeInterval(30)
+        model.moveSlugs = [.p1: ["thunderbolt": "thunderbolt", "quickattack": "quick-attack"], .p2: ["splash": "splash"]]
+        model.abilitySlugs = [.p1: ["static": "static"]]
         model.arena = .init(turn: 3, ended: false,
                             p1: .init(speciesNum: 25, species: "피카츄", level: 50, types: ["Electric"], hp: 88, maxhp: 110,
-                                      status: "", moves: ["thunderbolt"], ability: "static"),
+                                      status: "", moves: ["thunderbolt", "quickattack"], ability: "static"),
                             p2: .init(speciesNum: 129, species: "잉어킹", level: 50, types: ["Water"], hp: 42, maxhp: 100,
                                       status: "", moves: ["splash"], ability: nil))
         model.request = .init(kind: "move", moves: [
@@ -92,6 +94,19 @@ final class OnlineBattleScreenRenderingTests: XCTestCase {
                              hpApplied: true, isVoid: false)
         let result = try await capture(host, named: "online-synthetic-result.png")
         XCTAssertNotEqual(setup, lobby); XCTAssertNotEqual(lobby, arena); XCTAssertNotEqual(arena, result)
+    }
+    func testPublicRoomVerificationAndVoidStagesRender() async throws {
+        let model = Self.model(); model.phase = .room
+        model.room = Self.room(state: .accepted, confirmed: false)
+        let host = host(model)
+        let room = try await capture(host, named: "online-synthetic-room.png")
+        model.phase = .verifying
+        let verifying = try await capture(host, named: "online-synthetic-verifying.png")
+        model.phase = .result
+        model.result = .init(title: "경기 무효", detail: "양쪽 결과를 확인할 수 없어 무효로 끝났어요.", xpAwarded: 0,
+                             hpApplied: false, isVoid: true)
+        let void = try await capture(host, named: "online-synthetic-void.png")
+        XCTAssertNotEqual(room, verifying); XCTAssertNotEqual(verifying, void)
     }
     func testArenaClockKeepsServerDeadlineWhenViewIsAbsent() {
         let deadline = Date(timeIntervalSince1970: 100)

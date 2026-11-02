@@ -33,8 +33,10 @@ struct OnlineBattleLobby: View {
                 Picker(l.onlineMode, selection: Binding(get: { model.mode }, set: { model.send(.setMode($0)) })) {
                     Text(l.onlineManual).tag(OnlineBattleMode.manual)
                     Text(l.onlineAuto).tag(OnlineBattleMode.auto)
-                }.pickerStyle(.segmented)
+                }.pickerStyle(.segmented).disabled(model.isBusy)
                 Text(l.onlineTurnHint).font(.caption2).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(l.onlineStakesHint).font(.caption2).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 Button(l.onlineChallenge) { model.send(.challenge) }
                     .buttonStyle(.borderedProminent).disabled(!model.canChallenge)
@@ -46,7 +48,10 @@ struct OnlineBattleLobby: View {
                 ForEach(model.battles, id: \.battleId) { battle in
                     Button { model.send(.openBattle(battle.battleId)) } label: {
                         HStack {
-                            Text(l.onlineState(battle.state)).font(.callout)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(opponentName(battle)).font(.callout).lineLimit(1).truncationMode(.middle)
+                                Text(l.onlineState(battle.state)).font(.caption2).foregroundStyle(.secondary)
+                            }
                             Spacer(minLength: 4)
                             Image(systemName: "chevron.right").font(.caption)
                         }.contentShape(Rectangle())
@@ -55,6 +60,11 @@ struct OnlineBattleLobby: View {
             }.practiceCard()
         }
     }
+    private func opponentName(_ battle: OnlineBattleView) -> String {
+        let id = battle.p1.trainerId == model.account?.trainer.trainerId ? battle.p2.trainerId : battle.p1.trainerId
+        return model.members.first { $0.trainerId == id }?.displayEmail ?? l.onlineAnonymous
+    }
+
 }
 
 @MainActor
@@ -119,6 +129,8 @@ struct OnlineBattleRoom: View {
                 Text(l.onlineNoLevelLimit).font(.caption).foregroundStyle(.secondary)
                 Text(l.onlineHidden).font(.caption2).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+                Text(l.onlineStakesHint).font(.caption2).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
                 if room.state == .pending && model.localSide == .p2 {
                     HStack {
                         Button(l.onlineAccept) { model.send(.accept) }.buttonStyle(.borderedProminent).disabled(!model.canAccept)
@@ -151,7 +163,7 @@ struct OnlineBattleRoom: View {
                 PracticeHPBar(hp: Int(percent.rounded()), maxHP: 100)
                 // Only the server's public shape is consumed here. Never snapshot.set or config.
                 Text(["hp", "atk", "def", "spa", "spd", "spe"].compactMap { key in
-                    info.stats[key].map { "\(key.uppercased()) \($0)" }
+                    info.stats[key].map { "\(l.practiceStatName(key)) \($0)" }
                 }.joined(separator: " · "))
                 .font(.system(size: 10)).monospacedDigit().fixedSize(horizontal: false, vertical: true)
             }.practiceCard()

@@ -105,3 +105,50 @@ extension OnlineBattlePresentationTests {
         XCTAssertTrue(model.choiceSubmitted)
     }
 }
+
+
+extension OnlineBattlePresentationTests {
+    func testConsentActionsFollowParticipantAndRevisionStateWithoutReusingSelection() {
+        let model = OnlineBattleScreenRenderingTests.model(); model.phase = .room
+        var events: [String] = []
+        model.onAction = { action in
+            switch action {
+            case .accept: events.append("accept")
+            case .confirm: events.append("confirm")
+            case .prepareBattle: events.append("prepare")
+            case .decline: events.append("decline")
+            case .cancel: events.append("cancel")
+            default: XCTFail("Unexpected action")
+            }
+        }
+        model.room = OnlineBattleScreenRenderingTests.room(state: .pending, confirmed: false)
+        model.localSide = .p1; model.send(.accept); model.send(.decline)
+        model.localSide = .p2; model.entryHP["synthetic-pikachu"] = 0; model.send(.accept)
+        model.entryHP["synthetic-pikachu"] = 88; model.send(.accept); model.send(.decline)
+        model.room = OnlineBattleScreenRenderingTests.room(state: .accepted, confirmed: false)
+        model.send(.confirm)
+        model.localSide = .p1; model.send(.confirm)
+        model.room = OnlineBattleScreenRenderingTests.room(state: .accepted)
+        model.send(.confirm); model.send(.prepareBattle)
+        model.canStart = true; model.send(.prepareBattle); model.send(.cancel)
+        model.room = OnlineBattleScreenRenderingTests.room(state: .running); model.send(.cancel)
+        XCTAssertEqual(events, ["accept", "decline", "confirm", "prepare", "cancel"])
+    }
+    func testSelectionsRejectUnknownAndReservedIDsAndVisibilityAlwaysReachesSession() {
+        let model = OnlineBattleScreenRenderingTests.model()
+        var visible = false
+        model.onAction = { if case .setPopoverVisible(let value) = $0 { visible = value } }
+        model.selectedEntryID = nil
+        model.send(.selectEntry("unknown"))
+        XCTAssertNil(model.selectedEntryID)
+        model.blockedEntryIDs = ["synthetic-pikachu"]
+        model.send(.selectEntry("synthetic-pikachu")); XCTAssertNil(model.selectedEntryID)
+        model.blockedEntryIDs = []; model.send(.selectEntry("synthetic-pikachu"))
+        XCTAssertEqual(model.selectedEntryID, "synthetic-pikachu")
+        model.selectedOpponentID = nil; model.send(.selectOpponent("synthetic-me"))
+        XCTAssertNil(model.selectedOpponentID)
+        model.send(.selectOpponent("synthetic-foe")); XCTAssertEqual(model.selectedOpponentID, "synthetic-foe")
+        model.send(.setMode(.auto)); XCTAssertEqual(model.mode, .auto)
+        model.isBusy = true; model.send(.setPopoverVisible(true)); XCTAssertTrue(visible)
+    }
+}

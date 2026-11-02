@@ -30,7 +30,7 @@ struct OnlineBattleArena: View {
                 } else if model.request?.kind == "move" {
                     LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
                         ForEach(model.request?.moves ?? []) { move in
-                            PracticeMoveCard(move: move, key: move.slot, snapshot: model.selectedEntry?.snapshot,
+                            PracticeMoveCard(move: namedMove(move), key: move.slot, snapshot: nil,
                                              l: l, artwork: artwork, locked: !model.canChooseMove(move.slot)) {
                                 model.send(.chooseMove(move.slot))
                             }
@@ -52,6 +52,16 @@ struct OnlineBattleArena: View {
     static func remainingSeconds(deadline: Date?, now: Date) -> Int {
         guard let deadline else { return 0 }
         return max(0, Int(ceil(deadline.timeIntervalSince(now))))
+    }
+
+    private func metadataSlug(_ kind: PokemonNameResource.Kind, _ id: String, own: Bool) -> String {
+        let side: OnlineBattleSide = own ? model.localSide : (model.localSide == .p1 ? .p2 : .p1)
+        return (kind == .move ? model.moveSlugs[side]?[id] : model.abilitySlugs[side]?[id]) ?? id
+    }
+
+    private func namedMove(_ move: BattleMove) -> BattleMove {
+        .init(slot: move.slot, id: metadataSlug(.move, move.id, own: true), name: move.name, type: move.type,
+              pp: move.pp, maxpp: move.maxpp, disabled: move.disabled)
     }
 
     private func sideCard(_ side: BattleView.Pokemon, own: Bool) -> some View {
@@ -79,10 +89,26 @@ struct OnlineBattleArena: View {
             // The resolver view is the sole source of revealed metadata. Never read frozen opponent config.
             HStack(alignment: .top, spacing: 4) {
                 Text(l.practiceAbility).foregroundStyle(.secondary)
-                Text(side.ability ?? "?").lineLimit(2)
+                if let ability = side.ability {
+                    PracticeMetadataName(kind: .ability, id: metadataSlug(.ability, ability, own: own), snapshot: nil,
+                                         l: l, artwork: artwork)
+                } else { Text("?") }
             }.font(.caption2)
-            Text(side.moves.isEmpty ? "? · ? · ? · ?" : side.moves.joined(separator: " · "))
-                .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            WrappingHStack(spacing: 4, lineSpacing: 4) {
+                ForEach(Array(side.moves.prefix(4)), id: \.self) { move in
+                    PracticeChip {
+                        if move == "recharge" { Text(l.practiceRecharge) }
+                        else if move == "struggle" { Text(l.practiceStruggle) }
+                        else {
+                            PracticeMetadataName(kind: .move, id: metadataSlug(.move, move, own: own), snapshot: nil,
+                                                 l: l, artwork: artwork)
+                        }
+                    }
+                }
+                ForEach(0..<max(0, own ? 0 : 4 - side.moves.count), id: \.self) { _ in
+                    PracticeChip(dimmed: true) { Text("?") }
+                }
+            }
         }.practiceCard(padding: 8)
     }
 }

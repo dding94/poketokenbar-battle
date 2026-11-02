@@ -54,7 +54,8 @@ extension L {
     var onlineHPApplied: String { online("체력 반영 완료", "HP saved") }
     var onlineNoEffects: String { online("체력과 경험치 변화 없음", "No HP or XP changes") }
     var onlineDone: String { online("그룹으로 돌아가기", "Back to group") }
-    var onlineCaption: String { online("포켓몬을 빼앗지 않는 정식전", "Official battles never transfer Pokémon") }
+    var onlineCaption: String { online("온라인 정식전", "Official online battle") }
+    var onlineStakesHint: String { online("승리하면 현재 키우는 포켓몬이 경험치 1천만을 받아요(온라인 하루 10회). 패배하면 출전 포켓몬이 기절해요.", "A win grants your current companion 10 million XP (10 online wins per day). A loss faints your battle entry.") }
     func onlineTurn(_ turn: Int, seconds: Int) -> String { online("\(turn)턴 · \(seconds)초", "Turn \(turn) · \(seconds)s") }
     func onlineXP(_ value: Int64) -> String { online("경험치 +\(value.formatted())", "XP +\(value.formatted())") }
     func onlineHP(_ value: Int) -> String { "HP \(value)%" }
