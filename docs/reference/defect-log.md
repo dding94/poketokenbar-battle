@@ -1278,6 +1278,21 @@ read_when:
 
 ## 상태 파일 이전·병합
 
+- **경기 원장을 합칠 때 이미 완료한 경기의 옛 출전 보류도 정리한다(PR 07).** 과거 내보내기의 hold를
+  그대로 가져오면 현재 receipt와 병합한 뒤 중복 결과가 올바르게 무효과로 끝나더라도 hold가 영원히
+  남는다. 초기 가져오기 테스트에는 진행 중 hold가 없어서 이 조합을 놓쳤다. applySave와 이를
+  사용하는 restoreSnapshot, 중복 결과/출전 보류 획득 경로를 함께 확인했다.
+  `testImportDoesNotResurrectACompletedBattleHold`는 hold 내보내기→결과 적용→옛 파일 가져오기→중복
+  결과 순서로 재현한다. completed-key hold 정리를 제거한 변형은 1건 실행·단언 실패 1·종료 1,
+  원복 후 관련 전체 79건 통과·실패/skip 0이다. receipt 합집합과 hold 정리를 같은 후보 상태에 반영한다.
+- **없는 파일과 읽지 못한 파일을 같은 새 설치로 취급하지 않는다(PR 07).** `try? Data(contentsOf:)`의
+  실패를 모두 빈 상태로 처리하면 권한 오류 등으로 읽지 못한 기존 원장이 신뢰 가능한 빈 원장으로
+  바뀔 수 있다. 초기 손상 테스트는 읽기 성공 후 decode 실패만 만들었다. 실제 Data 읽기가 실패하는
+  임시 디렉터리 경로로 `testPresentUnreadableStateIsNotAFreshTrustedLedger`를 구성해 지급 writer가 호출되지 않음을 검증했다.
+  missing/`.corrupt`/정상 snapshot/read failure를 스윕했고, NSError의 실제 no-such-file만 새 설치로
+  인정한다(`fileExists`도 권한 오류에서 false일 수 있다). 실패 상태 신뢰 가드를 제거한 변형은
+  1건 실행·단언 실패 3·종료 1, 원복 후 위 79건 통과다. 실제 사용자 파일은 사용하지 않았다.
+
 - **상태 파일을 옮기거나 합칠 땐 "진행"과 "이 기기 장부"를 먼저 분류하라.** 같은 파일에 살아도 성격이
   다르다 — `usedSinceInstall`·`dex`·`inventory`·`candyGrantTier` 는 어느 기기에서든 참인 **진행**이고,
   `claimedTodayTokens`·`lastDate`·`installBaselineSet` 은 *그 기기가* 어디까지 적립했나를 적은 **로컬
@@ -1361,6 +1376,18 @@ read_when:
   종료 대상 프로세스 PID를 전달하고 `kill -0 "$3"`로 특정 프로세스의 종료를 대기한다.
 
 ## 서버 입력·비밀값 (PR 04)
+
+- **온라인 수신 목록은 연결 부록뿐 아니라 배틀 알림도 대조한다(PR 07).** 초기 클라이언트 초안은
+  `battle_void`를 정상 메시지 목록에서 빠뜨려 결과 불일치 알림에 연결을 영구 중단했다. PR 05의
+  연결 종류만 옮기고 PR 06의 실제 송신 지점을 대조하는 테스트가 없었던 것이 원인이다.
+  서버의 모든 WS 송신 type과 client dispatch를 함께 스윕하고 실제 형태의 VOID 알림 회귀를 먼저
+  실패시킨 뒤 HTTP 재조회로 연결했다. 알림만으로 경기 효과를 적용하지 않는다.
+- **WS 업그레이드의 인증 실패를 비정상 close 코드보다 먼저 분류한다(PR 07).** URLSession 실패에는
+  HTTP 401과 close 상태가 함께 있을 수 있다. closeCode를 먼저 보면 폐기된 키를 일시 단절로
+  취급해 반복 재연결한다. 기존 대역은 401만 단독 전달해 조합을 놓쳤다. 분류 함수를 추출해
+  HTTP 401 + abnormal close 조합을 RED로 만든 뒤 401을 우선하도록 수정했다. HTTP 인증 실패와
+  수신 4003/4001/4400, 지연된 옛 연결 응답을 함께 대조했다. 최종 통신 50건 통과·실패/skip 0,
+  실제 URLSession/Keychain 경로는 이 단위 테스트 증거에 포함하지 않는다.
 
 - **사람이 보는 표시 문자열은 NFKC로 정규화한 뒤 "보이지 않는 글자" 부류를 통째로 거절한다.** PR 04 첫 구현은
   `[\s\p{Cc}]`만 막아 폭 없는 공백(U+200B)·방향 바꿈(U+202E)을 넣은 `victim<ZWSP>@x`가 `victim@x` 옆에

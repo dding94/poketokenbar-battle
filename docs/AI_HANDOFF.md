@@ -12,6 +12,10 @@
 - RED 증거: 별도 통신 worktree에서 `swift test --disable-sandbox --jobs 2 --filter OnlineBattleTransportTests` 종료 **1**, 2건 실행·단언 실패 6·skip 0(주소 정규화/금지 입력), 컴파일 성공. 효과 worktree의 `--filter OnlineBattleEffectsTests` 종료 **1**, 9건 실행·단언 실패 34·unexpected/skip 0, RED 커밋 `ed2340e`(미통합). 두 실행 모두 임시 PTB_STATE_DIR·CLANG_MODULE_CACHE_PATH와 명령별 DEVELOPER_DIR를 사용했다. 최초 모듈 캐시 권한 실패(테스트 0건)는 RED 증거가 아니다.
 - CI 준비 `c0c0d40`: OnlineBattle 파일의 커버리지/결정성 경계, resolver 필터, 양쪽 shard 화면 이미지 보존, workflow 변경 시 server 검사, server timeout 2분(기존 37초)을 반영했다. `bash -n`·Ruby YAML 파싱·`git diff --check` 모두 종료 0. 새 resolver 테스트 파일은 아직 별도 worktree에서 구현 중이며 원격 CI는 실행 전이다.
 - 효과 GREEN 후보 `7a73af2`(worktree 원본 `80a8f23`)는 58건 통과·실패/skip 0: 위 환경에서 `swift test --disable-sandbox --jobs 2 --filter 'OnlineBattleEffectsTests|SaveTransferTests|PracticeStakesStoreTests'`. 독립 리뷰 전 후보이며, 추가 회귀·결함 주입·통합 검증이 남아 있다. 통신·resolver·UI·세션은 아직 전체 통합하지 않았다.
+- Core 독립 리뷰 완료 뒤 `5f44280`까지 통합했다(리뷰 고정 worktree `5c502f9`와 동일 Core). 확인된 수정 지적 0; 새 테스트 실행 없이 코드·기존 테스트·실제 서버 계약을 검토한 증거다. UI/Session 통합은 별도로 진행 중이다.
+- 최종 개별 Core 검증: 같은 격리 환경에서 `swift test --disable-sandbox --jobs 2 --enable-code-coverage --filter OnlineBattle`(통신 worktree) **50건**, `--filter 'OnlineBattleEffectsTests|SaveTransferTests|PracticeStakesStoreTests|SaveSnapshot'`(효과 worktree) **79건**, `--filter OnlineBattleResolverTests`(재생 worktree) **9건**, 모두 종료 0·실패/skip 0. 겹치는 관련 테스트가 있으므로 단순 합계를 통합 실행 수로 보고하지 않는다. 최종 refactor 전 세 모듈 조합의 `--filter OnlineBattle`도 **63건·실패/skip 0·종료 0**이었다.
+- 결함 주입: 효과 9개(각 1건 테스트), resolver 9개, 통신 generation/gate 3개 모두 실제 실패 후 원복했다. llvm-cov 영역 확인: 효과 새 파일 49/49, resolver 90.91%, 통신 전체 87.39%. 네이티브 URLSession/SecItem·엔진 비정상 상태/재시도 완전 소진·일부 콜백 교차는 단위 테스트 미검증이다. 별도 로컬 Worker+실제 URLSession 보조 검증을 준비 중이며 두 맥 증거와 구분한다.
+- 절차상 한계: 통신 HTTP/WS/키 저장은 초안을 먼저 작성한 뒤 실행 가능한 stub과 행동 테스트로 RED를 만들었다. 최초부터 테스트 우선이었다고 기록하지 않는다. 최초 확장 RED에는 unexpected throw가 있어 다시 단언만 발생하도록 고쳤고, 유효 RED는 **35건·단언 실패 36·unexpected/skip 0·종료 1**이다. 화면 레이아웃 초안도 렌더 테스트보다 먼저 작성됐으며, presentation 행동 RED와 화면 이미지 검증을 구분한다. 나머지 Session 새 행동은 단계별 RED를 먼저 확인 중이다.
 
 ### PR 05 개발 환경 실측 (2026-11-02)
 
