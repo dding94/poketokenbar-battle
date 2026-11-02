@@ -25,6 +25,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private var floatingPet: FloatingPetController!
     private let navigation = PopoverNavigation()
     private var practice: PracticeSession!
+    private var onlineAccessObservation: OnlineBattleAccessObservation?
     private var online: OnlineBattleSession?
     private var onlinePresentation = OnlineBattlePresentation()
     var onOpenPractice: (() -> Void)?
@@ -272,16 +273,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     }
 
     private func observeOnlineAccess() {
-        withObservationTracking {
-            _ = store.disableKeychainAccess
-        } onChange: { [weak self] in
-            Task { @MainActor in
-                guard let self else { return }
-                // The session's fresh accessAllowed check also blocks responses before this callback runs.
-                await self.online?.setEnabled(!self.store.disableKeychainAccess)
-                self.observeOnlineAccess()
-            }
-        }
+        onlineAccessObservation = OnlineBattleAccessObservation(
+            read: { [weak self] in self?.store.disableKeychainAccess == false },
+            changed: { [weak self] allowed in await self?.online?.setEnabled(allowed) })
+        onlineAccessObservation?.start()
     }
 
     /// 현재 포켓몬의 기절 관찰(PR 03C) — 배틀 결과·회복약·대표 변경으로 바뀌면 표식·툴팁·흐림을 다시 반영한다.

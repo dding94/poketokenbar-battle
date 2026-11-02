@@ -73,7 +73,7 @@ final class OnlineBattleSession {
         generation &+= 1
         refreshTask?.cancel(); refreshTask = nil; refreshAgain = false
         ticker?.cancel(); ticker = nil
-        let old = connection; connection = nil
+        let old = connection, oldAPI = api; connection = nil
         authenticated = false; reconciled = false; bootstrapped = false; actionInFlight = false
         pendingGrant = nil; challengeIntent = nil; prepared = [:]; acknowledgedStarts = []; submittedReports = []
         for resolver in resolvers.values { resolver.close() }; resolvers = [:]; views = [:]
@@ -83,8 +83,8 @@ final class OnlineBattleSession {
         presentation.recoveryCode = nil; presentation.result = nil; presentation.canRetryCredentialSave = false
         presentation.canStart = false; presentation.isBusy = false; presentation.phase = .setup
         presentation.connectionStatus = "키체인 접근이 꺼져 있어 온라인 배틀을 중단했어요"
+        await oldAPI?.setAccessKey(nil)
         await old?.stop()
-        await api?.setAccessKey(nil)
     }
     /// Notification delivery never waits for a whole battle. Changes during a read retain one follow-up read.
     func requestRefresh() {
@@ -198,7 +198,7 @@ final class OnlineBattleSession {
             presentation.result = nil; presentation.recoveryCode = nil; presentation.canStart = false
             presentation.phase = .setup
             pendingGrant = grant; presentation.canRetryCredentialSave = true
-            await api.setAccessKey(nil); try current(epoch)
+            await api.setAccessKey(nil)
             await old?.stop(); try current(epoch)
             await retryCredentialSave()
         } catch { await handle(error, epoch: epoch) }
@@ -601,8 +601,8 @@ final class OnlineBattleAccessObservation {
         withObservationTracking { _ = read() } onChange: { [weak self] in
             Task { @MainActor in
                 guard let self else { return }
-                await self.changed(self.read())
                 self.start()
+                await self.changed(self.read())
             }
         }
     }
