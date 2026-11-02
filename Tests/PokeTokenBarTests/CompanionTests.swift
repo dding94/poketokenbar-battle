@@ -290,25 +290,52 @@ final class CompanionStoreTests: XCTestCase {
         XCTAssertEqual(s.state.inventory["rareCandy"], 2, "도감 손상이 다른 상태(인벤토리)를 날리지 않음")
     }
 
-    /// [회귀] 전면 손상 상태 파일은 fresh 로 시작하되, 다음 save() 가 덮어써 영구 유실되기 전에
-    /// 원본을 `.corrupt` 로 백업해 수동 복구 여지를 남긴다.
+    /// [회귀] 손상 원본은 보존하고, 원장 신뢰를 잃은 초기 상태는 즉시 저장해 재시작해도 효과를 차단한다.
     func testCorruptStateFileBackedUpBeforeReset() throws {
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("poke-corrupt-\(UUID().uuidString).json")
-        let garbage = "this is not valid json {{{ 손상"
-        try Data(garbage.utf8).write(to: url)
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("poke-corrupt-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let url = folder.appendingPathComponent("state.json")
+        let suite = "CorruptStateTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defaults.set(1.0, forKey: "growthDifficulty")
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let garbage = Data("this is not valid json {{{ 손상".utf8)
+        try garbage.write(to: url)
 
         let s = CompanionStore(provider: StubProvider(value: linear3), clock: { fixedNow },
-                               fileURL: url, rng: SeededRNG(seed: 7))
+                               fileURL: url, rng: SeededRNG(seed: 7), defaults: defaults)
 
         XCTAssertTrue(s.state.dex.isEmpty)
         XCTAssertNil(s.state.active)
         XCTAssertEqual(s.state.usedSinceInstall, 0, "fresh state 로 시작")
+        XCTAssertFalse(s.state.onlineLedgerTrusted)
 
         let backup = url.appendingPathExtension("corrupt")
-        XCTAssertTrue(FileManager.default.fileExists(atPath: backup.path), "손상 원본이 .corrupt 로 백업돼야 한다")
-        XCTAssertEqual(try String(contentsOf: backup, encoding: .utf8), garbage, "백업 내용 = 원본 그대로")
-        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path), "원본은 이동돼 사라짐")
-        try? FileManager.default.removeItem(at: backup)
+        XCTAssertEqual(try Data(contentsOf: backup), garbage, "백업 내용 = 원본 그대로")
+        let persistedData = try Data(contentsOf: url)
+        let persisted = try JSONDecoder().decode(CompanionState.self, from: persistedData)
+        XCTAssertTrue(persisted.dex.isEmpty)
+        XCTAssertNil(persisted.active)
+        XCTAssertEqual(persisted.usedSinceInstall, 0)
+        XCTAssertFalse(persisted.onlineLedgerTrusted, "후속 save 없이 원장 신뢰 상실을 즉시 저장")
+        XCTAssertTrue(persisted.onlineBattleReceipts.isEmpty)
+        XCTAssertTrue(persisted.onlineBattleHolds.isEmpty)
+        XCTAssertTrue(persisted.battleHealth.isEmpty)
+
+        let reopened = CompanionStore(provider: StubProvider(value: linear3), clock: { fixedNow },
+                                      fileURL: url, rng: SeededRNG(seed: 7), defaults: defaults)
+        XCTAssertFalse(reopened.state.onlineLedgerTrusted, "재시작으로 원장 신뢰를 복구하지 않음")
+        let effect = try VerifiedOnlineBattleEffect(
+            key: .init(scope: .init(originHash: "origin", groupID: "group", trainerID: "trainer"), battleID: "battle"),
+            resultHash: "hash", localInstanceID: "entrant", remainingHPShare: 0.4, outcome: .win)
+        XCTAssertThrowsError(try reopened.applyVerifiedOnlineBattleEffect(effect)) { error in
+            XCTAssertEqual(error as? OnlineBattleEffectError, .untrustedLedger)
+        }
+        XCTAssertTrue(reopened.state.onlineBattleReceipts.isEmpty)
+        XCTAssertTrue(reopened.state.battleHealth.isEmpty)
+        XCTAssertEqual(try Data(contentsOf: url), persistedData, "거절한 효과는 파일을 바꾸지 않음")
+        XCTAssertEqual(try Data(contentsOf: backup), garbage, "재시작 후에도 손상 원본 보존")
     }
 
     /// [회귀] active(현재 포켓몬)가 손상돼도(pathIDs 누락 등) 알로 폴백하되 도감·인벤토리·누적은 보존한다 —
