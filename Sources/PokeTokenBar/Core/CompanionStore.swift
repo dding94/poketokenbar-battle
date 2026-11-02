@@ -1882,6 +1882,8 @@ final class CompanionStore {
                                                   todayDate: todayDate,
                                                   hasUsageData: hasUsageData)
         candidate.onlineBattleReceipts = receipts
+        let completedKeys = Set(receipts.map(\.key))
+        candidate.onlineBattleHolds.removeAll { completedKeys.contains($0.key) }
         candidate.onlineLedgerTrusted = state.onlineLedgerTrusted && envelope.state.onlineLedgerTrusted
         try backupStateBeforeImport()
         try commitOnlineState(candidate)
@@ -2137,9 +2139,14 @@ final class CompanionStore {
 
     // MARK: 영속
     private func load() {
-        guard let data = try? Data(contentsOf: fileURL) else {
-            // A failed fallback write must not turn a previously corrupt ledger into a fresh trusted one.
-            if FileManager.default.fileExists(atPath: fileURL.appendingPathExtension("corrupt").path) {
+        let data: Data
+        do { data = try Data(contentsOf: fileURL) }
+        catch {
+            // Only a genuinely absent file is a new installation. Permission errors can also make fileExists
+            // report false, so preserve the read error rather than infer trust from file existence alone.
+            let failure = error as NSError
+            let missing = failure.domain == NSCocoaErrorDomain && failure.code == NSFileReadNoSuchFileError
+            if !missing || FileManager.default.fileExists(atPath: fileURL.appendingPathExtension("corrupt").path) {
                 state.onlineLedgerTrusted = false
             }
             return
@@ -2288,23 +2295,11 @@ extension CompanionStore: OnlineBattleEffects {
             ($0.key == effect.key && $0.instanceID != effect.localInstanceID)
                 || ($0.instanceID == effect.localInstanceID && $0.key != effect.key)
         }), inBattleInstanceID != effect.localInstanceID else { throw OnlineBattleEffectError.individualHeld }
-        var candidate = state
-        let hp = effect.outcome == .loss ? 0 : effect.remainingHPShare
-        candidate.battleHealth[effect.localInstanceID] = hp < 1 ? hp : nil
-        let day = OnlineBattleLedger.day(clock())
-        let paidToday = candidate.onlineBattleReceipts.filter { $0.rewardDate == day && $0.grantedXP > 0 }.count
-        let recipient = candidate.active?.profile?.instanceID
-        let xp = effect.outcome == .win && recipient != nil && paidToday < 10 ? 10_000_000 : 0
-        if xp > 0 { candidate.active!.usedAtStage += xp }
-        let receipt = OnlineBattleEffectReceipt(key: effect.key, resultHash: effect.resultHash,
-            localInstanceID: effect.localInstanceID, appliedHPShare: hp, grantedXP: xp,
-            recipientInstanceID: xp > 0 ? recipient : nil, rewardDate: day)
-        candidate.onlineBattleReceipts.append(receipt)
-        candidate.onlineBattleHolds.removeAll { $0.key == effect.key }
-        try commitOnlineState(candidate)
+        let commit = OnlineBattleLedger.commit(effect, to: state, on: clock())
+        try commitOnlineState(commit.state)
         // Growth consumes the already-durable credit. Derived saves may fail without refunding this receipt.
-        if xp > 0 { applyUsage(0); kickLineLoadIfNeeded() }
-        return receipt
+        if commit.receipt.grantedXP > 0 { applyUsage(0); kickLineLoadIfNeeded() }
+        return commit.receipt
     }
 
     func holdOnlineBattle(key: OnlineBattleReceiptKey, instanceID: String) throws {

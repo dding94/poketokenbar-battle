@@ -248,4 +248,134 @@ final class OnlineBattleEffectsTests: XCTestCase {
         XCTAssertThrowsError(try store.holdOnlineBattle(key: key(), instanceID: ""))
     }
 
+    func testAtomicWriterSeesOldPublishedStateAndFailureCannotReleaseHold() throws {
+        var store: CompanionStore!
+        var fail = false
+        var inspectCommit = false
+        var writes = 0
+        store = try make(writer: { data, url in
+            writes += 1
+            if inspectCommit {
+                XCTAssertEqual(store.state.onlineBattleReceipts.count, 0)
+                XCTAssertEqual(store.healthShare(of: "entrant"), 1)
+                XCTAssertTrue(store.isHeldForBattle(instanceID: "entrant"))
+                let candidate = try JSONDecoder().decode(CompanionState.self, from: data)
+                XCTAssertEqual(candidate.onlineBattleReceipts.count, 1)
+                XCTAssertEqual(candidate.active?.usedAtStage, 11_000_000)
+                XCTAssertTrue(candidate.onlineBattleHolds.isEmpty)
+            }
+            if fail { throw OnlineBattleEffectError.invalidEffect }
+            try data.write(to: url, options: .atomic)
+        })
+        try store.holdOnlineBattle(key: key(), instanceID: "entrant")
+        fail = true
+        XCTAssertThrowsError(try store.releaseOnlineBattle(key: key()))
+        XCTAssertTrue(store.isHeldForBattle(instanceID: "entrant"))
+        fail = false; inspectCommit = true
+        _ = try store.applyVerifiedOnlineBattleEffect(effect())
+        XCTAssertEqual(writes, 3)
+        _ = try store.applyVerifiedOnlineBattleEffect(effect())
+        XCTAssertEqual(writes, 3, "duplicates never call the writer")
+    }
+    func testUnpaidNoActiveReceiptsDoNotConsumeLaterQuota() throws {
+        let store = try make(state(active: false))
+        for i in 0..<11 { XCTAssertEqual(try store.applyVerifiedOnlineBattleEffect(effect("egg\(i)")).grantedXP, 0) }
+        let envelope = try SaveTransfer.decode(SaveTransfer.encode(state: state(), appVersion: "test", deviceName: "test", now: now))
+        try store.applySave(envelope, todayTokensByProvider: [:], todayDate: "day", hasUsageData: false)
+        for i in 0..<10 { XCTAssertEqual(try store.applyVerifiedOnlineBattleEffect(effect("active\(i)")).grantedXP, 10_000_000) }
+        XCTAssertEqual(try store.applyVerifiedOnlineBattleEffect(effect("eleventh")).grantedXP, 0)
+    }
+    func testIncomingAndCurrentReceiptUnionKeepsBothAndDeduplicates() throws {
+        let current = try make()
+        let receipt = try current.applyVerifiedOnlineBattleEffect(effect())
+        let incoming = try make(name: "incoming")
+        let other = try incoming.applyVerifiedOnlineBattleEffect(effect("other"))
+        var incomingState = incoming.state; incomingState.onlineBattleReceipts.append(receipt)
+        let envelope = try SaveTransfer.decode(SaveTransfer.encode(state: incomingState, appVersion: "test", deviceName: "test", now: now))
+        try current.applySave(envelope, todayTokensByProvider: [:], todayDate: "day", hasUsageData: false)
+        XCTAssertEqual(current.state.onlineBattleReceipts, [receipt, other])
+        XCTAssertEqual(try current.applyVerifiedOnlineBattleEffect(effect("other")), other)
+        XCTAssertEqual(try current.applyVerifiedOnlineBattleEffect(effect()), receipt)
+    }
+    func testRecoveredSnapshotAndMissingFallbackFileRemainUntrusted() throws {
+        let original = try make()
+        _ = try original.createManualSnapshot()
+        _ = try original.applyVerifiedOnlineBattleEffect(effect())
+        try Data("broken".utf8).write(to: folder.appendingPathComponent("save"))
+        let recovered = open()
+        XCTAssertNotNil(recovered.state.active, "snapshot really recovered the older active individual")
+        XCTAssertFalse(recovered.state.onlineLedgerTrusted)
+        XCTAssertThrowsError(try recovered.applyVerifiedOnlineBattleEffect(effect()))
+        try FileManager.default.removeItem(at: folder.appendingPathComponent("save"))
+        let missing = open()
+        XCTAssertFalse(missing.state.onlineLedgerTrusted, "corrupt marker survives an unsuccessful fallback write")
+        XCTAssertThrowsError(try missing.applyVerifiedOnlineBattleEffect(effect()))
+    }
+    func testConcurrentDuplicateDeliveriesPayOnce() async throws {
+        let store = try make()
+        let input = try effect()
+        async let first = Task { @MainActor in try store.applyVerifiedOnlineBattleEffect(input) }.value
+        async let second = Task { @MainActor in try store.applyVerifiedOnlineBattleEffect(input) }.value
+        let receipts = try await (first, second)
+        XCTAssertEqual(receipts.0, receipts.1)
+        XCTAssertEqual(store.state.onlineBattleReceipts.count, 1)
+        XCTAssertEqual(store.state.active?.usedAtStage, 11_000_000)
+    }
+
+    func testImportDoesNotResurrectACompletedBattleHold() throws {
+        let store = try make()
+        try store.holdOnlineBattle(key: key(), instanceID: "entrant")
+        let stale = try SaveTransfer.decode(store.exportedSaveData(appVersion: "test", deviceName: "test"))
+        _ = try store.applyVerifiedOnlineBattleEffect(effect())
+        XCTAssertFalse(store.isHeldForBattle(instanceID: "entrant"))
+        try store.applySave(stale, todayTokensByProvider: [:], todayDate: "day", hasUsageData: false)
+        _ = try store.applyVerifiedOnlineBattleEffect(effect())
+        XCTAssertFalse(store.isHeldForBattle(instanceID: "entrant"))
+        XCTAssertEqual(store.state.onlineBattleReceipts.count, 1)
+    }
+    func testPresentUnreadableStateIsNotAFreshTrustedLedger() throws {
+        XCTAssertTrue(open("fresh").state.onlineLedgerTrusted, "a genuinely missing file remains a new installation")
+        let unreadable = folder.appendingPathComponent("directory")
+        try FileManager.default.createDirectory(at: unreadable, withIntermediateDirectories: true)
+        XCTAssertThrowsError(try Data(contentsOf: unreadable), "real read failure reaches the load branch")
+        var writes = 0
+        let store = open("directory", writer: { _, _ in writes += 1 })
+        XCTAssertFalse(store.state.onlineLedgerTrusted)
+        XCTAssertThrowsError(try store.applyVerifiedOnlineBattleEffect(effect())) { error in
+            XCTAssertEqual(error as? OnlineBattleEffectError, .untrustedLedger)
+        }
+        XCTAssertEqual(writes, 0)
+    }
+
+    func testMalformedReceiptDayCannotHidePaidRewardFromQuota() throws {
+        for day in ["2026-99-99", "2026-2-2", "garbage"] {
+            let receipt = OnlineBattleEffectReceipt(key: key(), resultHash: "hash", localInstanceID: "entrant",
+                appliedHPShare: 0.2, grantedXP: 10_000_000, recipientInstanceID: "current", rewardDate: day)
+            var malformed = state(); malformed.onlineBattleReceipts = [receipt]
+            XCTAssertThrowsError(try JSONDecoder().decode(CompanionState.self, from: JSONEncoder().encode(malformed)))
+        }
+    }
+
+    func testPaidReceiptRequiresRecipientAndUnpaidReceiptCannotNameOne() throws {
+        for (xp, recipient) in [(10_000_000, nil as String?), (10_000_000, ""), (0, "current")] {
+            let receipt = OnlineBattleEffectReceipt(key: key(), resultHash: "hash", localInstanceID: "entrant",
+                appliedHPShare: 0.2, grantedXP: xp, recipientInstanceID: recipient, rewardDate: "2026-10-31")
+            var malformed = state(); malformed.onlineBattleReceipts = [receipt]
+            XCTAssertThrowsError(try JSONDecoder().decode(CompanionState.self, from: JSONEncoder().encode(malformed)))
+        }
+    }
+
+    func testRewardDayUsesInjectedLocalCalendarAtMidnightAndDST() throws {
+        var korea = Calendar(identifier: .gregorian); korea.timeZone = try XCTUnwrap(TimeZone(identifier: "Asia/Seoul"))
+        var losAngeles = Calendar(identifier: .gregorian); losAngeles.timeZone = try XCTUnwrap(TimeZone(identifier: "America/Los_Angeles"))
+        let parser = ISO8601DateFormatter()
+        let midnight = try XCTUnwrap(parser.date(from: "2026-11-01T15:00:00Z"))
+        XCTAssertEqual(OnlineBattleLedger.day(midnight.addingTimeInterval(-1), calendar: korea), "2026-11-01")
+        XCTAssertEqual(OnlineBattleLedger.day(midnight, calendar: korea), "2026-11-02")
+        for hour in ["08", "09"] {
+            let repeatedHour = try XCTUnwrap(parser.date(from: "2026-11-01T\(hour):30:00Z"))
+            XCTAssertEqual(OnlineBattleLedger.day(repeatedHour, calendar: losAngeles), "2026-11-01")
+        }
+    }
+
 }
