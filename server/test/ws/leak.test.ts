@@ -21,7 +21,7 @@ closeSocketsAfterAll();
 const METHODS = ["log", "info", "warn", "error", "debug", "trace"] as const;
 
 const ALLOWED_FIELDS: Record<string, string[]> = {
-  hello: ["groupId", "online", "trainerId", "type", "v"],
+  hello: ["connectionId", "groupId", "online", "trainerId", "type", "v"],
   presence: ["online", "trainerId", "type", "v"],
   group_changed: ["kind", "type", "v"],
 };

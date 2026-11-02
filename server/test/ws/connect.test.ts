@@ -71,7 +71,7 @@ describe("GET /v1/connect", () => {
   it("accepts an active key and sends hello with the group's online trainers", async () => {
     const { host, members } = await setupGroup(1);
     const first = await connect(host.accessKey);
-    expect(first.hello).toEqual({ v: 1, type: "hello", trainerId: host.trainerId, groupId: host.groupId, online: [host.trainerId] });
+    expect(first.hello).toEqual({ v: 1, type: "hello", connectionId: expect.any(String), trainerId: host.trainerId, groupId: host.groupId, online: [host.trainerId] });
 
     const second = await connect(members[0]!.accessKey);
     expect(second.hello.trainerId).toBe(members[0]!.trainerId);

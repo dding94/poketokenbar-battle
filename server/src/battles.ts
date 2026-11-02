@@ -1,3 +1,4 @@
+import { BattleRelay } from "./battle-relay";
 import { permitsRoomAction } from "./battle-policy";
 import { GroupAccess, type Actor } from "./access";
 import { canonical, POLICY_VERSION, RELAY_VERSION, RULES_VERSION, type BattleAction, type BattleInput, type Side } from "./battle-input";
@@ -8,7 +9,8 @@ export interface BattleEffect { recipients: string[]; groupId?: string; message:
 export function battleChanged(b: Battle): BattleEffect { return { recipients: [b.p1, b.p2], message: { type: "battle_changed", battleId: b.battleId, state: b.state, revision: b.revision } }; }
 export class Battles {
   readonly store: BattleStore;
-  constructor(sql: SqlStorage, private readonly access: GroupAccess, private readonly realtime: Realtime) { this.store = new BattleStore(sql); }
+  private readonly relay: BattleRelay;
+  constructor(sql: SqlStorage, private readonly access: GroupAccess, private readonly realtime: Realtime) { this.store = new BattleStore(sql); this.relay = new BattleRelay(this.store); }
   dispatch(actor: Actor, id: string | null, action: BattleAction | "get" | "list", input: BattleInput, now: number, after: BattleEffect[], before = Number.MAX_SAFE_INTEGER): Result<unknown> {
     if (action === "list") {
       const rows = this.store.list(actor.trainer.id, before), page = rows.slice(0, 100);
@@ -23,6 +25,18 @@ export class Battles {
     if ((action === "update" || action === "accept") && this.store.receipt(b, actor.trainer.id, action, input.revision!, input)) return ok(this.view(b, actor.trainer.id));
     if (input.revision !== undefined && input.revision !== b.revision) return fail("stale_revision");
     if (action === "decline" && b.state === "DECLINED" && side === "p2" || action === "cancel" && b.state === "CANCELLED") return ok(this.view(b, actor.trainer.id));
+    if (action === "choices") {
+      const result = this.relay.choice(b, side, input.roundSeq!, input.choice!, now, after);
+      if (!result.ok) return result;
+      if (result.value) this.store.put(b);
+      return ok(this.view(b, actor.trainer.id));
+    }
+    if (action === "advance") {
+      const result = this.relay.advance(b, input.processedRoundSeq!, now, after);
+      if (!result.ok) return result;
+      if (result.value) { this.store.put(b); after.push(battleChanged(b)); }
+      return ok(this.view(b, actor.trainer.id));
+    }
     if (!ACTIVE.has(b.state)) return fail("invalid_state");
     let changed = true;
     if (action === "update") {
@@ -45,7 +59,7 @@ export class Battles {
     } else if (action === "ready") {
       const result = this.ready(b, side, input); if (!result.ok) return result; changed = result.value;
     } else if (action === "start") {
-      const result = this.start(b, side, input, now); if (!result.ok) return result; changed = result.value;
+      const result = this.start(b, side, input, now, after); if (!result.ok) return result; changed = result.value;
     } else return fail("invalid_state");
     if (changed) { this.store.put(b); after.push(battleChanged(b)); }
     return ok(this.view(b, actor.trainer.id));
@@ -84,21 +98,21 @@ export class Battles {
     }
     return ok(true);
   }
-  private start(b: Battle, side: Side, input: BattleInput, now: number): Result<boolean> {
+  private start(b: Battle, side: Side, input: BattleInput, now: number, after: BattleEffect[]): Result<boolean> {
     if (this.realtime.connectionId(b[side]) !== input.connectionId) return fail("not_ready");
     if (!permitsRoomAction("start", b.state, side)) return fail("invalid_state");
     if (!b.config || input.readyToken !== b.config.readyToken) return fail("not_ready");
     if (input.engineHash !== b.config.engineHash) return fail("engine_mismatch");
     if (b.state === "RUNNING" || b.starts[side] === input.connectionId) return ok(false);
     b.starts[side] = input.connectionId!;
-    if (b.starts.p1 === this.realtime.connectionId(b.p1) && b.starts.p2 === this.realtime.connectionId(b.p2)) { b.state = "RUNNING"; b.startedAt = now; }
+    if (b.starts.p1 === this.realtime.connectionId(b.p1) && b.starts.p2 === this.realtime.connectionId(b.p2)) { b.state = "RUNNING"; b.startedAt = now; this.relay.open(b, now, after); }
     return ok(true);
   }
   expire(now: number, after: BattleEffect[]): void {
     for (const b of this.store.due(now)) {
       if (PRESTART.has(b.state)) { b.state = "EXPIRED"; }
       else if (b.state === "RUNNING" && now >= b.startedAt! + REPORT_MS || b.state === "REPORTED" && now >= b.reportedAt! + REPORT_MS) { b.state = "VOID"; b.reason = "report_timeout"; }
-      else continue;
+      else { if (b.state === "RUNNING" && this.relay.timeout(b, now, after)) this.store.put(b); continue; }
       this.store.unlock(b.battleId); this.store.put(b); after.push(battleChanged(b));
     }
   }
