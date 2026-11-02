@@ -5,12 +5,19 @@ import Foundation
 struct OnlineBattleOrigin: Equatable, Sendable {
     let url: URL
     init(_ value: String) throws {
-        guard let url = URL(string: value) else { throw OnlineBattleFailure.invalidOrigin }
+        guard value == value.trimmingCharacters(in: .whitespacesAndNewlines),
+              var components = URLComponents(string: value), components.scheme?.lowercased() == "https",
+              let host = components.host, !host.isEmpty, components.user == nil, components.password == nil,
+              components.path.isEmpty || components.path == "/", components.query == nil, components.fragment == nil,
+              components.port == nil || (1...65535).contains(components.port!) else { throw OnlineBattleFailure.invalidOrigin }
+        components.scheme = "https"; components.host = host.lowercased(); components.path = ""
+        if components.port == 443 { components.port = nil }
+        guard let url = components.url else { throw OnlineBattleFailure.invalidOrigin }
         self.url = url
     }
     var hash: String { SHA256.hash(data: Data(url.absoluteString.utf8)).map { String(format: "%02x", $0) }.joined() }
 }
-enum OnlineBattleFailure: String, Error, Equatable, Sendable { case invalidOrigin, transport, invalidResponse, staleGeneration, unauthorized, protocolError, credentialsUnavailable }
+enum OnlineBattleFailure: String, Error, Equatable, Sendable { case invalidSettings, credentialsDisabled, invalidOrigin, invalidRequest, transport, invalidResponse, staleGeneration, unauthorized, protocolError, credentialsUnavailable }
 
 enum OnlineBattleMode: String, Codable, Sendable { case manual, auto }
 enum OnlineBattleState: String, Codable, Sendable {
