@@ -26,6 +26,9 @@
 - 테스트 전용 후속 `afe4ee2`는 기술 제출 HTTP 응답을 보류한 동안 그룹 복귀를 선택하는 회귀를 추가했다. 같은 Xcode/격리 상태에서 `swift test --disable-sandbox --jobs 2 --enable-code-coverage --filter 'OnlineBattleSessionTests|OnlineBattleResolverTests|OnlineBattleEffectsTests|OnlineBattlePresentationTests|OnlineBattleReviewFixTests'` 종료 **0**, **94건·실패/skip 0**(Session 47). 이동 보호 조건 제거 시 1건·단언 실패 3·종료 1 후 바이트 원복/최종 GREEN을 확인했다. 앞선 protocol 변형 2건·실패 2, generation/동시 완료 변형 2건·실패 6도 검출 후 원복했다. llvm-cov `--show-regions`에서 이동 보호 조건 16회/적용 15회, 재조회 상한·동시 완료 보호·늦은 보고 거절 각 1회 실행을 확인했다. 전체 분기 완전 검증을 뜻하지 않는다.
 - 공용 번들 완료(`bbea7fa`): `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer CLANG_MODULE_CACHE_PATH=<임시 캐시> PTB_SKIP_INSTALL=1 ./scripts/build-app.sh` 종료 **0**. Xcode 27의 공유 출력 덮어쓰기와 lipo 다중 arch 검증 호환성을 각각 실제 종료 1로 발견하고 RED→GREEN·독립 리뷰를 거쳐 고쳤다. `bash scripts/test-build-app-slices.sh` 공유/분리 출력 **2시나리오 통과·종료 0**, shell 문법·YAML 파싱·diff 검사도 0. 별도 `--filter AppIdentityTests`는 **15건·실패/skip 0·종료 0**이었다.
 - 번들 검사 종료 **0**: arm64+x86_64, 두 Mach-O 최소 macOS 15.0, 포크 bundle ID/실행 파일/LaunchAgent 경로, JIT entitlement, `codesign --verify --deep --strict`, 저장소와 같은 엔진 해시를 확인했다. 실행 파일 SHA-256 `5ff1b7712fab731d349814fe239c19688f2c99e854a407e5b67f842cb77f91ca`. 자체 서명 인증서가 없어 **ad-hoc 개발 서명**이며 Gatekeeper·회사 관리 정책 통과나 설치/실행을 검증한 것은 아니다. 산출물은 `build/PokeTokenBar Battle.app`; 실제 앱을 설치·실행하지 않았다.
+- 실기 준비 산출물(미커밋 빌드 파일): `build/PokeTokenBar-Battle-PR07.zip`(5.9MB), `build/PR07-E2E-Fixtures.zip`. 합성 상태는 `build/pr07-e2e-fixtures/{left,right}/companion-state.json`이며 서로 다른 instanceID의 Lv52 라프라스·완전 HP 208/201·빈 온라인 원장/보류다. 실제 세이브·키·서버 주소를 포함하지 않는다. 공개 PokéAPI와 실제 Swift 모델로 생성한 뒤 `CompanionStore` 재로딩·프로필 준비·production roster·JSC snapshot 검증을 수행했다. 임시 비OCR `swift test --disable-sandbox --jobs 2 --filter OnlineBattleFixturePreparationTests`는 Xcode/임시 상태/캐시 환경에서 **1건 통과·실패/skip 0·종료 0**. 준비 중 컴파일 실패(실행 0건)와 제한 환경 DNS 실패(1건 실패·종료 1)는 통과로 세지 않는다. 같은 공개 조회를 허용한 재실행으로 성공했고 임시 테스트 소스는 worktree에서 제거했다. 저장소/CI 테스트나 실제 앱 시작·두 맥 E2E 증거는 아니다. 실기에서는 깨끗한 macOS 시험 계정과 별도 상태 폴더를 사용하고 공개 메타데이터 로딩이 끝난 뒤 출전한다.
+- [CI 41379959776](https://github.com/dding94/poketokenbar-battle/actions/runs/41379959776)(`7f9fdf9`)는 **실패**했다. rest `test-gate.sh` 종료 1: **2,076건 실행·16 skip·1실패**(손상 파일 복구 후 원래 경로가 없어야 한다는 기존 테스트 기대값). 코드의 차단 상태 즉시 저장 계약은 유지하고 테스트를 보강 중이다. rendering 6건·실패/skip 0, 포크 가드/공용 slice 2시나리오·test-union·secret-scan은 성공했다. 서버 `npm ci`·typecheck·test 종료 0, 30파일 318건·실패/skip 0. macOS 15·26 각각 Swift 경계 349건·실패/skip 0, Node/JSC 2,200판 불일치·재생·상태 왕복 실패 0(200턴 무승부 200건), 관련 명령 종료 0이었다. 기존 skip 16건은 여전히 미검증이고 앱 커버리지 게이트는 이 실행에서 완료되지 않았다. 앞선 실행 41379207526·41379294248·41379677870은 후속 푸시로 취소됐으며 전체 통과로 세지 않는다.
+- 위 CI 회귀 수정은 테스트 전용이다(`01d3bcc`). `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer PTB_STATE_DIR=<임시 상태> CLANG_MODULE_CACHE_PATH=<임시 캐시> swift test --disable-sandbox --jobs 2 --filter 'CompanionStoreTests|OnlineBattleEffectsTests|SaveTransferTests|PracticeStakesStoreTests'` **139건·실패/skip 0·종료 0**. 별도 독립 리뷰가 원본 보관·즉시 영속화·중간 저장 없는 재시작·정확한 보상 거절을 확인했다. 신뢰 false를 true로 바꾼 결함 주입은 해당 1건에서 단언 실패 7·종료 1 후 원본 바이트 동일 원복을 확인했다. 제품 코드와 검증한 번들은 바뀌지 않았으며 전체 CI를 다시 확인한다.
 
 ### PR 05 개발 환경 실측 (2026-11-02)
 
@@ -314,15 +317,15 @@
 
 ## 아직 없는 것 / 검증하지 않은 것
 
-- Cloudflare 리소스·자격 증명·배포 URL(`server/`는 PR 04로 생겼지만 배포하지 않았다).
-- 온라인 배틀·락스텝 프로토콜·결과 효과 적용·재대결·그룹 전적판. 로컬 연습전은 설치까지 완료했으며 사용자 직접 시험이 남았다.
+- 운영 환경 배포·릴리스는 하지 않았다. 개발 Worker는 PR 06까지 배포했고 비밀값은 사용자가 관리한다. 실제 주소·계정 식별값은 공개 문서에 넣지 않는다.
+- PR 07 앱 설치·실제 두 맥 정식전은 미실행이다. 온라인 중계·락스텝·앱 결과 효과는 구현했으며 자동 검증 상태는 문서 상단을 따른다. 경기 기록 화면(PR 11)·그룹 전적판/챔피언/재대결 UI(PR 12)는 후속 범위다.
 - CI의 기존 skip 16건. macOS 14는 2026-10-30부터 지원하지 않는다(최소 15).
 - 앱 안 고지의 실제 화면 확인(고지 코드·문자열 테스트는 완료). 저장소는 2026-10-29 public 전환.
-- 실제 GitHub 기능 PR. PR 00~03C는 이 브랜치의 커밋이며 GitHub PR은 아직 없다. PR 04~13(08~10 폐기)은 앞으로 할 작업 단위다.
+- 실제 GitHub 기능 PR은 아직 만들지 않았다. PR 00~06은 완료된 작업 단위이며 PR 07은 실기 검증이 남아 있다. PR 08~10은 폐기했고 PR 11~13은 이후 순서다.
 
 REA 설치본 버전 확인은 수행했지만, 바이너리와 소스의 재현 빌드 일치를 증명하지 않는다. REA Evidence ID는 이전 조사 세션의 참조이며 새 AI 세션에서 조회 가능하다고 가정하지 않는다.
 
-## 현재 상태와 다음 작업 (PR 06, 2026-11-02)
+## PR 06 종료 기록 (2026-11-02, 현재 상태는 문서 상단)
 
 - PR 06 계약 `efc0f46`·`465c4e8`을 먼저 커밋하고 별도 worktree에서 06A 방/준비 → 06B 턴/복원/알람 → 06C 결과/전적/재대결을 RED → GREEN → REFACTOR로 구현했다. 통합 서버 소스는 `3d7a73c`다. [CI 41372533717](https://github.com/dding94/poketokenbar-battle/actions/runs/41372533717)(`9109f9f`)도 성공했다. 이후 변경은 검증 결과 문서뿐이다. 새 앱 구현은 아직 시작하지 않았다.
 - 최종 Git 아카이브를 별도 임시 폴더에 펼쳐 `npm ci`·`npm run typecheck`·`npm test`를 실행했다. 모두 종료 **0**, **30파일 318건 통과·실패/skip 0**, npm audit 취약점 0. 당시 순서 seed `1793582643045`. 실제 명령·RED 결과·결함 주입별 수치는 BATTLE_PLAN PR 06에 있다. 초기 실행 권한 오류 0건과 필터 제외를 통과로 세지 않았다.
@@ -410,8 +413,8 @@ PR 05 실측의 재접속 표본 0·전수 CPU·계정 DO 오류 원인·회사 
 
 ```text
 이 저장소의 AGENTS.md와 docs/AI_HANDOFF.md, docs/BATTLE_PLAN.md를 읽어줘.
-feat/local-practice-battle 브랜치에서 설치본 시험 피드백을 반영하거나,
-피드백이 없으면 BATTLE_PLAN의 PR 04(서버 골격)부터 TDD로 진행해줘.
+feat/local-practice-battle 브랜치의 현재 상태를 확인하고,
+PR 07에 남은 승인·실기 검증과 시험 피드백부터 처리해줘.
 월 0원 조건과 로그인 화면 없는 초대코드 + 이메일 표시명 방식을 유지해줘.
 ```
 
