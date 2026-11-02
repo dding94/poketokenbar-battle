@@ -452,7 +452,8 @@ final class OnlineBattleSession {
         case .selectOpponent(let id): presentation.selectedOpponentID = id; challengeIntent = nil; return
         case .setMode(let mode): presentation.mode = mode; challengeIntent = nil; return
         case .acknowledgeRecoveryCode: presentation.recoveryCode = nil; return
-        case .dismissResult: prefersLobby = true; navigationRevision &+= 1; selectedBattleID = nil; publish(); return
+        case .dismissResult, .backToLobby: prefersLobby = true; navigationRevision &+= 1; selectedBattleID = nil; publish(); return
+        case .openBattle(let id): prefersLobby = false; navigationRevision &+= 1; selectedBattleID = id; publish(); return
         case .configureServer(let value): await configureServer(value); return
         default: break
         }
@@ -466,7 +467,6 @@ final class OnlineBattleSession {
         case .reconnect(let code): await obtainGrant { try await $0.reconnect(reconnectCode: code) }
         case .retryCredentialSave: await retryCredentialSave()
         case .refresh: await refresh()
-        case .openBattle(let id): prefersLobby = false; navigationRevision &+= 1; selectedBattleID = id; publish()
         default:
             do { try await battleAction(action, epoch: epoch) }
             catch { publish(); await handle(error, epoch: epoch) }
