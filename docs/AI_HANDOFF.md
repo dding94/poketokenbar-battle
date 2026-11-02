@@ -16,6 +16,8 @@
 - 최종 개별 Core 검증: 같은 격리 환경에서 `swift test --disable-sandbox --jobs 2 --enable-code-coverage --filter OnlineBattle`(통신 worktree) **50건**, `--filter 'OnlineBattleEffectsTests|SaveTransferTests|PracticeStakesStoreTests|SaveSnapshot'`(효과 worktree) **79건**, `--filter OnlineBattleResolverTests`(재생 worktree) **9건**, 모두 종료 0·실패/skip 0. 겹치는 관련 테스트가 있으므로 단순 합계를 통합 실행 수로 보고하지 않는다. 최종 refactor 전 세 모듈 조합의 `--filter OnlineBattle`도 **63건·실패/skip 0·종료 0**이었다.
 - 결함 주입: 효과 9개(각 1건 테스트), resolver 9개, 통신 generation/gate 3개 모두 실제 실패 후 원복했다. llvm-cov 영역 확인: 효과 새 파일 49/49, resolver 90.91%, 통신 전체 87.39%. 네이티브 URLSession/SecItem·엔진 비정상 상태/재시도 완전 소진·일부 콜백 교차는 단위 테스트 미검증이다. 별도 로컬 Worker+실제 URLSession 보조 검증을 준비 중이며 두 맥 증거와 구분한다.
 - 절차상 한계: 통신 HTTP/WS/키 저장은 초안을 먼저 작성한 뒤 실행 가능한 stub과 행동 테스트로 RED를 만들었다. 최초부터 테스트 우선이었다고 기록하지 않는다. 최초 확장 RED에는 unexpected throw가 있어 다시 단언만 발생하도록 고쳤고, 유효 RED는 **35건·단언 실패 36·unexpected/skip 0·종료 1**이다. 화면 레이아웃 초안도 렌더 테스트보다 먼저 작성됐으며, presentation 행동 RED와 화면 이미지 검증을 구분한다. 나머지 Session 새 행동은 단계별 RED를 먼저 확인 중이다.
+- 한 맥 네이티브 보조 검증(11:13:49–51 KST): 실제 URLSession HTTP/WS와 격리된 로컬 workerd, 두 JSC를 연결해 수동 12라운드·자동 13라운드 경기 COMPLETED/재생/중복 보고를 확인했다. hello 2·presence 1·4001/4003 각 1·HTTP/WS 401 각 1·키 복구 1. 가짜 세이브 4개에서 HP/XP·지갑/사용량 불변·잠금 해제·재시작 1회 지급도 확인했다. **XCTest 1건 통과·실패/skip 0, 재현 스크립트 종료 0**. 임시 source/recipe는 `/private/tmp/ptb-pr07-native-replay/`에만 있으며 저장소/CI 자동 검사나 두 맥 E2E가 아니다. 임시 Worker·포트·DO·세이브는 정리했고 실제 키체인/세이브/개발 Worker는 사용하지 않았다.
+- 개발 배포 준비: BATTLE_PLAN §7에 11:17 KST Free 계정 사용량과 dry-run 성공/번들 해시를 기록했다. 별도 배포 승인을 질문했으며 응답 전에는 실행하지 않는다. 앱 설치·두 맥 실행 승인은 별도로 남아 있다.
 
 ### PR 05 개발 환경 실측 (2026-11-02)
 
