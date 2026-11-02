@@ -34,6 +34,7 @@ export class Battles {
     // Successful update/accept retry uses its ORIGINAL revision, before stale checks.
     if ((action === "update" || action === "accept") && this.store.receipt(b, actor.trainer.id, action, input.revision!, input)) return ok(battleView(this.store, b, actor.trainer.id));
     if (input.revision !== undefined && input.revision !== b.revision) return fail("stale_revision");
+    if (action === "confirm" && side === "p1" && b.confirmed) return ok(battleView(this.store, b, actor.trainer.id));
     if (action === "decline" && b.state === "DECLINED" && side === "p2" || action === "cancel" && b.state === "CANCELLED") return ok(battleView(this.store, b, actor.trainer.id));
     if (action === "choices") {
       const result = this.relay.choice(b, side, input.roundSeq!, input.choice!, now, after);

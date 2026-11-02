@@ -583,6 +583,7 @@ export class League extends DurableObject<Env> {
 
   private cancelBattles(trainerId: string, after: Effect[]): void {
     const effects: BattleEffect[] = [];
+    this.battles.expire(this.clock(), effects);
     this.battles.participantLeft(trainerId, effects);
     after.push(...effects.map(effect => ({ kind: "battle" as const, effect })));
   }
