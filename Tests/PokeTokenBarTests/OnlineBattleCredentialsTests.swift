@@ -35,6 +35,7 @@ private final class OnlineKeychainStub: @unchecked Sendable {
 final class OnlineBattleCredentialsTests: XCTestCase {
     private func scope(_ profile: String = "00000000-0000-4000-8000-000000000001", host: String = "https://example.invalid") throws -> OnlineBattleCredentialScope { .init(profileID: profile, origin: try OnlineBattleOrigin(host)) }
     func testScopedCredentialRoundTripAndRotationUsesInjectedSecurityOnly() async throws {
+        do {
         let stub = OnlineKeychainStub(), scope = try scope()
         let store = OnlineBattleCredentials(operations: stub.operations, gate: .init(allowsAccess: { true }))
         var value = try await store.load(scope: scope); XCTAssertNil(value)
@@ -51,8 +52,10 @@ final class OnlineBattleCredentialsTests: XCTestCase {
         let read = try XCTUnwrap(stub.recorded.first { $0.0 == "read" }?.1)
         XCTAssertEqual(read[kSecMatchLimit as String] as? String, kSecMatchLimitOne as String)
         XCTAssertEqual(read[kSecReturnData as String] as? Bool, true)
+        } catch { XCTFail("Expected successful fixture operation; received \(error)") }
     }
     func testProfileAndOriginScopesCannotReadEachOthersKey() async throws {
+        do {
         let stub = OnlineKeychainStub()
         let store = OnlineBattleCredentials(operations: stub.operations, gate: .init(allowsAccess: { true }))
         try await store.save("synthetic", scope: scope())
@@ -60,22 +63,28 @@ final class OnlineBattleCredentialsTests: XCTestCase {
         let otherOrigin = try await store.load(scope: scope(host: "https://other.invalid"))
         XCTAssertNil(otherProfile); XCTAssertNil(otherOrigin)
         XCTAssertEqual(try scope().originHash, try scope(host: "https://EXAMPLE.INVALID:443/").originHash)
+        } catch { XCTFail("Expected successful fixture operation; received \(error)") }
     }
     func testDisabledGatePerformsZeroSecurityCalls() async throws {
+        do {
         let stub = OnlineKeychainStub(), scope = try scope()
         let store = OnlineBattleCredentials(operations: stub.operations, gate: .init(allowsAccess: { false }))
         do { _ = try await store.load(scope: scope); XCTFail() } catch { XCTAssertEqual(error as? OnlineBattleFailure, .credentialsDisabled) }
         do { try await store.save("synthetic", scope: scope); XCTFail() } catch { XCTAssertEqual(error as? OnlineBattleFailure, .credentialsDisabled) }
         do { try await store.remove(scope: scope); XCTFail() } catch { XCTAssertEqual(error as? OnlineBattleFailure, .credentialsDisabled) }
         XCTAssertTrue(stub.recorded.isEmpty)
+        } catch { XCTFail("Expected successful fixture operation; received \(error)") }
     }
     func testStorageFailureIsNeverReportedAsSuccess() async throws {
+        do {
         let stub = OnlineKeychainStub(); stub.failWrite = true
         let store = OnlineBattleCredentials(operations: stub.operations, gate: .init(allowsAccess: { true }))
         do { try await store.save("synthetic", scope: scope()); XCTFail() } catch { XCTAssertEqual(error as? OnlineBattleFailure, .credentialsUnavailable) }
         XCTAssertEqual(stub.recorded.map(\.0), ["update"])
+        } catch { XCTFail("Expected successful fixture operation; received \(error)") }
     }
     func testSettingsPersistOnlyProfileAndOriginOutsideSave() throws {
+        do {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: folder) }
         var settings = try OnlineBattleSettings.load(from: folder)
@@ -88,12 +97,15 @@ final class OnlineBattleCredentialsTests: XCTestCase {
         let data = try Data(contentsOf: folder.appendingPathComponent(files[0]))
         let keys = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any]).keys.sorted()
         XCTAssertEqual(keys, ["profileID", "serverURL"])
+        } catch { XCTFail("Expected successful fixture operation; received \(error)") }
     }
     func testSettingsFailClosedOnCorruptProfile() throws {
+        do {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: folder) }
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         try Data(#"{"profileID":"not-a-uuid","serverURL":null}"#.utf8).write(to: folder.appendingPathComponent("online-battle-settings.json"))
         XCTAssertThrowsError(try OnlineBattleSettings.load(from: folder))
+        } catch { XCTFail("Expected successful fixture operation; received \(error)") }
     }
 }

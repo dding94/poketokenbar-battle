@@ -15,6 +15,7 @@ struct OnlineBattleOrigin: Equatable, Sendable {
         guard let url = components.url else { throw OnlineBattleFailure.invalidOrigin }
         self.url = url
     }
+    init(testLoopbackURL: URL) throws { throw OnlineBattleFailure.invalidOrigin }
     var hash: String { SHA256.hash(data: Data(url.absoluteString.utf8)).map { String(format: "%02x", $0) }.joined() }
 }
 enum OnlineBattleFailure: String, Error, Equatable, Sendable { case invalidSettings, credentialsDisabled, invalidOrigin, invalidRequest, transport, invalidResponse, staleGeneration, unauthorized, protocolError, credentialsUnavailable }
