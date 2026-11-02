@@ -54,7 +54,7 @@ export class BattleStore {
   earliest(): number | null { return this.sql.exec<{ at: number | null }>("SELECT MIN(deadline) AS at FROM battle_rooms WHERE deadline IS NOT NULL").toArray()[0]?.at ?? null; }
   due(now: number): Battle[] { return this.sql.exec<StoredBattle>("SELECT data FROM battle_rooms WHERE deadline<=?", now).toArray().map(r => JSON.parse(r.data)); }
   forTrainer(id: string): Battle[] { return this.sql.exec<StoredBattle>("SELECT data FROM battle_rooms WHERE (p1=? OR p2=?) AND deadline IS NOT NULL", id, id).toArray().map(r => JSON.parse(r.data)); }
-  list(id: string, before: number): StoredBattle[] { return this.sql.exec<StoredBattle>("SELECT seq,data FROM battle_rooms WHERE (p1=? OR p2=?) AND seq<? ORDER BY seq DESC LIMIT 101", id, id, before).toArray(); }
+  list(id: string, before: number): StoredBattle[] { return this.sql.exec<StoredBattle>("SELECT seq,data FROM battle_rooms WHERE p1=? AND seq<? UNION ALL SELECT seq,data FROM battle_rooms WHERE p2=? AND seq<? ORDER BY seq DESC LIMIT 101", id, before, id, before).toArray(); }
   busy(trainerId: string, instanceId: string, except?: string): boolean {
     const row = this.sql.exec<{ battle_id: string }>("SELECT battle_id FROM battle_locks WHERE trainer_id=? AND instance_id=?", trainerId, instanceId).toArray()[0];
     return !!row && row.battle_id !== except;
