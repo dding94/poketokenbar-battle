@@ -72,16 +72,10 @@ describe("request bodies", () => {
   });
 });
 
-describe("display email", () => {
+describe("display nickname (legacy field)", () => {
   const bad = [
     "",
     "   ",
-    "ab",
-    "a@",
-    "@b",
-    "a@@b",
-    "a@b@c",
-    "no-at-sign",
     "a b@c",
     "a@b\tc",
     "a@b\u0007",
@@ -102,15 +96,17 @@ describe("display email", () => {
     expect(res.body.trainer.displayEmail).toBe(email);
   });
 
-  it("accepts 3 and 254 characters", async () => {
-    expect((await call("POST", "/v1/groups", { body: groupBody({ displayEmail: "a@b" }) })).status).toBe(200);
+  it("accepts 1 and 254 characters", async () => {
+    for (const nickname of ["딩", "ab", "no-at-sign", "a@", "@b", "a@@b", "a@b@c"]) {
+      expect((await call("POST", "/v1/groups", { body: groupBody({ displayEmail: nickname }) })).status).toBe(200);
+    }
     const long = `${"y".repeat(250)}@b.c`;
     expect(long).toHaveLength(254);
     expect((await call("POST", "/v1/groups", { body: groupBody({ displayEmail: long }) })).status).toBe(200);
   });
 
   it("is validated on join before the invite is looked at", async () => {
-    expectError(await call("POST", "/v1/join", { body: { inviteCode: "AAAA-AAAA-AAAA", displayEmail: "bad" } }), 400, "bad_request");
+    expectError(await call("POST", "/v1/join", { body: { inviteCode: "AAAA-AAAA-AAAA", displayEmail: "bad\u200bname" } }), 400, "bad_request");
   });
 });
 

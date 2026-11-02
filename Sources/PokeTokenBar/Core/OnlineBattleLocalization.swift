@@ -6,11 +6,22 @@ extension L {
     var onlineTitle: String { online("온라인 배틀", "Online battle") }
     var onlineSetup: String { online("동료와 정식전 시작하기", "Battle with your group") }
     var onlineServer: String { online("서버 주소", "Server address") }
-    var onlineSaveServer: String { online("서버 연결", "Connect server") }
-    var onlineServerHint: String { online("방장이 안내한 HTTPS 서버 주소를 입력하세요.", "Enter the HTTPS server address provided by your host.") }
+    var onlineSaveServer: String { online("서버 주소 적용", "Apply server address") }
+    var onlineServerHint: String { online("① 방장이 보낸 https:// 서버 주소를 붙여넣고 아래 버튼을 누르세요.", "① Paste the HTTPS server address from your host, then apply it below.") }
     var onlineInvite: String { online("초대코드", "Invite code") }
-    var onlineEmail: String { online("이메일 표시명", "Email display name") }
-    var onlineEmailHint: String { online("이메일은 동료에게 보이는 이름이며, 인증에는 사용하지 않아요.", "Your email is a name shown to group members, not an authentication method.") }
+    var onlineNickname: String { online("닉네임", "Nickname") }
+    var onlineNicknameHint: String { online("② 초대코드와 공백 없는 닉네임을 입력하세요. 이메일은 필요 없어요.", "② Enter your invite code and nickname without spaces. No email is required.") }
+    var onlineServerSaved: String { online("주소가 적용됐어요. 아래에서 그룹에 참여하세요.", "Address saved. Join your group below.") }
+    func onlineSetupRequirement(_ requirement: OnlineBattleSetupInput.Requirement) -> String {
+        switch requirement {
+        case .busy: online("처리하고 있어요. 잠시 기다려 주세요.", "Working. Please wait.")
+        case .serverMissing: online("먼저 방장에게 받은 https:// 서버 주소를 입력하세요.", "First enter the HTTPS server address from your host.")
+        case .serverChanged: online("위의 ‘서버 주소 적용’을 먼저 눌러 주세요.", "Apply the server address above first.")
+        case .inviteMissing: online("방장에게 받은 초대코드를 입력하세요.", "Enter the invite code from your host.")
+        case .nicknameMissing: online("함께 사용할 닉네임을 입력하세요.", "Enter your nickname.")
+        case .ready: online("준비됐어요. ‘그룹 참여’를 눌러 주세요.", "Ready. Select Join group.")
+        }
+    }
     var onlineJoin: String { online("그룹 참여", "Join group") }
     var onlineRecovery: String { online("기존 계정 연결", "Reconnect your account") }
     var onlineRecoveryCode: String { online("복구코드", "Recovery code") }

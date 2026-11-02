@@ -103,16 +103,15 @@ export interface DisplayEmail {
 }
 
 /**
- * Trimmed and NFKC-normalised; 3-254 characters, exactly one `@` with text on both sides,
- * no whitespace, control or format characters. Duplicates compare by lowercase NFKC form.
+ * Nickname carried by the legacy displayEmail field: trimmed/NFKC-normalised, 1-254
+ * characters, no whitespace, control or invisible characters. Existing email values remain valid.
+ * Duplicates compare by lowercase NFKC form.
  */
 export function parseDisplayEmail(value: unknown): DisplayEmail {
   if (typeof value !== "string") throw new ApiError("bad_request");
   const display = value.trim().normalize("NFKC");
   const length = [...display].length;
-  if (length < 3 || length > 254 || FORBIDDEN_IN_EMAIL.test(display)) throw new ApiError("bad_request");
-  const parts = display.split("@");
-  if (parts.length !== 2 || parts[0] === "" || parts[1] === "") throw new ApiError("bad_request");
+  if (length < 1 || length > 254 || FORBIDDEN_IN_EMAIL.test(display)) throw new ApiError("bad_request");
   return { display, norm: display.toLowerCase() };
 }
 

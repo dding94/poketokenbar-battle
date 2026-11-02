@@ -85,7 +85,7 @@ describe("no secret or email reaches logs or error bodies", () => {
     await track(joinRaw(fakeInvite, freshEmail(), ip()));
     await track(call("POST", "/v1/recover", { ip: ip(), body: { recoveryCode: fakeCode } }));
     await track(call("POST", "/v1/reconnect", { ip: ip(), body: { reconnectCode: fakeCode } }));
-    const badEmail = "not-an-email-leak-check";
+    const badEmail = "invalid\u200bnickname-leak-check";
     secrets.push(badEmail);
     await track(joinRaw(invite.inviteCode, badEmail, ip()));
     const fakeKey = `ptbk_${"Q".repeat(43)}`;

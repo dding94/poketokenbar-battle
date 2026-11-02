@@ -6,10 +6,24 @@ struct OnlineBattleSetupInput {
     var server = ""
     var invite = ""
     var nickname = ""
-    var serverToApply: String? { nil }
-    func hasAppliedServer(_ applied: String) -> Bool { false }
-    func requirement(appliedServer: String, isBusy: Bool) -> Requirement { .serverMissing }
-    func joinAction(appliedServer: String, isBusy: Bool) -> OnlineBattleUIAction? { nil }
+    var serverToApply: String? { (try? OnlineBattleOrigin(server.trimmingCharacters(in: .whitespacesAndNewlines)))?.url.absoluteString }
+    func hasAppliedServer(_ applied: String) -> Bool {
+        guard let draft = serverToApply, let current = try? OnlineBattleOrigin(applied) else { return false }
+        return draft == current.url.absoluteString
+    }
+    func requirement(appliedServer: String, isBusy: Bool) -> Requirement {
+        if isBusy { return .busy }
+        if serverToApply == nil { return .serverMissing }
+        if !hasAppliedServer(appliedServer) { return .serverChanged }
+        if invite.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return .inviteMissing }
+        if nickname.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return .nicknameMissing }
+        return .ready
+    }
+    func joinAction(appliedServer: String, isBusy: Bool) -> OnlineBattleUIAction? {
+        guard requirement(appliedServer: appliedServer, isBusy: isBusy) == .ready else { return nil }
+        return .join(inviteCode: invite.trimmingCharacters(in: .whitespacesAndNewlines),
+                     email: nickname.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
 }
 
 /// The online session survives closing this 360pt popover. Views only dispatch typed user intent.
@@ -123,9 +137,7 @@ struct OnlineBattleScreen: View {
 private struct OnlineBattleSetupForm: View {
     let model: OnlineBattlePresentation
     let l: L
-    @State private var server = ""
-    @State private var invite = ""
-    @State private var email = ""
+    @State private var input = OnlineBattleSetupInput()
     @State private var recovery = ""
     @State private var reconnect = ""
 
@@ -135,34 +147,43 @@ private struct OnlineBattleSetupForm: View {
             VStack(alignment: .leading, spacing: 7) {
                 Text(l.onlineServerHint).font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-                TextField(l.onlineServer, text: $server).textFieldStyle(.roundedBorder)
+                TextField(l.onlineServer, text: $input.server).textFieldStyle(.roundedBorder)
                     .accessibilityIdentifier("online.server")
-                Button(l.onlineSaveServer) { model.send(.configureServer(server)) }
-                    .disabled(model.isBusy || (try? OnlineBattleOrigin(server)) == nil)
+                Button(l.onlineSaveServer) {
+                    if let address = input.serverToApply { model.send(.configureServer(address)) }
+                }
+                .disabled(model.isBusy || input.serverToApply == nil)
+                if input.hasAppliedServer(model.serverAddress) {
+                    Text(l.onlineServerSaved).font(.caption2).foregroundStyle(.secondary)
+                }
             }.practiceCard()
             VStack(alignment: .leading, spacing: 7) {
-                TextField(l.onlineInvite, text: $invite).textFieldStyle(.roundedBorder)
-                TextField(l.onlineEmail, text: $email).textFieldStyle(.roundedBorder)
-                Text(l.onlineEmailHint).font(.caption2).foregroundStyle(.secondary)
+                TextField(l.onlineInvite, text: $input.invite).textFieldStyle(.roundedBorder)
+                TextField(l.onlineNickname, text: $input.nickname).textFieldStyle(.roundedBorder)
+                Text(l.onlineNicknameHint).font(.caption2).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 Button(l.onlineJoin) {
-                    model.send(.join(inviteCode: invite, email: email)); invite = ""
+                    if let action = input.joinAction(appliedServer: model.serverAddress, isBusy: model.isBusy) {
+                        model.send(action); input.invite = ""
+                    }
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(model.isBusy || invite.isEmpty || email.isEmpty || model.serverAddress.isEmpty)
+                .disabled(input.requirement(appliedServer: model.serverAddress, isBusy: model.isBusy) != .ready)
+                Text(l.onlineSetupRequirement(input.requirement(appliedServer: model.serverAddress, isBusy: model.isBusy)))
+                    .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }.practiceCard()
             DisclosureGroup(l.onlineRecovery) {
                 VStack(alignment: .leading, spacing: 7) {
                     SecureField(l.onlineRecoveryCode, text: $recovery).textFieldStyle(.roundedBorder)
                     Button(l.onlineRecover) { model.send(.recover(code: recovery)); recovery = "" }
-                        .disabled(model.isBusy || recovery.isEmpty || model.serverAddress.isEmpty)
+                        .disabled(model.isBusy || recovery.isEmpty || !input.hasAppliedServer(model.serverAddress))
                     Divider()
                     SecureField(l.onlineReconnectCode, text: $reconnect).textFieldStyle(.roundedBorder)
                     Button(l.onlineReconnect) { model.send(.reconnect(code: reconnect)); reconnect = "" }
-                        .disabled(model.isBusy || reconnect.isEmpty || model.serverAddress.isEmpty)
+                        .disabled(model.isBusy || reconnect.isEmpty || !input.hasAppliedServer(model.serverAddress))
                 }.padding(.top, 6)
             }.practiceCard()
         }
-        .onAppear { server = model.serverAddress }
+        .onAppear { input.server = model.serverAddress }
     }
 }
