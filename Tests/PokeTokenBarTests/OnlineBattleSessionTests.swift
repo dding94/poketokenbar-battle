@@ -707,4 +707,38 @@ final class OnlineBattleSessionTests: XCTestCase {
         let reads = await http.count("/v1/me"); XCTAssertEqual(reads, 3, "late disable cleanup must not remove the new API credential")
     }
 
+    func testSecondJournalMismatchAfterFreshReplayCannotRefetchAgain() async throws {
+        let final = try battle()
+        let gap = try changed(final, ["state": "RUNNING", "result": NSNull(), "roundSeq": 1, "journal": JSONSerialization.jsonObject(with: JSONEncoder().encode([final.journal[1]]))])
+        let fresh = try changed(final, ["state": "RUNNING", "result": NSNull(), "roundSeq": 1, "journal": JSONSerialization.jsonObject(with: JSONEncoder().encode(Array(final.journal.prefix(1))))])
+        var altered = try JSONSerialization.jsonObject(with: JSONEncoder().encode(fresh.journal)) as! [[String: Any]]
+        altered[0]["p1"] = ["kind": "move", "slot": 1]
+        let mismatch = try changed(fresh, ["journal": altered, "roundSeq": final.roundSeq])
+        let (session, http, _, effects) = try await setup([gap])
+        await http.queue("/v1/battles/\(final.battleId)", [try response(fresh), .init(status: 503, body: Data())])
+        await http.route("/v1/battles/\(final.battleId)/advance", try JSONEncoder().encode(mismatch))
+        await session.bootstrap()
+        let reads = await http.count("/v1/battles/\(final.battleId)"); XCTAssertEqual(reads, 1)
+        let advances = await http.count("/v1/battles/\(final.battleId)/advance"); XCTAssertEqual(advances, 1)
+        XCTAssertEqual(effects.applications, 0)
+        XCTAssertNil(session.presentation.result)
+        XCTAssertNotNil(session.presentation.notice)
+    }
+
+    func testAuthoritativeShorterValidJournalReplacesRejectedGapAndContinues() async throws {
+        let final = try battle()
+        let gap = try changed(final, ["state": "RUNNING", "result": NSNull(), "journal": JSONSerialization.jsonObject(with: JSONEncoder().encode(Array(final.journal.dropFirst())))])
+        let fresh = try changed(final, ["state": "RUNNING", "result": NSNull(), "roundSeq": 1, "journal": JSONSerialization.jsonObject(with: JSONEncoder().encode(Array(final.journal.prefix(1))))])
+        let terminal = try changed(final, ["state": "RUNNING", "result": NSNull()])
+        let (session, http, _, effects) = try await setup([gap])
+        await http.route("/v1/battles/\(final.battleId)", try JSONEncoder().encode(fresh))
+        await http.route("/v1/battles/\(final.battleId)/advance", try JSONEncoder().encode(terminal))
+        await http.route("/v1/battles/\(final.battleId)/report", try JSONEncoder().encode(final))
+        await session.bootstrap()
+        XCTAssertEqual(session.presentation.room?.state, .completed)
+        XCTAssertEqual(effects.applications, 1)
+        XCTAssertNil(session.presentation.notice)
+        let reads = await http.count("/v1/battles/\(final.battleId)"); XCTAssertEqual(reads, 1)
+    }
+
 }
