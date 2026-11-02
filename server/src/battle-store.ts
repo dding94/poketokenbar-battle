@@ -51,7 +51,7 @@ export class BattleStore {
     const round = this.round(b.battleId, b.roundSeq);
     return round?.deadline != null && round.pair === null ? Math.min(expiry, round.deadline) : expiry;
   }
-  earliest(): number | null { return this.sql.exec<{ at: number | null }>("SELECT MIN(deadline) AS at FROM battle_rooms").toArray()[0]?.at ?? null; }
+  earliest(): number | null { return this.sql.exec<{ at: number | null }>("SELECT MIN(deadline) AS at FROM battle_rooms WHERE deadline IS NOT NULL").toArray()[0]?.at ?? null; }
   due(now: number): Battle[] { return this.sql.exec<StoredBattle>("SELECT data FROM battle_rooms WHERE deadline<=?", now).toArray().map(r => JSON.parse(r.data)); }
   forTrainer(id: string): Battle[] { return this.sql.exec<StoredBattle>("SELECT data FROM battle_rooms WHERE (p1=? OR p2=?) AND deadline IS NOT NULL", id, id).toArray().map(r => JSON.parse(r.data)); }
   list(id: string, before: number): StoredBattle[] { return this.sql.exec<StoredBattle>("SELECT seq,data FROM battle_rooms WHERE (p1=? OR p2=?) AND seq<? ORDER BY seq DESC LIMIT 101", id, id, before).toArray(); }
