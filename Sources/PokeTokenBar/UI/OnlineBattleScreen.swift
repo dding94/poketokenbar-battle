@@ -1,5 +1,17 @@
 import SwiftUI
 
+/// Setup prerequisites are shared by button availability and action dispatch.
+struct OnlineBattleSetupInput {
+    enum Requirement: Equatable { case busy, serverMissing, serverChanged, inviteMissing, nicknameMissing, ready }
+    var server = ""
+    var invite = ""
+    var nickname = ""
+    var serverToApply: String? { nil }
+    func hasAppliedServer(_ applied: String) -> Bool { false }
+    func requirement(appliedServer: String, isBusy: Bool) -> Requirement { .serverMissing }
+    func joinAction(appliedServer: String, isBusy: Bool) -> OnlineBattleUIAction? { nil }
+}
+
 /// The online session survives closing this 360pt popover. Views only dispatch typed user intent.
 @MainActor
 struct OnlineBattleScreen: View {
