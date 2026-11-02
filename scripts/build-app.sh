@@ -50,7 +50,9 @@ echo "==> $APP 조립"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 lipo -create "${SLICES[@]}" -output "$APP/Contents/MacOS/$EXEC_NAME"
-lipo "$APP/Contents/MacOS/$EXEC_NAME" -verify_arch "${ARCHS[@]}"
+for arch in "${ARCHS[@]}"; do
+    lipo "$APP/Contents/MacOS/$EXEC_NAME" -verify_arch "$arch"
+done
 echo "   archs: $(lipo -archs "$APP/Contents/MacOS/$EXEC_NAME")"
 # 심볼 strip — 릴리스 바이너리 1.84MB → 0.80MB(-57%). codesign 전에 수행(서명 무효화 방지).
 strip -rSTx "$APP/Contents/MacOS/$EXEC_NAME" 2>/dev/null || strip -rSx "$APP/Contents/MacOS/$EXEC_NAME"
