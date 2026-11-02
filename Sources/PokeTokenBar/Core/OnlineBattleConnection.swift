@@ -15,7 +15,12 @@ enum OnlineBattleConnectionEvent: Sendable {
     /// Notifications trigger authoritative HTTP reads; they never award results.
     case refreshRequested
 }
-enum OnlineBattleSocketEvent: Sendable { case text(String), closed(Int), failed(Int?) }
+enum OnlineBattleSocketEvent: Sendable, Equatable {
+    case text(String), closed(Int), failed(Int?)
+    static func receiveFailure(httpStatus: Int?, closeCode: Int) -> Self {
+        closeCode != 0 ? .closed(closeCode) : .failed(httpStatus)
+    }
+}
 protocol OnlineBattleSocket: Sendable {
     var events: AsyncStream<OnlineBattleSocketEvent> { get }
     func sendPing() async throws
@@ -261,8 +266,7 @@ private final class OnlineBattleURLSessionSocket: NSObject, OnlineBattleSocket, 
                 if !Task.isCancelled {
                     let status = (task.response as? HTTPURLResponse)?.statusCode
                     let closeCode = task.closeCode.rawValue
-                    if closeCode != 0 { continuation.yield(.closed(closeCode)) }
-                    else { continuation.yield(.failed(status)) }
+                    continuation.yield(.receiveFailure(httpStatus: status, closeCode: closeCode))
                 }
             }
         }

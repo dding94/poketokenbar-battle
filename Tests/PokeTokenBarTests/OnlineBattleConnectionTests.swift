@@ -70,6 +70,11 @@ final class OnlineBattleConnectionTests: XCTestCase {
         let snapshot = await connection.snapshot()
         await connection.receive(value, generation: snapshot.generation)
     }
+    func testUnauthorizedUpgradeTakesPrecedenceOverAbnormalTransportClose() {
+        XCTAssertEqual(OnlineBattleSocketEvent.receiveFailure(httpStatus: 401, closeCode: 1006), .failed(401))
+        XCTAssertEqual(OnlineBattleSocketEvent.receiveFailure(httpStatus: nil, closeCode: 4003), .closed(4003))
+        XCTAssertEqual(OnlineBattleSocketEvent.receiveFailure(httpStatus: 503, closeCode: 0), .failed(503))
+    }
     func testSocketHeaderHelloPongAndThirtySecondPing() async throws {
         let (connection, clock, driver, _) = try await setup()
         let request = await driver.requests[0]
