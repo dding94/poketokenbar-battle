@@ -14,7 +14,9 @@ private actor OnlineTestSocket: OnlineBattleSocket {
     init() { let stream = AsyncStream<OnlineBattleSocketEvent>.makeStream(); events = stream.stream; continuation = stream.continuation }
     var pings = 0
     var closes = 0
-    func sendPing() { pings += 1 }
+    var failPing = false
+    func setFailPing() { failPing = true }
+    func sendPing() throws { pings += 1; if failPing { throw OnlineBattleFailure.transport } }
     func close() { closes += 1; continuation.finish() }
 }
 private actor OnlineTestSocketDriver: OnlineBattleSocketDriver {
@@ -29,6 +31,31 @@ private actor OnlineConnectionEvents {
     var events: [OnlineBattleConnectionEvent] = []
     func append(_ value: OnlineBattleConnectionEvent) { events.append(value) }
     var refreshCount: Int { events.filter { if case .refreshRequested = $0 { return true }; return false }.count }
+}
+private actor OnlineHeldSocketDriver: OnlineBattleSocketDriver {
+    var pending: CheckedContinuation<any OnlineBattleSocket, Error>?
+    var waiting: CheckedContinuation<Void, Never>?
+    func connect(_ request: URLRequest) async throws -> any OnlineBattleSocket {
+        try await withCheckedThrowingContinuation { pending = $0; waiting?.resume(); waiting = nil }
+    }
+    func waitUntilStarted() async { if pending != nil { return }; await withCheckedContinuation { waiting = $0 } }
+    func finish(_ socket: any OnlineBattleSocket) { pending?.resume(returning: socket); pending = nil }
+}
+private struct OnlineFailingSocketDriver: OnlineBattleSocketDriver {
+    let failure: OnlineBattleFailure
+    func connect(_ request: URLRequest) async throws -> any OnlineBattleSocket { throw failure }
+}
+private actor OnlineSleepGate {
+    var continuation: CheckedContinuation<Void, Error>?
+    var waiting: CheckedContinuation<Void, Never>?
+    var closed = false
+    func sleep() async throws {
+        if closed { throw CancellationError() }
+        try await withCheckedThrowingContinuation { continuation = $0; waiting?.resume(); waiting = nil }
+    }
+    func waitUntilSleeping() async { if continuation != nil { return }; await withCheckedContinuation { waiting = $0 } }
+    func release() { continuation?.resume(); continuation = nil }
+    func close() { closed = true; continuation?.resume(throwing: CancellationError()); continuation = nil }
 }
 @MainActor
 final class OnlineBattleConnectionTests: XCTestCase {
@@ -187,6 +214,56 @@ final class OnlineBattleConnectionTests: XCTestCase {
         }
         let requests = await driver.requests; XCTAssertEqual(requests.count, 10)
         await connection.stop()
+    }
+    func testLateSocketCreationClosesOldSocketWithoutChangingNewConfiguration() async throws {
+        let driver = OnlineHeldSocketDriver(), connection = OnlineBattleConnection(driver: driver, automaticTicks: false)
+        let origin = try OnlineBattleOrigin("https://example.invalid")
+        let old = Task { await connection.configure(origin: origin, accessKey: "synthetic-old") }
+        await driver.waitUntilStarted()
+        await connection.configure(origin: nil, accessKey: nil)
+        let socket = OnlineTestSocket(); await driver.finish(socket); await old.value
+        let state = await connection.snapshot(); XCTAssertEqual(state.state, .unconfigured)
+        let closes = await socket.closes; XCTAssertEqual(closes, 1)
+        await connection.stop()
+    }
+    func testDriverFailureAndCurrentHTTPAuthenticationFailureClassifyCorrectly() async throws {
+        for failure in [OnlineBattleFailure.unauthorized, .transport] {
+            let connection = OnlineBattleConnection(driver: OnlineFailingSocketDriver(failure: failure), automaticTicks: false)
+            await connection.configure(origin: try OnlineBattleOrigin("https://example.invalid"), accessKey: "synthetic")
+            let state = await connection.snapshot(); XCTAssertEqual(state.state, failure == .unauthorized ? .revoked : .retryWaiting)
+            await connection.stop()
+        }
+        let (connection, _, _, _) = try await setup()
+        let current = await connection.snapshot()
+        await connection.authenticationFailed(generation: current.generation)
+        let state = await connection.snapshot(); XCTAssertEqual(state.state, .revoked)
+        await connection.stop()
+    }
+    func testFailedPingRetriesAndOpenPopoverStartsPollingImmediately() async throws {
+        let (connection, clock, driver, events) = try await setup()
+        await send(.text(hello), to: connection)
+        let socket = await driver.sockets[0]; await socket.setFailPing()
+        clock.advance(60); await connection.tick()
+        var state = await connection.snapshot(); XCTAssertEqual(state.state, .retryWaiting)
+        await connection.setPopoverOpen(true)
+        for retry in 0..<3 {
+            clock.advance(pow(2, Double(retry))); await connection.tick()
+            await send(.failed(nil), to: connection)
+        }
+        state = await connection.snapshot(); XCTAssertEqual(state.state, .polling)
+        let count = await events.refreshCount; XCTAssertEqual(count, 2)
+        await connection.stop()
+    }
+    func testAutomaticSchedulerUsesInjectedSleepAndStopsWithoutRealWaiting() async throws {
+        let gate = OnlineSleepGate(), clock = OnlineTestClock(), driver = OnlineTestSocketDriver()
+        let timedOut = expectation(description: "injected timer fires")
+        let connection = OnlineBattleConnection(driver: driver, clock: .init(now: { clock.now() }, sleep: { _ in try await gate.sleep() }), jitter: { $0 }, observer: { event in
+            if case .changed(let snapshot) = event, snapshot.state == .retryWaiting { timedOut.fulfill() }
+        })
+        await connection.configure(origin: try OnlineBattleOrigin("https://example.invalid"), accessKey: "synthetic")
+        await gate.waitUntilSleeping(); clock.advance(15); await gate.release()
+        await fulfillment(of: [timedOut], timeout: 2)
+        await connection.stop(); await gate.close()
     }
     func testMissingConfigurationAndKeyNeverOpenSocket() async throws {
         let driver = OnlineTestSocketDriver(), connection = OnlineBattleConnection(driver: driver, automaticTicks: false)

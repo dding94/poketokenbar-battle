@@ -7,9 +7,7 @@ struct OnlineBattleOrigin: Equatable, Sendable {
     init(_ value: String) throws {
         guard value == value.trimmingCharacters(in: .whitespacesAndNewlines),
               var components = URLComponents(string: value), components.scheme?.lowercased() == "https",
-              let host = components.host, !host.isEmpty, components.user == nil, components.password == nil,
-              components.path.isEmpty || components.path == "/", components.query == nil, components.fragment == nil,
-              components.port == nil || (1...65535).contains(components.port!) else { throw OnlineBattleFailure.invalidOrigin }
+              let host = components.host, !host.isEmpty, Self.isOriginOnly(components) else { throw OnlineBattleFailure.invalidOrigin }
         components.scheme = "https"; components.host = host.lowercased(); components.path = ""
         if components.port == 443 { components.port = nil }
         guard let url = components.url else { throw OnlineBattleFailure.invalidOrigin }
@@ -19,13 +17,17 @@ struct OnlineBattleOrigin: Equatable, Sendable {
     init(testLoopbackURL: URL) throws {
         guard var components = URLComponents(url: testLoopbackURL, resolvingAgainstBaseURL: false),
               components.scheme == "http", ["localhost", "127.0.0.1", "[::1]", "::1"].contains(components.host ?? ""),
-              components.user == nil, components.password == nil, components.query == nil, components.fragment == nil,
-              components.path.isEmpty || components.path == "/", components.port == nil || (1...65535).contains(components.port!) else {
+              Self.isOriginOnly(components) else {
             throw OnlineBattleFailure.invalidOrigin
         }
         components.path = ""
         guard let url = components.url else { throw OnlineBattleFailure.invalidOrigin }
         self.url = url
+    }
+    private static func isOriginOnly(_ components: URLComponents) -> Bool {
+        components.user == nil && components.password == nil && components.query == nil && components.fragment == nil
+            && (components.path.isEmpty || components.path == "/")
+            && (components.port.map { (1...65535).contains($0) } ?? true)
     }
     var hash: String { SHA256.hash(data: Data(url.absoluteString.utf8)).map { String(format: "%02x", $0) }.joined() }
 }
