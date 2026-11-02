@@ -73,7 +73,9 @@ final class OnlineBattlePresentation {
         case .accept: guard canAccept else { return }
         case .confirm: guard canConfirm else { return }
         case .prepareBattle: guard canPrepare else { return }
-        case .chooseMove(let slot): guard canChooseMove(slot) else { return }
+        case .chooseMove(let slot):
+            guard canChooseMove(slot) else { return }
+            choiceSubmitted = true
         case .decline: guard !isBusy, localSide == .p2, room?.state == .pending else { return }
         case .cancel: guard !isBusy, [.pending, .accepted, .ready].contains(room?.state) else { return }
         case .retryCredentialSave: guard !isBusy, canRetryCredentialSave else { return }
