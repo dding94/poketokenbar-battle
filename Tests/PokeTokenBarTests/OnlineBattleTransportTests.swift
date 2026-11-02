@@ -166,6 +166,72 @@ final class OnlineBattleAPITests: XCTestCase {
         let requests = await driver.requests; XCTAssertTrue(requests.isEmpty)
         } catch { XCTFail("Expected successful fixture operation; received \(error)") }
     }
+    func testAllBattleActionsUseExactClosedBodiesAndRoutes() async throws {
+        let view = #"{"battleId":"bt_synthetic","state":"PENDING","revision":1,"mode":"manual","p1":{"trainerId":"p1"},"p2":{"trainerId":"p2"},"createdAt":1,"expiresAt":2,"startedAt":null,"reportedAt":null,"confirmed":false,"config":null,"roundSeq":0,"deadline":null,"ownChoice":null,"journal":[],"result":null,"reason":null,"rematchOf":null}"#
+        let driver = OnlineHTTPStub(Array(repeating: response(view), count: 13)), api = try api(driver)
+        await api.setAccessKey("synthetic")
+        let set = BattleSet(speciesNum: 25, form: nil, level: 50, gender: .male, nature: "hardy", ability: "static", moves: ["thunderbolt"], ivs: [:], shiny: false)
+        let snapshot = OnlineBattleSnapshot(instanceId: "synthetic-individual", set: set, publicInfo: .init(speciesNum: 25, species: "Pikachu", level: 50, types: ["Electric"], stats: ["hp": 100]), hp: 100)
+        _ = try await api.battle(id: "bt_synthetic")
+        _ = try await api.createBattle(requestId: "synthetic-request", targetTrainerId: "p2", mode: .manual, snapshot: snapshot)
+        _ = try await api.update(id: "bt_synthetic", revision: 1, snapshot: snapshot)
+        _ = try await api.accept(id: "bt_synthetic", revision: 2, snapshot: snapshot)
+        _ = try await api.confirm(id: "bt_synthetic", revision: 3)
+        _ = try await api.decline(id: "bt_synthetic", revision: 3)
+        _ = try await api.cancel(id: "bt_synthetic", revision: 3)
+        _ = try await api.ready(id: "bt_synthetic", revision: 3, connectionId: "synthetic-connection", engineHash: "synthetic-hash", rulesVersion: "rules", policyVersion: "policy")
+        _ = try await api.start(id: "bt_synthetic", revision: 3, connectionId: "synthetic-connection", readyToken: "synthetic-ready", engineHash: "synthetic-hash")
+        _ = try await api.choose(id: "bt_synthetic", roundSeq: 1, slot: 2)
+        _ = try await api.advance(id: "bt_synthetic", processedRoundSeq: 1)
+        _ = try await api.report(id: "bt_synthetic", report: .init(readyToken: "synthetic-ready", engineHash: "synthetic-hash", terminalSeq: 1, winner: .p1, logHash: "log", journalHash: "journal", finalHp: .init(p1: 50, p2: 0)))
+        _ = try await api.rematch(id: "bt_synthetic", requestId: "synthetic-rematch", snapshot: snapshot)
+        let requests = await driver.requests
+        XCTAssertEqual(requests.count, 13)
+        XCTAssertEqual(requests.map { $0.url!.path }, ["/v1/battles/bt_synthetic", "/v1/battles"] + ["update", "accept", "confirm", "decline", "cancel", "ready", "start", "choices", "advance", "report", "rematch"].map { "/v1/battles/bt_synthetic/" + $0 })
+        let expectedKeys = [["mode", "requestId", "snapshot", "targetTrainerId"], ["revision", "snapshot"], ["revision", "snapshot"], ["revision"], ["revision"], ["revision"], ["connectionId", "engineHash", "policyVersion", "revision", "rulesVersion"], ["connectionId", "engineHash", "readyToken", "revision"], ["choice", "roundSeq"], ["processedRoundSeq"], ["engineHash", "finalHp", "journalHash", "logHash", "readyToken", "terminalSeq", "winner"], ["requestId", "snapshot"]]
+        for (request, keys) in zip(requests.dropFirst(), expectedKeys) {
+            XCTAssertEqual(request.httpMethod, "POST")
+            let body = try XCTUnwrap(JSONSerialization.jsonObject(with: XCTUnwrap(request.httpBody)) as? [String: Any])
+            XCTAssertEqual(body.keys.sorted(), keys)
+        }
+        let choice = try XCTUnwrap(JSONSerialization.jsonObject(with: XCTUnwrap(requests[9].httpBody)) as? [String: Any])
+        XCTAssertEqual(choice["choice"] as? String, "move 2")
+    }
+    func testRecoveryAndReconnectNeverAutomaticallyRetry() async throws {
+        let driver = OnlineHTTPStub([]), api = try api(driver)
+        for reconnect in [false, true] {
+            do {
+                if reconnect { _ = try await api.reconnect(reconnectCode: "synthetic", displayEmail: "synthetic@example.invalid") }
+                else { _ = try await api.recover(recoveryCode: "synthetic") }
+                XCTFail()
+            } catch { XCTAssertEqual(error as? OnlineBattleFailure, .transport) }
+        }
+        let requests = await driver.requests
+        XCTAssertEqual(requests.count, 2)
+        XCTAssertEqual(requests.map { $0.url!.path }, ["/v1/recover", "/v1/reconnect"])
+        XCTAssertTrue(requests.allSatisfy { $0.value(forHTTPHeaderField: "Authorization") == nil })
+    }
+    func testGroupAdministrationRoutesDecodeTheirActualServerEnvelopes() async throws {
+        let group = #"{"groupId":"group-synthetic","name":"Synthetic","hostTrainerId":"host-synthetic"}"#
+        let invite = #"{"inviteId":"invite-synthetic","createdAt":1,"expiresAt":2,"maxUses":30,"uses":0,"revoked":false,"revokedAt":null}"#
+        let driver = OnlineHTTPStub([
+            response("{\"group\":" + group + ",\"members\":[]}"), response(#"{"entries":[]}"#), response("{\"invites\":[" + invite + "]}"),
+            response("{\"invite\":" + invite + ",\"inviteCode\":\"synthetic-code\"}"), response("{\"invite\":" + invite + "}"),
+            response(#"{"trainerId":"synthetic-other","reconnectCode":"synthetic-code","expiresAt":2}"#), response(#"{"ok":true,"revokedInvites":3}"#), response("{\"group\":" + group + "}"), response(#"{"ok":true}"#)
+        ]), api = try api(driver)
+        await api.setAccessKey("synthetic")
+        let members = try await api.group(); XCTAssertTrue(members.members.isEmpty)
+        let audit = try await api.audit(); XCTAssertTrue(audit.entries.isEmpty)
+        let invites = try await api.invites(); XCTAssertEqual(invites.invites.count, 1)
+        let issued = try await api.createInvite(ttlSeconds: 3600, maxUses: 1); XCTAssertFalse(String(reflecting: issued).contains("synthetic-code"))
+        _ = try await api.revokeInvite(inviteId: "invite-synthetic")
+        let code = try await api.issueReconnectCode(trainerId: "synthetic-other"); XCTAssertFalse(String(reflecting: code).contains("synthetic-code"))
+        let revoked = try await api.removeMember(trainerId: "synthetic-other"); XCTAssertEqual(revoked, 3)
+        let transfer = try await api.transferHost(trainerId: "synthetic-other"); XCTAssertEqual(transfer.groupId, "group-synthetic")
+        try await api.leave()
+        let requests = await driver.requests
+        XCTAssertEqual(requests.map { $0.url!.path }, ["/v1/group", "/v1/audit", "/v1/invites", "/v1/invites", "/v1/invites/revoke", "/v1/reconnect-codes", "/v1/members/remove", "/v1/host/transfer", "/v1/leave"])
+    }
     func testRedirectDelegateNeverFollowsLocation() {
         let transport = OnlineBattleURLSessionTransport()
         let session = URLSession(configuration: .ephemeral)

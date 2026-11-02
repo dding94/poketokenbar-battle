@@ -121,7 +121,7 @@ actor OnlineBattleConnection: OnlineBattleConnecting {
         await publish()
         guard epoch == generation else { return }
         var parts = URLComponents(url: origin.url, resolvingAgainstBaseURL: false)!
-        parts.scheme = "wss"; parts.path = "/v1/connect"
+        parts.scheme = origin.url.scheme == "http" ? "ws" : "wss"; parts.path = "/v1/connect"
         var request = URLRequest(url: parts.url!)
         request.timeoutInterval = 15; request.setValue("Bearer " + accessKey, forHTTPHeaderField: "Authorization")
         do {
@@ -160,7 +160,6 @@ actor OnlineBattleConnection: OnlineBattleConnecting {
     }
     /// Also an injection boundary for deterministic transport tests.
     func receive(_ event: OnlineBattleSocketEvent, generation epoch: UInt64) async {
-        return // RED scaffold: transport events have no behavior yet.
         guard epoch == generation, [.connecting, .connected].contains(state) else { return }
         switch event {
         case .text("pong"): return
@@ -179,7 +178,7 @@ actor OnlineBattleConnection: OnlineBattleConnecting {
                 await publish()
                 guard epoch == generation else { return }
                 await observer(.refreshRequested)
-            } else if ["presence", "group_changed", "battle_changed", "battle_round"].contains(message.type), state == .connected {
+            } else if ["presence", "group_changed", "battle_changed", "battle_round", "battle_void"].contains(message.type), state == .connected {
                 await observer(.refreshRequested)
             } else { await terminate(.protocolError) }
         case .closed(4001): await terminate(.replaced)
@@ -212,7 +211,6 @@ actor OnlineBattleConnection: OnlineBattleConnecting {
         if state == .polling, popoverOpen { await observer(.refreshRequested) }
     }
     func tick() async {
-        return // RED scaffold: clock policy has no behavior yet.
         let now = clock.now(), epoch = generation
         if state == .connected {
             if let openedAt, now - openedAt >= 60 { attempts = 0 }

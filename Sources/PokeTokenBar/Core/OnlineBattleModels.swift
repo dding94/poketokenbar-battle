@@ -15,7 +15,18 @@ struct OnlineBattleOrigin: Equatable, Sendable {
         guard let url = components.url else { throw OnlineBattleFailure.invalidOrigin }
         self.url = url
     }
-    init(testLoopbackURL: URL) throws { throw OnlineBattleFailure.invalidOrigin }
+    /// Explicit injection for local workerd fixtures; user-entered settings always use the HTTPS initializer.
+    init(testLoopbackURL: URL) throws {
+        guard var components = URLComponents(url: testLoopbackURL, resolvingAgainstBaseURL: false),
+              components.scheme == "http", ["localhost", "127.0.0.1", "[::1]", "::1"].contains(components.host ?? ""),
+              components.user == nil, components.password == nil, components.query == nil, components.fragment == nil,
+              components.path.isEmpty || components.path == "/", components.port == nil || (1...65535).contains(components.port!) else {
+            throw OnlineBattleFailure.invalidOrigin
+        }
+        components.path = ""
+        guard let url = components.url else { throw OnlineBattleFailure.invalidOrigin }
+        self.url = url
+    }
     var hash: String { SHA256.hash(data: Data(url.absoluteString.utf8)).map { String(format: "%02x", $0) }.joined() }
 }
 enum OnlineBattleFailure: String, Error, Equatable, Sendable { case invalidSettings, credentialsDisabled, invalidOrigin, invalidRequest, transport, invalidResponse, staleGeneration, unauthorized, protocolError, credentialsUnavailable }
@@ -77,9 +88,18 @@ enum OnlineBattleRelayToken: Equatable, Sendable, Codable {
     case move(Int), timeout, policy
     private enum CodingKeys: String, CodingKey { case kind, slot }
     private enum Kind: String, Codable { case move, timeout, policy }
+    private struct AnyKey: CodingKey {
+        let stringValue: String
+        let intValue: Int? = nil
+        init?(stringValue: String) { self.stringValue = stringValue }
+        init?(intValue: Int) { return nil }
+    }
     init(from decoder: Decoder) throws {
         let box = try decoder.container(keyedBy: CodingKeys.self)
-        switch try box.decode(Kind.self, forKey: .kind) {
+        let kind = try box.decode(Kind.self, forKey: .kind)
+        let keys = try decoder.container(keyedBy: AnyKey.self).allKeys.map(\.stringValue)
+        guard Set(keys) == Set(kind == .move ? ["kind", "slot"] : ["kind"]) else { throw OnlineBattleFailure.invalidResponse }
+        switch kind {
         case .move:
             let slot = try box.decode(Int.self, forKey: .slot)
             guard (1...4).contains(slot) else { throw OnlineBattleFailure.invalidResponse }

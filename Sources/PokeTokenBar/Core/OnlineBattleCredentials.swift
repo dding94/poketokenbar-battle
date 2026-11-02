@@ -67,7 +67,6 @@ actor OnlineBattleCredentials: OnlineBattleCredentialStoring {
         self.operations = operations; self.gate = gate
     }
     private func query(_ scope: OnlineBattleCredentialScope) throws -> [String: Any] {
-        throw OnlineBattleFailure.credentialsUnavailable // RED scaffold
         guard gate.allowsAccess() else { throw OnlineBattleFailure.credentialsDisabled }
         guard UUID(uuidString: scope.profileID) != nil else { throw OnlineBattleFailure.invalidSettings }
         return [kSecClass as String: kSecClassGenericPassword,

@@ -9,11 +9,13 @@ private final class OnlineTestClock: @unchecked Sendable {
     var clock: OnlineBattleConnectionClock { .init(now: { self.now() }, sleep: { _ in throw CancellationError() }) }
 }
 private actor OnlineTestSocket: OnlineBattleSocket {
-    nonisolated let events: AsyncStream<OnlineBattleSocketEvent> = AsyncStream { _ in }
+    nonisolated let events: AsyncStream<OnlineBattleSocketEvent>
+    nonisolated let continuation: AsyncStream<OnlineBattleSocketEvent>.Continuation
+    init() { let stream = AsyncStream<OnlineBattleSocketEvent>.makeStream(); events = stream.stream; continuation = stream.continuation }
     var pings = 0
     var closes = 0
     func sendPing() { pings += 1 }
-    func close() { closes += 1 }
+    func close() { closes += 1; continuation.finish() }
 }
 private actor OnlineTestSocketDriver: OnlineBattleSocketDriver {
     var requests: [URLRequest] = []
@@ -150,6 +152,40 @@ final class OnlineBattleConnectionTests: XCTestCase {
         await send(.text(#"{"v":1,"type":"battle_void","battleId":"bt_synthetic","reason":"result_mismatch"}"#), to: connection)
         let state = await connection.snapshot(); XCTAssertEqual(state.state, .connected)
         let count = await events.refreshCount; XCTAssertEqual(count, 2)
+        await connection.stop()
+    }
+    func testDriverStreamActuallyDeliversHelloToConnection() async throws {
+        let received = expectation(description: "driver hello consumed")
+        let driver = OnlineTestSocketDriver()
+        let connection = OnlineBattleConnection(driver: driver, automaticTicks: false) { event in
+            if case .changed(let snapshot) = event, snapshot.state == .connected { received.fulfill() }
+        }
+        await connection.configure(origin: try OnlineBattleOrigin("https://example.invalid"), accessKey: "synthetic")
+        let socket = await driver.sockets[0]
+        socket.continuation.yield(.text(hello))
+        await fulfillment(of: [received], timeout: 2)
+        let state = await connection.snapshot(); XCTAssertEqual(state.connectionId, "synthetic-connection")
+        await connection.stop()
+    }
+    func testLoopbackFixtureUsesWSWithoutMakingUserHTTPAllowed() async throws {
+        let driver = OnlineTestSocketDriver(), connection = OnlineBattleConnection(driver: driver, automaticTicks: false)
+        await connection.configure(origin: try OnlineBattleOrigin(testLoopbackURL: URL(string: "http://127.0.0.1:8787")!), accessKey: "synthetic")
+        let request = await driver.requests[0]
+        XCTAssertEqual(request.url?.absoluteString, "ws://127.0.0.1:8787/v1/connect")
+        await connection.stop()
+    }
+    func testShortConnectionsBackOffToSixtySecondCap() async throws {
+        let (connection, clock, driver, _) = try await setup()
+        for attempt in 0..<9 {
+            await send(.text(hello), to: connection)
+            await send(.closed(1006), to: connection)
+            let delay = min(60, pow(2, Double(attempt)))
+            clock.advance(delay - 0.1); await connection.tick()
+            var state = await connection.snapshot(); XCTAssertEqual(state.state, .retryWaiting)
+            clock.advance(0.1); await connection.tick()
+            state = await connection.snapshot(); XCTAssertEqual(state.state, .connecting)
+        }
+        let requests = await driver.requests; XCTAssertEqual(requests.count, 10)
         await connection.stop()
     }
     func testMissingConfigurationAndKeyNeverOpenSocket() async throws {

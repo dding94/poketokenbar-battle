@@ -81,7 +81,6 @@ actor OnlineBattleAPI {
             guard let error = try? JSONDecoder().decode(ErrorEnvelope.self, from: response.body) else { throw OnlineBattleFailure.invalidResponse }
             throw OnlineBattleServerError(code: error.error.code, retryAfter: response.status == 429 ? response.retryAfter : nil)
         }
-        throw OnlineBattleFailure.invalidResponse // RED scaffold: successful responses not decoded yet.
         do { return try JSONDecoder().decode(Response.self, from: response.body) }
         catch { throw OnlineBattleFailure.invalidResponse }
     }
