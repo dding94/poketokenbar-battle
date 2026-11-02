@@ -34,7 +34,7 @@ final class OnlineBattleReviewFixTests: XCTestCase {
     func testGroupBackForwardsWhileBusyAndPreservesRunningBattle() {
         let model = OnlineBattleScreenRenderingTests.model()
         OnlineBattleScreenRenderingTests.arena(model)
-        model.phase = .verifying; model.isBusy = true
+        model.phase = .arena; model.isBusy = true
         let deadline = model.deadline
         var actions = 0
         model.onAction = { action in
@@ -52,6 +52,15 @@ final class OnlineBattleReviewFixTests: XCTestCase {
             let model = OnlineBattleScreenRenderingTests.model()
             OnlineBattleScreenRenderingTests.arena(model)
             model.phase = phase; model.isBusy = true
+            if phase == .room {
+                model.room = OnlineBattleScreenRenderingTests.room(state: .accepted, confirmed: false)
+                model.arena = nil; model.deadline = nil
+            } else if phase == .verifying {
+                model.room = OnlineBattleScreenRenderingTests.room(state: .reported)
+                if let view = model.arena { model.arena = .init(turn: view.turn, ended: true, p1: view.p1, p2: view.p2) }
+                model.deadline = nil
+            }
+            let roomState = model.room?.state
             var closed = false
             var routeActions = 0
             model.onAction = { action in
@@ -68,7 +77,7 @@ final class OnlineBattleReviewFixTests: XCTestCase {
             XCTAssertEqual(model.phase, .lobby)
             XCTAssertFalse(screen.showsGroupBack)
             XCTAssertFalse(closed)
-            XCTAssertEqual(model.room?.state, .running)
+            XCTAssertEqual(model.room?.state, roomState)
         }
     }
 
@@ -89,24 +98,30 @@ final class OnlineBattleReviewFixTests: XCTestCase {
         XCTAssertEqual(offline.displayName, "Magikarp", "Uncached offline names retain the public English name")
     }
 
-    func testMountedSpeciesLabelLoadsOnlyPublicNumberThroughInjectedProvider() async throws {
-        let provider = OnlineBattleSyntheticNameProvider()
-        let names = PokemonNameDisplayStore()
-        let label = OnlineBattleSpeciesNameLevel(speciesNum: 25, publicName: "Pikachu", level: 50, language: .ko,
-                                                 provider: provider, displayStore: names)
-        XCTAssertEqual(label.displayName, "Pikachu")
-        let host = NSHostingView(rootView: label.frame(width: 320, height: 60))
-        let window = NSWindow(contentRect: NSRect(x: -10000, y: -10000, width: 320, height: 60),
-                              styleMask: .borderless, backing: .buffered, defer: false)
-        window.isReleasedWhenClosed = false; window.contentView = host; window.orderFront(nil)
-        defer { window.close() }
-        let deadline = ContinuousClock.now + .seconds(2)
-        while names.names[label.speciesResource] == nil && ContinuousClock.now < deadline {
-            try await Task.sleep(for: .milliseconds(10))
+    func testMountedSpeciesLabelLoadsPublicSpeciesAndFormThroughInjectedProvider() async throws {
+        let cases = [
+            (25, "Pikachu", "피카츄", [PokemonNameResource(kind: .pokemonSpecies, name: "25")]),
+            (492, "Shaymin-Sky", "쉐이미 [스카이폼]", [.init(kind: .pokemonSpecies, name: "492"), .init(kind: .pokemonForm, name: "10064")])
+        ]
+        for (number, publicName, expected, expectedResources) in cases {
+            let provider = OnlineBattleSyntheticNameProvider()
+            let names = PokemonNameDisplayStore()
+            let label = OnlineBattleSpeciesNameLevel(speciesNum: number, publicName: publicName, level: 50, language: .ko,
+                                                     provider: provider, displayStore: names)
+            XCTAssertEqual(label.displayName, publicName)
+            let host = NSHostingView(rootView: label.frame(width: 320, height: 60))
+            let window = NSWindow(contentRect: NSRect(x: -10000, y: -10000, width: 320, height: 60),
+                                  styleMask: .borderless, backing: .buffered, defer: false)
+            window.isReleasedWhenClosed = false; window.contentView = host; window.orderFront(nil)
+            defer { window.close() }
+            let deadline = ContinuousClock.now + .seconds(2)
+            while label.displayName != expected && ContinuousClock.now < deadline {
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            XCTAssertEqual(label.displayName, expected)
+            let resources = await provider.resources
+            XCTAssertEqual(resources, expectedResources)
         }
-        XCTAssertEqual(label.displayName, "피카츄")
-        let resources = await provider.resources
-        XCTAssertEqual(resources, [.init(kind: .pokemonSpecies, name: "25")])
     }
 
     func testSpeciesClientRoutingAndCacheStaySeparateFromFormKind() async throws {
