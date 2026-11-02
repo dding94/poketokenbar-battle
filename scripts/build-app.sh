@@ -33,11 +33,17 @@ if [[ "${PTB_NATIVE_ARCH_ONLY:-0}" == "1" ]]; then
     [[ "${PTB_REQUIRE_STABLE_SIGN:-0}" == "1" ]] && { echo "   ✗ 릴리스 빌드는 PTB_NATIVE_ARCH_ONLY 를 쓸 수 없다 (universal 필수)." >&2; exit 1; }
     ARCHS=("$(uname -m)")
 fi
+SLICE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/ptb-build-slices.XXXXXX")"
+trap 'rm -rf "$SLICE_DIR"' EXIT
 SLICES=()
 for arch in "${ARCHS[@]}"; do
     echo "==> swift build -c release --arch $arch"
     swift build -c release --arch "$arch"
-    SLICES+=("$(swift build -c release --arch "$arch" --show-bin-path)/$PRODUCT")
+    source="$(swift build -c release --arch "$arch" --show-bin-path)/$PRODUCT"
+    lipo "$source" -verify_arch "$arch"
+    # Xcode may reuse one output path for both builds; preserve this slice before the next build.
+    cp "$source" "$SLICE_DIR/$arch"
+    SLICES+=("$SLICE_DIR/$arch")
 done
 
 echo "==> $APP 조립"
