@@ -94,7 +94,9 @@ jobs:
 
       - name: Prove the fork identity guard rejects an upstream value
         if: matrix.shard == 'rendering'
-        run: bash scripts/test-fork-identity-guard.sh
+        run: |
+          bash scripts/test-fork-identity-guard.sh
+          bash scripts/test-build-app-slices.sh
 
       - name: Keep the test logs for test-union
         if: ${{ !cancelled() }}

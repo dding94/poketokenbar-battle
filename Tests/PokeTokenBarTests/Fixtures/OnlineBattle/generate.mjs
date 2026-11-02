@@ -1,4 +1,4 @@
-// Run from repository root after bundling server/src/battle-relay.ts as an ESM module.
+// Run from repository root after bundling the server's battle-relay.ts as an ESM module.
 // node Tests/PokeTokenBarTests/Fixtures/OnlineBattle/generate.mjs /absolute/path/to/battle-relay.mjs
 import {readFileSync, writeFileSync} from 'node:fs';
 import {createHash} from 'node:crypto';
