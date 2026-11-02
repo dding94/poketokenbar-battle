@@ -43,6 +43,7 @@ final class PopoverNavigation {
     /// The local practice battle takes over the popover like Settings does. `AppDelegate` sets it
     /// again after `reset()` while `PracticeSession.isActive`, so a battle reopens where it was.
     var showingPractice = false { didSet { if showingPractice { dexDetailCollectionID = nil } } }
+    var showingOnlineBattle = false { didSet { if showingOnlineBattle { dexDetailCollectionID = nil } } }
     /// The Collection tab's open Pokédex detail page (`DexSpecies.collectionID`); nil = grid or log.
     /// It lives here so Home sprites can open it, but it only lasts while the collection content is
     /// on screen: leaving the tab, switching segment, or covering it with Settings/Recap drops it —
@@ -61,6 +62,7 @@ final class PopoverNavigation {
         expandAdvancedOnOpen = false
         showingRecap = false
         showingPractice = false
+        showingOnlineBattle = false
         tab = .home
     }
 
@@ -96,6 +98,7 @@ struct PopoverView: View {
     /// App-lifetime practice battle, injected by `AppDelegate`. Optional: views built without it
     /// (tests, previews) keep the tabs and hide the practice entry points.
     @Environment(PracticeSession.self) private var practice: PracticeSession?
+    @Environment(OnlineBattlePresentation.self) private var onlineBattle: OnlineBattlePresentation?
 
     private var l: L { companion.l }
     @State private var showingClaudeKeychainHelp = false
@@ -119,6 +122,8 @@ struct PopoverView: View {
                     .environment(updater)
             } else if nav.showingRecap {
                 RecapScreen(store: store, companion: companion) { nav.showingRecap = false }
+            } else if nav.showingOnlineBattle, let onlineBattle {
+                OnlineBattleScreen(model: onlineBattle, l: l) { nav.showingOnlineBattle = false }
             } else if nav.showingPractice, let practice {
                 // Back only leaves the screen; the session keeps the battle (and pauses manual turns).
                 PracticeScreen(session: practice, bag: companion, l: l) { nav.showingPractice = false }
@@ -190,6 +195,15 @@ struct PopoverView: View {
                         CompanionHeader(store: companion) { nav.openDexEntry(collectionID: $0) }
                         if let practice {
                             PracticeEntryRow(session: practice, l: l) { nav.showingPractice = true }
+                        }
+                        if onlineBattle != nil {
+                            Button { nav.showingOnlineBattle = true } label: {
+                                HStack {
+                                    Label(l.onlineTitle, systemImage: "network")
+                                    Spacer()
+                                    Image(systemName: "chevron.right").font(.caption)
+                                }.frame(maxWidth: .infinity).contentShape(Rectangle())
+                            }.buttonStyle(.plain).practiceCard()
                         }
                         Divider()
                         header
