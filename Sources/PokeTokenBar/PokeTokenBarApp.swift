@@ -25,6 +25,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private var floatingPet: FloatingPetController!
     private let navigation = PopoverNavigation()
     private var practice: PracticeSession!
+    private var online: OnlineBattleSession?
+    private var onlinePresentation = OnlineBattlePresentation()
     var onOpenPractice: (() -> Void)?
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
@@ -153,6 +155,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         practice = PracticeSession(engineURL: Bundle.main.url(forResource: "battle-engine", withExtension: "js"),
                                    recordStore: PracticeRecordStore(fileURL: AppStatePaths.directory().appendingPathComponent("practice-records.json")),
                                    effects: companion)
+        prepareOnlineBattle()
         onOpenPractice = { [weak self] in self?.showPopover { $0.showingPractice = true } }   // 창 없이 팝오버로
         Task { await companion.preparePokemonProfiles() }
         updater = UpdateChecker()
@@ -187,6 +190,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         observePowerState()
         observePractice()
         observeCurrentHealth()
+        observeOnlineAccess()
         applyState()
         if Self.launchRequestsPractice(arguments: CommandLine.arguments) {
             // 다음 턴으로 미룬다 — 상태 아이템 버튼이 자리 잡은 뒤에야 팝오버를 붙일 수 있다.
@@ -243,6 +247,41 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private var currentFaintLook: FaintLook {
         FaintLook(fainted: (companion.currentHealthShare ?? 1) <= 0,
                   showsCurrent: companion.representativeSpeciesID == nil)
+    }
+
+    /// Profile settings live beside the isolated fork save; credentials only live in the scoped Keychain item.
+    private func prepareOnlineBattle() {
+        do {
+            let directory = AppStatePaths.directory()
+            let settings = try OnlineBattleSettings.load(from: directory)
+            let engineURL = Bundle.main.url(forResource: "battle-engine", withExtension: "js")
+            let session = OnlineBattleSession(settings: settings,
+                credentials: OnlineBattleCredentials(gate: .init(allowsAccess: { !KeychainAccessGate.isDisabled })),
+                effects: companion,
+                engineFactory: {
+                    guard let engineURL else { throw BattleEngine.Failure.missingBundle }
+                    return try BattleEngine(url: engineURL)
+                }, connectionFactory: { OnlineBattleConnection(observer: $0) },
+                saveSettings: { try $0.save(to: directory) }, enabled: !store.disableKeychainAccess,
+                accessAllowed: { !KeychainAccessGate.isDisabled })
+            online = session; onlinePresentation = session.presentation
+            Task { await session.bootstrap() }
+        } catch {
+            onlinePresentation.notice = "온라인 설정을 읽지 못했어요. 저장 폴더를 확인해 주세요."
+        }
+    }
+
+    private func observeOnlineAccess() {
+        withObservationTracking {
+            _ = store.disableKeychainAccess
+        } onChange: { [weak self] in
+            Task { @MainActor in
+                guard let self else { return }
+                // The session's fresh accessAllowed check also blocks responses before this callback runs.
+                await self.online?.setEnabled(!self.store.disableKeychainAccess)
+                self.observeOnlineAccess()
+            }
+        }
     }
 
     /// 현재 포켓몬의 기절 관찰(PR 03C) — 배틀 결과·회복약·대표 변경으로 바뀌면 표식·툴팁·흐림을 다시 반영한다.
@@ -690,7 +729,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         popover.contentViewController = NSHostingController(
             rootView: PopoverView()
                 .environment(store).environment(companion).environment(updater).environment(navigation)
-                .environment(practice))
+                .environment(practice).environment(onlinePresentation))
     }
 
     @objc private func statusItemClicked() {
@@ -754,11 +793,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     /// Start and stop are both delegate-driven so a second `show` path cannot
     /// overwrite a live token (#168). `start` is also idempotent if `didShow` fires twice.
     func popoverDidShow(_ notification: Notification) {
+        Task { await online?.perform(.setPopoverVisible(true)) }
         startOutsideClickMonitor()
     }
 
     /// 팝오버가 닫히면 호스팅 컨트롤러 해제(숨은 트리 재레이아웃 비용 제거) + 메뉴바 애니메이션 재개.
     func popoverDidClose(_ notification: Notification) {
+        Task { await online?.perform(.setPopoverVisible(false)) }
         stopOutsideClickMonitor()
         popover.contentViewController = nil
         practice.setPaused(true, reason: .popoverClosed)

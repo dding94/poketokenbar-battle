@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 
 /// App-lifetime owner: closing a popover never stops the server clock, replay, or settlement.
 @MainActor
@@ -14,6 +15,14 @@ final class OnlineBattleSession {
     private let rosterProvider: (() throws -> [PracticeCandidate])?
     private let clock: OnlineBattleConnectionClock
     private let automaticTicks: Bool
+    private var enabled: Bool
+    private let accessAllowed: () -> Bool
+    private var onlineAllowed: Bool { enabled && accessAllowed() }
+    private var refreshAgain = false
+    private var prepared: [String: Int] = [:]
+    private var acknowledgedStarts = Set<String>()
+    private var submittedReports = Set<String>()
+    private var nextRecoveryRead: TimeInterval?
     private var api: OnlineBattleAPI?
     private var origin: OnlineBattleOrigin?
     private var connection: (any OnlineBattleConnecting)?
@@ -49,12 +58,38 @@ final class OnlineBattleSession {
         self.effects = effects; self.engineFactory = engineFactory; self.connectionFactory = connectionFactory
         self.saveSettings = saveSettings; self.rosterProvider = rosterProvider
         self.clock = clock; self.automaticTicks = automaticTicks
+        self.enabled = enabled; self.accessAllowed = accessAllowed
         presentation.serverAddress = settings.serverURL ?? ""
         presentation.onAction = { [weak self] action in Task { await self?.perform(action) } }
     }
-    func setEnabled(_ enabled: Bool) async {}
-    func requestRefresh() {}
+    func setEnabled(_ value: Bool) async {
+        guard value != enabled || (value && !bootstrapped) else { return }
+        enabled = value
+        if value { await bootstrap(); return }
+        generation &+= 1
+        refreshTask?.cancel(); refreshTask = nil; refreshAgain = false
+        ticker?.cancel(); ticker = nil
+        let old = connection; connection = nil
+        authenticated = false; reconciled = false; bootstrapped = false; actionInFlight = false
+        pendingGrant = nil; challengeIntent = nil; prepared = [:]; acknowledgedStarts = []; submittedReports = []
+        for resolver in resolvers.values { resolver.close() }; resolvers = [:]; views = [:]
+        selectedBattleID = nil; checkedDeadlines = [:]; nextRecoveryRead = nil
+        presentation.account = nil; presentation.members = []; presentation.battles = []
+        presentation.room = nil; presentation.arena = nil; presentation.request = nil
+        presentation.recoveryCode = nil; presentation.result = nil; presentation.canRetryCredentialSave = false
+        presentation.canStart = false; presentation.isBusy = false; presentation.phase = .setup
+        presentation.connectionStatus = "키체인 접근이 꺼져 있어 온라인 배틀을 중단했어요"
+        await old?.stop()
+        await api?.setAccessKey(nil)
+    }
+    /// Notification delivery never waits for a whole battle. Changes during a read retain one follow-up read.
+    func requestRefresh() {
+        guard onlineAllowed, authenticated else { return }
+        if refreshTask != nil { refreshAgain = true }
+        else { Task { [weak self] in await self?.refresh() } }
+    }
     func bootstrap() async {
+        guard onlineAllowed else { presentation.connectionStatus = "키체인 접근이 꺼져 있어요"; return }
         guard !bootstrapped else { return }
         bootstrapped = true
         let epoch = generation
@@ -80,6 +115,7 @@ final class OnlineBattleSession {
             resolvers = [:]; views = [:]; selectedBattleID = nil; checkedDeadlines = [:]
             api = nil; origin = nil; pendingGrant = nil; challengeIntent = nil
             authenticated = false; reconciled = false; actionInFlight = false
+            refreshAgain = false; prepared = [:]; acknowledgedStarts = []; submittedReports = []; nextRecoveryRead = nil
             settings = next; bootstrapped = false
             presentation.serverAddress = next.serverURL ?? ""
             presentation.account = nil; presentation.members = []; presentation.battles = []
@@ -92,7 +128,7 @@ final class OnlineBattleSession {
         } catch { await handle(error, epoch: generation) }
     }
     private func current(_ epoch: UInt64) throws {
-        guard epoch == generation, !Task.isCancelled else { throw OnlineBattleFailure.staleGeneration }
+        guard onlineAllowed, epoch == generation, !Task.isCancelled else { throw OnlineBattleFailure.staleGeneration }
     }
     private func activate(_ key: String, epoch: UInt64) async throws {
         guard let api else { throw OnlineBattleFailure.invalidSettings }
@@ -132,15 +168,14 @@ final class OnlineBattleSession {
             case .protocolError: presentation.connectionStatus = "서버와 앱 버전을 확인해 주세요"
             }
         case .refreshRequested:
-            guard authenticated else { return }
-            await refresh()
+            requestRefresh()
         }
     }
     func join(inviteCode: String, email: String) async {
         await obtainGrant { try await $0.join(inviteCode: inviteCode, displayEmail: email) }
     }
     private func obtainGrant(_ request: (OnlineBattleAPI) async throws -> OnlineBattleGrant) async {
-        guard let api, pendingGrant == nil else { return }
+        guard onlineAllowed, let api, pendingGrant == nil else { return }
         let epoch = generation
         do {
             let grant = try await request(api); try current(epoch)
@@ -149,7 +184,7 @@ final class OnlineBattleSession {
         } catch { await handle(error, epoch: epoch) }
     }
     func retryCredentialSave() async {
-        guard let grant = pendingGrant, let origin else { return }
+        guard onlineAllowed, let grant = pendingGrant, let origin else { return }
         let epoch = generation
         do {
             try await credentials.save(grant.accessKey, scope: .init(profileID: settings.profileID, origin: origin))
@@ -162,13 +197,18 @@ final class OnlineBattleSession {
     }
     /// One shared read owns reconciliation. Notifications never apply effects directly.
     func refresh() async {
-        guard authenticated, let api else { return }
+        guard onlineAllowed, authenticated, let api else { return }
         if let refreshTask { await refreshTask.value; return }
         let epoch = generation
-        let task = Task { [weak self] in await self?.readAll(api: api, epoch: epoch) }
-        let joined = Task { _ = await task.value }
-        refreshTask = joined
-        await joined.value
+        let task = Task { [weak self] in
+            guard let self else { return }
+            repeat {
+                self.refreshAgain = false
+                await self.readAll(api: api, epoch: epoch)
+            } while self.refreshAgain && self.generation == epoch && self.onlineAllowed && self.authenticated
+        }
+        refreshTask = task
+        await task.value
         if epoch == generation { refreshTask = nil }
     }
     private func readAll(api: OnlineBattleAPI, epoch: UInt64) async {
@@ -196,7 +236,10 @@ final class OnlineBattleSession {
             try current(epoch); reconciled = true
             try rebuildRoster(); publish()
             if let connection { let snapshot = await connection.snapshot(); try current(epoch); presentation.canStart = snapshot.state == .connected }
-        } catch { reconciled = false; await handle(error, epoch: epoch) }
+        } catch {
+            guard epoch == generation, onlineAllowed else { return }
+            reconciled = false; await handle(error, epoch: epoch)
+        }
     }
     private func scope(_ account: OnlineBattleAccount) throws -> OnlineBattleScope {
         guard let origin else { throw OnlineBattleFailure.invalidSettings }
@@ -218,6 +261,7 @@ final class OnlineBattleSession {
     }
     private func process(_ initial: OnlineBattleView, account: OnlineBattleAccount, api: OnlineBattleAPI, epoch: UInt64) async throws {
         var room = initial
+        var refetched = false
         // An automatic battle has at most 200 public pairs. Each response must make progress.
         for _ in 0..<202 {
             try current(epoch)
@@ -249,6 +293,8 @@ final class OnlineBattleSession {
             }
             do { try resolver.consume(journal: room.journal) }
             catch OnlineBattleResolver.Failure.needsRefetch {
+                guard !refetched else { throw OnlineBattleResolver.Failure.invalidJournal }
+                refetched = true
                 resolver.close(); resolvers[room.battleId] = nil
                 // One authoritative refetch and a fresh engine, then fail closed if the server remains invalid.
                 let fresh = try await api.battle(id: room.battleId); try current(epoch)
@@ -257,10 +303,26 @@ final class OnlineBattleSession {
                 resolvers[room.battleId] = rebuilt; room = fresh; continue
             }
             publish()
+            if room.state == .ready, prepared[room.battleId] == room.revision, let connection {
+                let snapshot = await connection.snapshot(); try current(epoch)
+                guard snapshot.state == .connected, snapshot.trainerId == account.trainer.trainerId,
+                      snapshot.groupId == account.group.groupId, let connectionID = snapshot.connectionId else { return }
+                let acknowledgement = room.battleId + ":" + connectionID
+                guard !acknowledgedStarts.contains(acknowledgement) else { return }
+                let updated = try await api.start(id: room.battleId, revision: room.revision, connectionId: connectionID,
+                                                 readyToken: room.config!.readyToken, engineHash: BattleEngineManifest.sha256)
+                try current(epoch); acknowledgedStarts.insert(acknowledgement)
+                guard updated != room else { return }
+                room = updated; continue
+            }
             guard room.state == .running || room.state == .reported else { return }
             if let report = try resolver.terminalReport() {
+                let reportKey = room.battleId + ":" + report.readyToken
+                if room.state == .reported, submittedReports.contains(reportKey) { return }
                 // Sending the identical deterministic report is safe after a response was lost.
                 let updated = try await api.report(id: room.battleId, report: report); try current(epoch)
+                submittedReports.insert(reportKey)
+                guard accepts(updated) else { return }
                 if updated == room { return }
                 room = updated
                 if room.state == .reported { views[room.battleId] = room; publish(); return }
@@ -274,6 +336,17 @@ final class OnlineBattleSession {
         throw OnlineBattleFailure.invalidResponse
     }
     private func settle(_ battle: OnlineBattleView, account: OnlineBattleAccount) throws {
+        let key = try receiptKey(battle, account: account)
+        if let state = effects.companionState()?.state,
+           let receipt = state.onlineBattleReceipts.first(where: { $0.key == key }) {
+            guard state.onlineLedgerTrusted, let report = battle.result else { throw OnlineBattleEffectError.untrustedLedger }
+            let hash = SHA256.hash(data: Data(try BattleJSON.encode(report).utf8)).map { String(format: "%02x", $0) }.joined()
+            guard receipt.resultHash == hash else { throw OnlineBattleEffectError.conflictingResult }
+            let side = battle.side(for: account.trainer.trainerId)
+            let outcome: OnlineBattleOutcome = report.winner == .draw ? .draw : report.winner.rawValue == side?.rawValue ? .win : .loss
+            showResult(receipt, outcome: outcome)
+            return
+        }
         let resolver = try OnlineBattleResolver(battle: battle, localTrainerID: account.trainer.trainerId, engine: engineFactory())
         defer { resolver.close() }
         let proof = try resolver.verifyCompleted(battle)
@@ -281,6 +354,9 @@ final class OnlineBattleSession {
         let outcome: OnlineBattleOutcome = proof.winner == .draw ? .draw : proof.winner.rawValue == proof.localSide.rawValue ? .win : .loss
         let receipt = try effects.applyVerifiedOnlineBattleEffect(.init(key: receiptKey(battle, account: account), resultHash: proof.resultHash,
             localInstanceID: proof.localInstanceID, remainingHPShare: proof.remainingHPShare, outcome: outcome))
+        showResult(receipt, outcome: outcome)
+    }
+    private func showResult(_ receipt: OnlineBattleEffectReceipt, outcome: OnlineBattleOutcome) {
         presentation.result = .init(title: outcome == .win ? "승리" : outcome == .loss ? "패배" : "무승부",
             detail: "양쪽의 전투 결과가 일치해 반영했어요.", xpAwarded: Int64(receipt.grantedXP), hpApplied: true, isVoid: false)
     }
@@ -316,17 +392,34 @@ final class OnlineBattleSession {
         presentation.battles = views.values.sorted { $0.createdAt > $1.createdAt }
         let room = selectedBattleID.flatMap { views[$0] } ?? presentation.battles.first(where: { $0.state.isActive }) ?? presentation.battles.first
         presentation.room = room
+        presentation.moveSlugs = [:]; presentation.abilitySlugs = [:]
         guard let room, let account = presentation.account else { presentation.phase = authenticated ? .lobby : .setup; return }
         presentation.localSide = room.side(for: account.trainer.trainerId) ?? .p1
         presentation.deadline = room.deadline.map { Date(timeIntervalSince1970: $0 / 1000) }
         presentation.choiceSubmitted = room.ownChoice != nil
         presentation.arena = resolvers[room.battleId]?.view; presentation.request = resolvers[room.battleId]?.request
+        publishDisclosedNames(room)
         switch room.state {
         case .pending, .accepted, .ready: presentation.phase = .room
         case .running: presentation.phase = .arena
         case .reported: presentation.phase = .verifying
         case .completed, .void: presentation.phase = .result
         case .declined, .cancelled, .expired: presentation.phase = .lobby
+        }
+    }
+    private func publishDisclosedNames(_ room: OnlineBattleView) {
+        guard let view = presentation.arena else { return }
+        func normalized(_ value: String) -> String { value.lowercased().filter { $0.isLetter || $0.isNumber } }
+        for (side, visible, snapshot) in [(OnlineBattleSide.p1, view.p1, room.p1.snapshot), (.p2, view.p2, room.p2.snapshot)] {
+            guard let snapshot else { continue }
+            var ids = Set(visible.moves)
+            if side == presentation.localSide { ids.formUnion(presentation.request?.moves.map(\.id) ?? []) }
+            presentation.moveSlugs[side] = Dictionary(uniqueKeysWithValues: ids.compactMap { id in
+                snapshot.set.moves.first(where: { normalized($0) == normalized(id) }).map { (id, $0) }
+            })
+            if let ability = visible.ability, normalized(ability) == normalized(snapshot.set.ability) {
+                presentation.abilitySlugs[side] = [ability: snapshot.set.ability]
+            }
         }
     }
     func perform(_ action: OnlineBattleUIAction) async {
@@ -340,7 +433,7 @@ final class OnlineBattleSession {
         case .configureServer(let value): await configureServer(value); return
         default: break
         }
-        guard !actionInFlight else { return }
+        guard onlineAllowed, !actionInFlight else { return }
         actionInFlight = true; presentation.isBusy = true
         let epoch = generation
         defer { if epoch == generation { actionInFlight = false; presentation.isBusy = false } }
@@ -357,10 +450,15 @@ final class OnlineBattleSession {
         }
     }
     private func battleAction(_ action: OnlineBattleUIAction, epoch: UInt64) async throws {
-        guard authenticated, reconciled, let api, let account = presentation.account else { throw OnlineBattleFailure.invalidRequest }
+        if case .challenge = action { await refresh(); try current(epoch) }
+        if case .accept = action { await refresh(); try current(epoch) }
+        guard onlineAllowed, authenticated, reconciled, let api, let account = presentation.account else { throw OnlineBattleFailure.invalidRequest }
         var result: OnlineBattleView
         if case .challenge = action {
-            let snapshot = try selectedSnapshot()
+            let previousRoom = challengeIntent.flatMap { intent in
+                views.values.first { $0.state.isActive && $0.p1.trainerId == account.trainer.trainerId && $0.p2.trainerId == intent.target && $0.p1.snapshot == intent.snapshot && $0.mode == intent.mode }
+            }
+            let snapshot = try selectedSnapshot(allow: previousRoom.map { try receiptKey($0, account: account) })
             guard let target = presentation.selectedOpponentID, target != account.trainer.trainerId else { throw OnlineBattleFailure.invalidRequest }
             if challengeIntent?.snapshot != snapshot || challengeIntent?.target != target || challengeIntent?.mode != presentation.mode {
                 challengeIntent = .init(requestID: UUID().uuidString, target: target, mode: presentation.mode, snapshot: snapshot)
@@ -369,7 +467,7 @@ final class OnlineBattleSession {
             result = try await api.createBattle(requestId: intent.requestID, targetTrainerId: intent.target, mode: intent.mode, snapshot: intent.snapshot)
             try current(epoch)
             // A local evolution, heal, or practice entry during the request invalidates consent.
-            guard (try? selectedSnapshot()) == snapshot else {
+            guard (try? selectedSnapshot(allow: receiptKey(result, account: account), id: snapshot.instanceId)) == snapshot else {
                 let cancelled = try await api.cancel(id: result.battleId, revision: result.revision); try current(epoch)
                 try await process(cancelled, account: account, api: api, epoch: epoch)
                 throw OnlineBattleFailure.invalidRequest
@@ -402,13 +500,14 @@ final class OnlineBattleSession {
                 let connected = await connection.snapshot(); try current(epoch)
                 guard connected.state == .connected, let connectionID = connected.connectionId,
                       connected.trainerId == account.trainer.trainerId, connected.groupId == account.group.groupId else { throw OnlineBattleFailure.invalidRequest }
-                try validateConsent(room, account: account)
                 if room.state == .accepted, room.confirmed {
+                    try validateConsent(room, account: account)
+                    prepared[room.battleId] = room.revision
                     result = try await api.ready(id: room.battleId, revision: room.revision, connectionId: connectionID, engineHash: BattleEngineManifest.sha256, rulesVersion: BattleSnapshot.rules, policyVersion: BattleSnapshot.policy)
                 } else if room.state == .ready {
-                    // Construction validates both frozen sets before the acknowledgement is sent.
-                    let verifier = try OnlineBattleResolver(battle: room, localTrainerID: account.trainer.trainerId, engine: engineFactory()); verifier.close()
-                    result = try await api.start(id: room.battleId, revision: room.revision, connectionId: connectionID, readyToken: room.config!.readyToken, engineHash: BattleEngineManifest.sha256)
+                    // The frozen inputs stay valid through later local growth. process validates both sets.
+                    prepared[room.battleId] = room.revision
+                    result = room
                 } else { throw OnlineBattleFailure.invalidRequest }
             case .chooseMove(let slot):
                 guard room.state == .running, room.mode == .manual, room.ownChoice == nil,
@@ -424,11 +523,14 @@ final class OnlineBattleSession {
         try rebuildRoster(); publish()
     }
     func tick() async {
-        guard authenticated else { return }
-        let now = clock.now() * 1000
-        let due = views.values.filter { $0.state == .running && $0.deadline.map { now >= $0 && checkedDeadlines[$0.description] == nil } == true }
-        guard !due.isEmpty else { return }
-        for room in due { if let deadline = room.deadline { checkedDeadlines[deadline.description] = deadline } }
+        guard onlineAllowed, authenticated else { return }
+        let now = clock.now()
+        let due = views.values.filter { room in
+            room.state == .running && room.deadline.map { now * 1000 >= $0 } == true && now >= (checkedDeadlines[room.battleId] ?? 0)
+        }
+        guard !due.isEmpty || nextRecoveryRead.map({ now >= $0 }) == true else { return }
+        for room in due { checkedDeadlines[room.battleId] = now + 5 }
+        nextRecoveryRead = nil
         await refresh()
     }
     private func revoke(epoch: UInt64) async {
@@ -440,7 +542,10 @@ final class OnlineBattleSession {
         await api?.setAccessKey(nil)
     }
     private func handle(_ error: Error, epoch: UInt64) async {
-        guard epoch == generation, !(error is CancellationError), error as? OnlineBattleFailure != .staleGeneration else { return }
+        guard onlineAllowed, epoch == generation, !(error is CancellationError), error as? OnlineBattleFailure != .staleGeneration else { return }
+        if authenticated, views.values.contains(where: { $0.state == .running || $0.state == .reported }) {
+            nextRecoveryRead = clock.now() + 5
+        }
         if error as? OnlineBattleFailure == .unauthorized {
             if let connection { let snapshot = await connection.snapshot(); guard epoch == generation else { return }; await connection.authenticationFailed(generation: snapshot.generation) }
             await revoke(epoch: epoch); return
