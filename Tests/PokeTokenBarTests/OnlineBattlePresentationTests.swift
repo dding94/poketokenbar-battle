@@ -93,3 +93,15 @@ extension OnlineBattlePresentationTests {
         XCTAssertEqual(sent, 1)
     }
 }
+
+
+extension OnlineBattlePresentationTests {
+    func testImmediateSecondManualChoiceCannotSendAnotherRequest() {
+        let model = OnlineBattleScreenRenderingTests.model(); OnlineBattleScreenRenderingTests.arena(model)
+        var choices = 0
+        model.onAction = { if case .chooseMove = $0 { choices += 1 } }
+        model.send(.chooseMove(1)); model.send(.chooseMove(2))
+        XCTAssertEqual(choices, 1, "The view must latch the first choice before its asynchronous session action starts")
+        XCTAssertTrue(model.choiceSubmitted)
+    }
+}
