@@ -63,6 +63,12 @@ describe("battle rooms", () => {
     expectError(await action(f.p2, f.view.battleId, "accept", { revision: 2, snapshot: snapshot() }), 409, "invalid_state");
     expect((await getBattle(f.p1, f.view.battleId)).body.state).toBe("EXPIRED");
   });
+  it("applies elapsed deadlines before membership cancellation", async () => {
+    const t = Date.now(); await setClock(t); const f = await room();
+    await setClock(t + DAY);
+    expect((await call("POST", "/v1/leave", { key: f.p2.accessKey })).status).toBe(200);
+    expect((await getBattle(f.p1, f.view.battleId)).body.state).toBe("EXPIRED");
+  });
   it("declines only target PENDING and cancels idempotently", async () => {
     const f = await room(); const body = { revision: 1 };
     expectError(await action(f.p1, f.view.battleId, "decline", body), 409, "invalid_state");

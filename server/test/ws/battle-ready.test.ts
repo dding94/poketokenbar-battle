@@ -19,6 +19,7 @@ describe("ready handshake", () => {
     expect(two.body.config.seed).toHaveLength(4); for (const n of two.body.config.seed) expect(n).toBeGreaterThanOrEqual(0);
     expect(two.body.config.policySeed).toBeGreaterThanOrEqual(0);
     expect(two.body.p1.snapshot).toEqual(snapshot());
+    expect((await action(f.p1, id, "confirm", { revision: f.view.revision })).body.state).toBe("READY");
     expect((await action(f.p1, id, "ready", { ...f.readyBody, connectionId: f.a.hello.connectionId })).body.config).toEqual(two.body.config);
     const locks = (await dumpTables()).battle_locks!.filter(r => r.battle_id === id); expect(locks).toHaveLength(2);
   });
