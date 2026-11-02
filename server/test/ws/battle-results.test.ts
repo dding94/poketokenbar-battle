@@ -87,12 +87,21 @@ describe("result comparison and atomic records", () => {
     const draw = reportFor(view, { winner: "draw", finalHp: { p1: 40, p2: 30 } }); await action(f.p1, next, "report", draw); expect((await action(f.p2, next, "report", draw)).body.state).toBe("COMPLETED");
     expect(await records(f.p1.trainerId)).toMatchObject({ wins: 1, draws: 1, streak: 0, best_streak: 1 }); expect(await records(f.p2.trainerId)).toMatchObject({ losses: 1, draws: 1, streak: 0 });
   });
-  it.each(["leave", "remove"])("atomically voids running battle on %s and leaves completed history unchanged", async kind => {
+  it.each(["leave", "remove"])("atomically voids running battle and cancels pending challenges on %s", async kind => {
     const f = await terminal(); const id = f.view.battleId;
     const pending = await createBattle(f.p2, f.third, "manual", "new", snapshot("unused")); expect(pending.status).toBe(200);
     const res = kind === "leave" ? await call("POST", "/v1/leave", { key: f.p2.accessKey }) : await call("POST", "/v1/members/remove", { key: f.p1.accessKey, body: { trainerId: f.p2.trainerId } }); expect(res.status).toBe(200);
     expect((await getBattle(f.p1, id)).body).toMatchObject({ state: "VOID", reason: "participant_left" }); expect(await locks(id)).toEqual([]);
     expect((await getBattle(f.third, pending.body.battleId)).body.state).toBe("CANCELLED"); expect(await records(f.p1.trainerId)).toBeUndefined();
+  });
+  it.each(["leave", "remove"])("preserves completed history and records after %s", async kind => {
+    const f = await terminal(); const id = f.view.battleId; const body = reportFor(f.view);
+    expect((await action(f.p1, id, "report", body)).body.state).toBe("REPORTED");
+    const completed = await action(f.p2, id, "report", body); expect(completed.body.state).toBe("COMPLETED");
+    const before = [await records(f.p1.trainerId), await records(f.p2.trainerId)];
+    const res = kind === "leave" ? await call("POST", "/v1/leave", { key: f.p2.accessKey }) : await call("POST", "/v1/members/remove", { key: f.p1.accessKey, body: { trainerId: f.p2.trainerId } }); expect(res.status).toBe(200);
+    expect((await getBattle(f.p1, id)).body).toEqual(completed.body);
+    expect([await records(f.p1.trainerId), await records(f.p2.trainerId)]).toEqual(before);
   });
   it("restores the same battle under a recovered key", async () => {
     const f = await terminal(); const recovered = await recoverAccount(f.p2); await connect(recovered.accessKey);

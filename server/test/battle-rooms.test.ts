@@ -78,6 +78,11 @@ describe("battle rooms", () => {
     expect((await action(g.p2, g.view.battleId, "cancel", cancel)).body.state).toBe("CANCELLED");
     expect((await action(g.p1, g.view.battleId, "cancel", cancel)).body.state).toBe("CANCELLED");
   });
+  it("rejects a fainted acceptance while preserving its pending challenge", async () => {
+    const f = await room();
+    expectError(await action(f.p2, f.view.battleId, "accept", { revision: 1, snapshot: { ...snapshot(), hp: 0 } }), 409, "fainted");
+    expect((await getBattle(f.p1, f.view.battleId)).body).toMatchObject({ state: "PENDING", revision: 1, p2: { trainerId: f.p2.trainerId } });
+  });
   it("requires a current socket for readiness", async () => {
     const f = await confirmed();
     expectError(await action(f.p1, f.view.battleId, "ready", { revision: f.view.revision, connectionId: "missing", ...versions }), 409, "not_ready");

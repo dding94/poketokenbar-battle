@@ -36,6 +36,14 @@ describe("ready handshake", () => {
     expect((await action(f.p1, f.view.battleId, "ready", body)).status).toBe(200);
     expectError(await action(f.p1, f.view.battleId, "ready", { ...body, engineHash: "b".repeat(64) }), 409, "engine_mismatch");
   });
+  it("ignores an obsolete ready session before freezing either participant", async () => {
+    const f = await connectedRoom(); const id = f.view.battleId;
+    expect((await action(f.p1, id, "ready", { ...f.readyBody, connectionId: f.a.hello.connectionId })).status).toBe(200);
+    const replacement = await connect(f.p1.accessKey);
+    expect((await action(f.p2, id, "ready", { ...f.readyBody, connectionId: f.b.hello.connectionId })).body.state).toBe("ACCEPTED");
+    expectError(await action(f.p1, id, "ready", { ...f.readyBody, connectionId: f.a.hello.connectionId }), 409, "not_ready");
+    expect((await action(f.p1, id, "ready", { ...f.readyBody, connectionId: replacement.hello.connectionId })).body.state).toBe("READY");
+  });
   it("requires fresh ACK after same-millisecond socket replacement while keeping config", async () => {
     await setClock(Date.now()); const f = await connectedRoom(); const id = f.view.battleId;
     await action(f.p1, id, "ready", { ...f.readyBody, connectionId: f.a.hello.connectionId });
@@ -57,6 +65,11 @@ describe("ready handshake", () => {
     await action(f.p1, id, "ready", { ...f.readyBody, connectionId: f.a.hello.connectionId });
     expect((await action(f.p2, id, "ready", { ...f.readyBody, connectionId: f.b.hello.connectionId })).body.state).toBe("READY");
     expectError(await createBattle(f.p1, f.third), 409, "instance_busy");
+    const challenge = await createBattle(f.third, f.p1, "manual", "accept-busy", snapshot("third-unused"));
+    expect(challenge.status).toBe(200);
+    expectError(await action(f.p1, challenge.body.battleId, "accept", { revision: 1, snapshot: snapshot() }), 409, "instance_busy");
+    expect((await getBattle(f.third, challenge.body.battleId)).body.state).toBe("PENDING");
+
     expectError(await action(f.p1, other.body.battleId, "ready", { ...f.readyBody, connectionId: f.a.hello.connectionId }), 409, "instance_busy");
     expect((await action(f.third, other.body.battleId, "ready", { ...f.readyBody, connectionId: c.hello.connectionId })).status).toBe(200);
     expect((await dumpTables()).battle_locks!.filter(r => r.battle_id === other.body.battleId)).toHaveLength(0);
