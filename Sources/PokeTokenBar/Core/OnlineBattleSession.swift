@@ -319,8 +319,11 @@ final class OnlineBattleSession {
                 resolver.close(); resolvers[room.battleId] = nil
                 // One authoritative refetch and a fresh engine, then fail closed if the server remains invalid.
                 let fresh = try await api.battle(id: room.battleId); try current(epoch)
+                guard views[room.battleId] == room else { return }
                 let rebuilt = try OnlineBattleResolver(battle: fresh, localTrainerID: account.trainer.trainerId, engine: engineFactory())
                 do { try rebuilt.consume(journal: fresh.journal) } catch { rebuilt.close(); throw error }
+                // The rejected journal is not a trusted monotonic baseline for this authoritative read.
+                views[room.battleId] = nil
                 resolvers[room.battleId] = rebuilt; room = fresh; continue
             }
             publish()

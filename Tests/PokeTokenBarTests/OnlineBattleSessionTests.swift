@@ -741,4 +741,23 @@ final class OnlineBattleSessionTests: XCTestCase {
         let reads = await http.count("/v1/battles/\(final.battleId)"); XCTAssertEqual(reads, 1)
     }
 
+    func testAuthoritativeRefetchCannotReplaceConcurrentCompletedResult() async throws {
+        let final = try battle()
+        let running = try changed(final, ["state": "RUNNING", "result": NSNull(), "roundSeq": 1, "journal": []])
+        let gap = try changed(final, ["state": "RUNNING", "result": NSNull(), "journal": JSONSerialization.jsonObject(with: JSONEncoder().encode(Array(final.journal.dropFirst())))])
+        let (session, http, _, effects) = try await setup([running])
+        await http.route("/v1/battles/\(final.battleId)/choices", try JSONEncoder().encode(gap))
+        await http.suspendNext("/v1/battles/\(final.battleId)")
+        await session.bootstrap()
+        let choice = Task { await session.perform(.chooseMove(1)) }; await http.waitUntilBlocked()
+        await http.route("/v1/battles", try JSONEncoder().encode(OnlineBattlePage(battles: [final], before: nil)))
+        await session.refresh()
+        await http.resume(try response(running)); await choice.value
+        XCTAssertEqual(session.presentation.room?.state, .completed)
+        XCTAssertEqual(session.presentation.result?.title, "승리")
+        XCTAssertEqual(effects.applications, 1)
+        XCTAssertTrue(effects.state.onlineBattleHolds.isEmpty)
+        XCTAssertNil(session.presentation.notice)
+    }
+
 }
