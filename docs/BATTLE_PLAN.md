@@ -988,8 +988,8 @@ API(`/v1`, JSON 본문, 응답은 `cache-control: no-store`):
 | `POST /v1/battles/:id/confirm` | `{revision}`. 신청자가 상대 공개 정보를 보고 최종 동의 |
 | `POST /v1/battles/:id/decline` | `{revision}`. 상대가 PENDING에서 DECLINED |
 | `POST /v1/battles/:id/cancel` | `{revision}`. 참가자가 시작 전 취소해 CANCELLED·잠금 해제 |
-| `POST /v1/battles/:id/ready` | `{revision,engineHash,rulesVersion,policyVersion}`. 아래 준비 조건 확인 |
-| `POST /v1/battles/:id/start` | `{revision,readyToken,engineHash}`. 동결 입력 검증·엔진 준비를 마친 앱의 ACK |
+| `POST /v1/battles/:id/ready` | `{revision,connectionId,engineHash,rulesVersion,policyVersion}`. 아래 준비 조건 확인 |
+| `POST /v1/battles/:id/start` | `{revision,connectionId,readyToken,engineHash}`. 동결 입력 검증·엔진 준비를 마친 앱의 ACK |
 | `POST /v1/battles/:id/choices` | `{roundSeq,choice:"move 1"~"move 4"}`. manual의 열린 라운드에 자기 선택 하나 |
 | `POST /v1/battles/:id/advance` | `{processedRoundSeq}`. 공개된 라운드 처리 후 엔진이 아직 진행 중임을 확인한 앱이 다음 라운드를 요청 |
 | `POST /v1/battles/:id/report` | `{readyToken,engineHash,terminalSeq,winner:"p1"·"p2"·"draw",logHash,journalHash,finalHp:{p1,p2}}` |
@@ -1002,7 +1002,7 @@ API(`/v1`, JSON 본문, 응답은 `cache-control: no-store`):
 ### D.4 준비·동결·출전 잠금
 
 - PENDING에는 신청자 snapshot, ACCEPTED에는 상대 snapshot과 그 동의가 있다. 신청자의 confirm이 같은 revision을 승인해야 ready를 받는다. 성장 진행도는 입력 필드가 아니며 동의에 영향을 주지 않는다. 기절·현재 출전 중인 개체는 신청/수락 단계에서도 거절하고, 실제 잠금 경쟁은 READY 트랜잭션에서 재확인한다.
-- ready는 해당 계정의 **현재 열린 WebSocket 연결**에 묶는다. 연결마다 난수 connectionId를 attachment에 저장한다(같은 밀리초 재연결도 구별). 두 ready가 현재 연결과 일치하고 엔진 해시·규칙·정책이 같을 때, 한 `transactionSync`에서 두 `(trainerId,instanceId)` 유일 잠금·양쪽 snapshot·암호학적 난수 seed(16비트 정수 4개)·policySeed(uint32)·버전·`readyToken`을 저장하고 READY로 간다. 하나라도 충돌하면 부분 잠금이나 부분 동결이 남지 않는다.
+- ready는 해당 계정의 **현재 열린 WebSocket 연결**에 묶는다. 연결마다 난수 connectionId를 attachment에 저장하고 hello에 포함한다(같은 밀리초 재연결도 구별). ready/start 요청은 그 connectionId를 제출하며 현재 열린 연결 ID와 다르면 거절한다. 옛 앱의 지연된 HTTP 요청을 새 연결의 확인으로 취급하지 않는다. 두 ready가 현재 연결과 일치하고 엔진 해시·규칙·정책이 같을 때, 한 `transactionSync`에서 두 `(trainerId,instanceId)` 유일 잠금·양쪽 snapshot·암호학적 난수 seed(16비트 정수 4개)·policySeed(uint32)·버전·`readyToken`을 저장하고 READY로 간다. 하나라도 충돌하면 부분 잠금이나 부분 동결이 남지 않는다.
 - readyToken은 서버가 발급한 불변 준비 식별자다. 앱은 이를 포함한 동결 config를 `createBattle`로 검증한 뒤 start한다. 양쪽 현재 연결의 start ACK가 있어야 RUNNING이다. READY에서 연결이 교체되면 새 연결의 ACK가 필요하다. 한쪽의 과거 연결 확인으로 시작하지 않는다. seed/config는 재접속·재시도 때 바뀌지 않는다.
 - config는 `p1=신청자`, `p2=수락자`, 이름은 고정 `p1`·`p2`(이메일 없음), 정책 `standard`, 정확한 시작 HP를 사용한다. 다른 그룹/제3자와 READY 전에는 전체 config를 주지 않는다.
 
