@@ -179,10 +179,13 @@ final class OnlineBattleSession {
         await obtainGrant { try await $0.join(inviteCode: inviteCode, displayEmail: email) }
     }
     private func obtainGrant(_ request: (OnlineBattleAPI) async throws -> OnlineBattleGrant) async {
-        guard onlineAllowed, let api, pendingGrant == nil else { return }
+        guard onlineAllowed, let api, let origin, pendingGrant == nil else { return }
         var epoch = generation
         do {
-            let grant = try await request(api); try current(epoch)
+            // Recovery revokes the old WebSocket before its HTTP grant arrives. Its credential
+            // generation must not invalidate this unauthenticated, one-use grant response.
+            let grantAPI = OnlineBattleAPI(origin: origin, transport: transport)
+            let grant = try await request(grantAPI); try current(epoch)
             // A grant replaces credentials even at the same origin. Retire all work before any await.
             generation &+= 1; epoch = generation
             refreshTask?.cancel(); refreshTask = nil; refreshAgain = false
