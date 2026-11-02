@@ -35,6 +35,13 @@ describe("battle rooms", () => {
     expect((await action(f.p1, id, "update", { ...body, revision: 2 })).body.revision).toBe(2);
     expectError(await action(f.p2, id, "accept", { revision: 1, snapshot: snapshot() }), 409, "stale_revision");
   });
+  it("does not consume the revision receipt on a no-op update", async () => {
+    const f = await room();
+    const same = await action(f.p1, f.view.battleId, "update", { revision: 1, snapshot: snapshot() });
+    expect(same.status).toBe(200); expect(same.body.revision).toBe(1);
+    const changed = await action(f.p1, f.view.battleId, "update", { revision: 1, snapshot: { ...snapshot(), hp: 99 } });
+    expect(changed.status, changed.text).toBe(200); expect(changed.body.revision).toBe(2);
+  });
   it("creation keys normalize object order and reject changed requests", async () => {
     const f = await room(); const key = "unique-key"; const first = await createBattle(f.p1, f.p2, "manual", key);
     const retry = await call("POST", "/v1/battles", { key: f.p1.accessKey, body: { snapshot: snapshot(), mode: "manual", targetTrainerId: f.p2.trainerId, requestId: key } });
