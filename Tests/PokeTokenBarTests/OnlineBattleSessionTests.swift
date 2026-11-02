@@ -784,4 +784,21 @@ final class OnlineBattleSessionTests: XCTestCase {
         }
     }
 
+    func testBackToLobbyBeforeChoiceResponseCannotBeOverriddenByLateActionSelection() async throws {
+        let final = try battle()
+        let running = try changed(final, ["state": "RUNNING", "result": NSNull(), "roundSeq": 1, "journal": []])
+        let terminal = try changed(final, ["state": "RUNNING", "result": NSNull()])
+        let (session, http, _, effects) = try await setup([running])
+        await http.suspendNext("/v1/battles/\(final.battleId)/choices")
+        await http.route("/v1/battles/\(final.battleId)/report", try JSONEncoder().encode(final))
+        await session.bootstrap()
+        let choice = Task { await session.perform(.chooseMove(1)) }; await http.waitUntilBlocked()
+        await session.perform(.backToLobby)
+        await http.resume(try response(terminal)); await choice.value
+        XCTAssertEqual(effects.applications, 1)
+        XCTAssertEqual(session.presentation.phase, .lobby)
+        XCTAssertNil(session.presentation.room)
+        XCTAssertNil(session.presentation.result)
+    }
+
 }
