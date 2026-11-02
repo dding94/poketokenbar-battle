@@ -30,6 +30,11 @@ describe("ready handshake", () => {
     expect((await dumpTables()).battle_locks!.filter(r => r.battle_id === id)).toHaveLength(0);
     expect((await getBattle(f.p1, id)).body.state).toBe("ACCEPTED");
   });
+  it("rejects a changed engine hash from an already-ready session", async () => {
+    const f = await connectedRoom(); const body = { ...f.readyBody, connectionId: f.a.hello.connectionId };
+    expect((await action(f.p1, f.view.battleId, "ready", body)).status).toBe(200);
+    expectError(await action(f.p1, f.view.battleId, "ready", { ...body, engineHash: "b".repeat(64) }), 409, "engine_mismatch");
+  });
   it("requires fresh ACK after same-millisecond socket replacement while keeping config", async () => {
     await setClock(Date.now()); const f = await connectedRoom(); const id = f.view.battleId;
     await action(f.p1, id, "ready", { ...f.readyBody, connectionId: f.a.hello.connectionId });
