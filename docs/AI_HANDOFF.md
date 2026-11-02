@@ -1,14 +1,17 @@
 # 다음 AI를 위한 작업 인계
 
-최종 갱신: 2026-11-02. **PR 00~06 서버 구현·독립 리뷰·로컬 검증 완료. PR 06 통합 서버 소스는 `3d7a73c`이며 `9109f9f`의 CI도 성공했다. 다음 구현은 PR 07 macOS 연결·정식전 E2E다. 실제 Free 비용·CPU·계정 운영 여유는 미검증 항목을 유지한다. 과거 기록의 배포 전·CLT만 설치 등의 표현은 당시 상태다.**
+최종 갱신: 2026-11-02. **PR 00~06 서버 구현·독립 리뷰·로컬 검증 완료. PR 06 통합 서버 소스는 `3d7a73c`이며 `9109f9f`의 CI도 성공했다. PR 07은 부록 E 계약을 커밋하고 macOS 클라이언트를 구현 중이며 아직 완료하지 않았다. 실제 Free 비용·CPU·계정 운영 여유는 미검증 항목을 유지한다. 과거 기록의 배포 전·CLT만 설치 등의 표현은 당시 상태다.**
 
 ### 진행 중인 작업: PR 07 (2026-11-02)
 
 - 인수 시 `feat/local-practice-battle`·origin 모두 `d21935b`, 작업 트리 깨끗함. 원격 origin은 포크, upstream은 원본 참조/푸시 금지 상태를 확인했다.
-- 구현 전 앱 계약을 BATTLE_PLAN 부록 E에 작성했다. 통신/키, 결정적 재생/원자 효과 원장, 팝오버/통합의 세 단계다. 현재 기능 테스트는 아직 실행하지 않았으며 PR 07 체크박스는 그대로다.
+- 구현 전 앱 계약을 BATTLE_PLAN 부록 E에 작성·커밋했다(`274bfc2`). 통신/키, 결정적 재생/원자 효과 원장, 팝오버/통합의 세 단계다. 공통 DTO와 RED 주소 테스트를 `86746bf`로 통합했으며 아직 의도한 stub이 남아 있다. **PR 07 GREEN/완료가 아니다.**
 - 네트워크·상태 파일·UI 경계 조사를 완료했다. 효과는 후보 상태의 HP·XP credit·경기 receipt를 한 번 저장한 뒤 기존 성장 경로로 소비한다. 실제 사용자 파일과 키체인은 읽지 않았다.
 - 사용자 답변 대기: disableKeychainAccess의 배틀 적용, 무료 한도 보완을 PR 07에 포함할지, 두 번째 맥 사용 가능 여부. 답변에 의존하는 정책은 구현하지 않는다. 설치·개발 배포·두 맥 E2E 승인은 아직 받지 않았다.
 - Xcode 27.2(27B52) 설치 확인. 명령별 DEVELOPER_DIR를 사용하며 시스템 xcode-select는 CLT 그대로다. 별도 worktree에서 RED→GREEN→REFACTOR 구현 후 독립 리뷰·통합·CI를 진행한다. 요청한 모델 이름은 현재 도구에 없어 Core/리뷰는 Astra high, UI는 Sol high, 조사는 Sol medium으로 역할을 대체한다고 사용자에게 알렸다.
+- RED 증거: 별도 통신 worktree에서 `swift test --disable-sandbox --jobs 2 --filter OnlineBattleTransportTests` 종료 **1**, 2건 실행·단언 실패 6·skip 0(주소 정규화/금지 입력), 컴파일 성공. 효과 worktree의 `--filter OnlineBattleEffectsTests` 종료 **1**, 9건 실행·단언 실패 34·unexpected/skip 0, RED 커밋 `ed2340e`(미통합). 두 실행 모두 임시 PTB_STATE_DIR·CLANG_MODULE_CACHE_PATH와 명령별 DEVELOPER_DIR를 사용했다. 최초 모듈 캐시 권한 실패(테스트 0건)는 RED 증거가 아니다.
+- CI 준비 `c0c0d40`: OnlineBattle 파일의 커버리지/결정성 경계, resolver 필터, 양쪽 shard 화면 이미지 보존, workflow 변경 시 server 검사, server timeout 2분(기존 37초)을 반영했다. `bash -n`·Ruby YAML 파싱·`git diff --check` 모두 종료 0. 새 resolver 테스트 파일은 아직 별도 worktree에서 구현 중이며 원격 CI는 실행 전이다.
+- 효과 GREEN 후보 `7a73af2`(worktree 원본 `80a8f23`)는 58건 통과·실패/skip 0: 위 환경에서 `swift test --disable-sandbox --jobs 2 --filter 'OnlineBattleEffectsTests|SaveTransferTests|PracticeStakesStoreTests'`. 독립 리뷰 전 후보이며, 추가 회귀·결함 주입·통합 검증이 남아 있다. 통신·resolver·UI·세션은 아직 전체 통합하지 않았다.
 
 ### PR 05 개발 환경 실측 (2026-11-02)
 
