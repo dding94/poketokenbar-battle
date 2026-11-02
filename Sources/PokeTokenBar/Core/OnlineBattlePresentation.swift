@@ -61,7 +61,7 @@ final class OnlineBattlePresentation {
         request?.kind == "move" && request?.moves.contains { $0.slot == slot && !$0.disabled && $0.pp > 0 } == true
     }
     func send(_ action: OnlineBattleUIAction) {
-        // These are presentation guards. The session independently validates current server/replay state.
+        // These are presentation guards. The session independently validates server state and replay state.
         switch action {
         case .setPopoverVisible:
             break
