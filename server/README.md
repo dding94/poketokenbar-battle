@@ -85,3 +85,28 @@ or put in a URL. The summary names the target only by the Worker's first host la
 row writes and GB-s come from the Cloudflare dashboard and analytics, not from the script.
 For the idle-disconnect time, run with a `--ping-seconds` longer than the expected cutoff and
 read `unexpectedDrops.connectedForMs`.
+
+### Local battle cost measurement
+
+Run `npm run measure:battles` for synthetic matches inside local workerd. It creates a
+separate disposable League object per scenario and uses fake accounts/snapshots. It
+never connects to the deployed Worker. Scenarios include 25/200 manual rounds, a
+10-match batch, auto rounds, timeouts, mismatching/missing reports, and reconnects.
+
+Each JSON result reports battle HTTP calls (including WebSocket upgrades), League
+RPC calls, forced runtime alarm invocations, SQL cursor `rowsRead` and `rowsWritten` (already
+including index writes), `setAlarm` calls, and application `deleteAlarm` calls separately. The pinned test
+helper consumes each forced alarm using `deleteAlarm`; these are reported as
+`harnessAlarmDeletes` and excluded from application deletes.
+Account setup, schema migration, measurement queries and test-control RPCs are
+excluded. Outgoing WebSocket notifications are not incoming requests. No CPU or
+actual Free-plan billing is measured here.
+
+`retainedCellBytes` sums UTF-8 text and 8-byte numeric cells in battle tables; it
+excludes SQLite headers and indexes. `databaseDeltaBytes` uses `sql.databaseSize`
+after minus before the match, including page allocation and indexes. Initial
+empty table pages make single-match deltas smaller than steady growth; use the
+10-match batch when estimating retention. IDs and cryptographic random values
+can change the retained byte totals slightly between runs. These local values
+are evidence for capacity planning, not a deployment or a guarantee of daily
+Free-plan headroom; account-wide traffic and the actual plan limits still apply.

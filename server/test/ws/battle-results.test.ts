@@ -103,6 +103,34 @@ describe("result comparison and atomic records", () => {
     expect((await getBattle(f.p1, id)).body).toEqual(completed.body);
     expect([await records(f.p1.trainerId), await records(f.p2.trainerId)]).toEqual(before);
   });
+  it("requires a completed source and supports reverse-initiator rematches", async () => {
+    const f = await terminal(); const id = f.view.battleId;
+    expectError(await action(f.p2, id, "rematch", { requestId: "reverse", snapshot: snapshot("fresh") }), 409, "invalid_state");
+    const report = reportFor(f.view); await action(f.p1, id, "report", report); expect((await action(f.p2, id, "report", report)).body.state).toBe("COMPLETED");
+    const rematch = await action(f.p2, id, "rematch", { requestId: "reverse", snapshot: snapshot("fresh") }); expect(rematch.status).toBe(200);
+    expect(rematch.body).toMatchObject({ state: "PENDING", rematchOf: id, p1: { trainerId: f.p2.trainerId, snapshot: snapshot("fresh") }, p2: { trainerId: f.p1.trainerId } });
+    expect(rematch.body.config).toBeNull(); expect(rematch.body.p2.snapshot).toBeUndefined();
+  });
+  it("increments consecutive wins and retains the best streak after losing", async () => {
+    const f = await terminal(); let view = f.view;
+    for (const [index, winner] of ["p1", "p1", "p2"].entries()) {
+      if (index > 0) {
+        const created = await createBattle(f.p1, f.p2); expect(created.status).toBe(200); const id = created.body.battleId;
+        expect((await action(f.p2, id, "accept", { revision: 1, snapshot: snapshot("original_2") })).status).toBe(200);
+        expect((await action(f.p1, id, "confirm", { revision: 2 })).status).toBe(200);
+        for (const [who, socket] of [[f.p1, f.a], [f.p2, f.b]] as const) expect((await action(who, id, "ready", { revision: 2, connectionId: socket.hello.connectionId, ...versions })).status).toBe(200);
+        const config = (await getBattle(f.p1, id)).body.config;
+        for (const [who, socket] of [[f.p1, f.a], [f.p2, f.b]] as const) expect((await action(who, id, "start", { revision: 2, connectionId: socket.hello.connectionId, readyToken: config.readyToken, engineHash: versions.engineHash })).status).toBe(200);
+        view = await release({ ...f, view: (await getBattle(f.p1, id)).body });
+      }
+      const body = reportFor(view, { winner, finalHp: winner === "p1" ? { p1: 50, p2: 0 } : { p1: 0, p2: 50 } });
+      expect((await action(f.p1, view.battleId, "report", body)).status).toBe(200);
+      expect((await action(f.p2, view.battleId, "report", body)).body.state).toBe("COMPLETED");
+      if (index === 1) expect(await records(f.p1.trainerId)).toMatchObject({ wins: 2, streak: 2, best_streak: 2 });
+    }
+    expect(await records(f.p1.trainerId)).toMatchObject({ wins: 2, losses: 1, draws: 0, streak: 0, best_streak: 2 });
+    expect(await records(f.p2.trainerId)).toMatchObject({ wins: 1, losses: 2, streak: 1, best_streak: 1 });
+  });
   it("restores the same battle under a recovered key", async () => {
     const f = await terminal(); const recovered = await recoverAccount(f.p2); await connect(recovered.accessKey);
     expectError(await getBattle(f.p2, f.view.battleId), 401, "unauthorized");

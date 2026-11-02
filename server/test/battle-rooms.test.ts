@@ -15,6 +15,18 @@ describe("battle rooms", () => {
     const list = await call("GET", "/v1/battles", { key: f.p1.accessKey }); expect(list.status).toBe(200);
     expect(list.body.battles.map((b: any) => b.battleId)).toContain(f.view.battleId);
   });
+  it("paginates both participant roles without duplicates and validates cursors", async () => {
+    const f = await room(); const ids = [f.view.battleId];
+    for (let i = 0; i < 102; i++) {
+      const made = i % 2 ? await createBattle(f.p1, f.p2) : await createBattle(f.p2, f.p1);
+      expect(made.status).toBe(200); ids.push(made.body.battleId);
+    }
+    const page = await call("GET", "/v1/battles", { key: f.p1.accessKey }); expect(page.status).toBe(200); expect(page.body.battles).toHaveLength(100);
+    const next = await call("GET", `/v1/battles?before=${page.body.before}`, { key: f.p1.accessKey }); expect(next.status).toBe(200); expect(next.body.before).toBeNull();
+    expect([...page.body.battles, ...next.body.battles].map((b: any) => b.battleId)).toEqual(ids.reverse());
+    expect((await call("GET", "/v1/battles", { key: f.third.accessKey })).body.battles).toEqual([]);
+    for (const query of ["before=0", "before=-1", "before=abc", "before=1&before=2", "unknown=1"]) expectError(await call("GET", `/v1/battles?${query}`, { key: f.p1.accessKey }), 400, "bad_request");
+  });
   it("accepts, requires confirmation and preserves original revision retries", async () => {
     const f = await room(); const id = f.view.battleId; const body = { revision: 1, snapshot: snapshot("other") };
     const first = await action(f.p2, id, "accept", body); expect(first.status).toBe(200);
