@@ -580,4 +580,81 @@ final class OnlineBattleSessionTests: XCTestCase {
         }
     }
 
+    func testBackToLobbyWhileBusyKeepsSettlementRunningAndAllowsSelectingAnotherRoom() async throws {
+        let final = try battle()
+        let running = try changed(final, ["state": "RUNNING", "result": NSNull(), "roundSeq": 1, "journal": []])
+        let terminal = try changed(final, ["state": "RUNNING", "result": NSNull()])
+        let (session, http, _, effects) = try await setup([running])
+        await http.route("/v1/battles/\(final.battleId)/choices", try JSONEncoder().encode(terminal))
+        await http.suspendNext("/v1/battles/\(final.battleId)/report")
+        await session.bootstrap()
+        let choice = Task { await session.perform(.chooseMove(1)) }; await http.waitUntilBlocked()
+        XCTAssertTrue(session.presentation.isBusy)
+        await session.perform(.backToLobby)
+        XCTAssertEqual(session.presentation.phase, .lobby)
+        XCTAssertNil(session.presentation.room)
+        XCTAssertNil(session.presentation.arena)
+        XCTAssertNil(session.presentation.deadline)
+        await http.resume(try response(final)); await choice.value
+        XCTAssertEqual(effects.applications, 1, "navigation must not pause replay/report/settlement")
+        XCTAssertTrue(effects.state.onlineBattleHolds.isEmpty)
+        XCTAssertEqual(session.presentation.phase, .lobby, "in-flight action cannot undo explicit navigation")
+        let incoming = try changed(battle(1), ["state": "PENDING", "config": NSNull(), "result": NSNull(), "roundSeq": 0, "journal": []])
+        await http.route("/v1/battles", try JSONEncoder().encode(OnlineBattlePage(battles: [final, incoming], before: nil)))
+        await session.refresh()
+        XCTAssertEqual(session.presentation.phase, .lobby)
+        await session.perform(.openBattle(incoming.battleId))
+        XCTAssertEqual(session.presentation.room?.battleId, incoming.battleId)
+        XCTAssertEqual(session.presentation.phase, .room)
+        XCTAssertNil(session.presentation.result)
+    }
+    func testLateReportedHTTPResponseCannotDowngradeCompletedOrReacquireHold() async throws {
+        let final = try battle()
+        let running = try changed(final, ["state": "RUNNING", "result": NSNull(), "roundSeq": 1, "journal": []])
+        let terminal = try changed(final, ["state": "RUNNING", "result": NSNull()])
+        let reported = try changed(final, ["state": "REPORTED", "result": NSNull()])
+        let (session, http, _, effects) = try await setup([running])
+        await http.route("/v1/battles/\(final.battleId)/choices", try JSONEncoder().encode(terminal))
+        await http.suspendNext("/v1/battles/\(final.battleId)/report")
+        await session.bootstrap()
+        let choice = Task { await session.perform(.chooseMove(1)) }; await http.waitUntilBlocked()
+        await http.route("/v1/battles", try JSONEncoder().encode(OnlineBattlePage(battles: [final], before: nil)))
+        await session.refresh()
+        XCTAssertEqual(effects.applications, 1)
+        await http.resume(try response(reported)); await choice.value
+        XCTAssertEqual(session.presentation.room?.state, .completed)
+        XCTAssertEqual(session.presentation.result?.title, "승리")
+        XCTAssertEqual(effects.applications, 1)
+        XCTAssertTrue(effects.state.onlineBattleHolds.isEmpty)
+    }
+    func testChangedJournalRefetchesOnceWithFreshResolverAndSettlesVerifiedResult() async throws {
+        let final = try battle()
+        let initial = try changed(final, ["state": "RUNNING", "result": NSNull(), "roundSeq": 2, "journal": JSONSerialization.jsonObject(with: JSONEncoder().encode(Array(final.journal.prefix(1))))])
+        let (session, http, _, effects) = try await setup([initial]); await session.bootstrap()
+        var altered = try JSONSerialization.jsonObject(with: JSONEncoder().encode(Array(final.journal.prefix(1)))) as! [[String: Any]]
+        altered[0]["p1"] = ["kind": "move", "slot": 1]
+        let mismatch = try changed(initial, ["journal": altered])
+        let terminal = try changed(final, ["state": "RUNNING", "result": NSNull()])
+        await http.route("/v1/battles", try JSONEncoder().encode(OnlineBattlePage(battles: [mismatch], before: nil)))
+        await http.route("/v1/battles/\(final.battleId)", try JSONEncoder().encode(terminal))
+        await http.route("/v1/battles/\(final.battleId)/report", try JSONEncoder().encode(final))
+        await session.refresh()
+        let reads = await http.count("/v1/battles/\(final.battleId)"); XCTAssertEqual(reads, 1)
+        XCTAssertEqual(effects.applications, 1)
+        XCTAssertEqual(session.presentation.room?.state, .completed)
+        XCTAssertNil(session.presentation.notice)
+    }
+    func testJournalGapStillInvalidAfterOneRefetchFailsClosedWithoutLoopOrEffects() async throws {
+        let final = try battle()
+        let gap = try changed(final, ["state": "RUNNING", "result": NSNull(), "journal": JSONSerialization.jsonObject(with: JSONEncoder().encode(Array(final.journal.dropFirst())))])
+        let (session, http, _, effects) = try await setup([gap])
+        await http.route("/v1/battles/\(final.battleId)", try JSONEncoder().encode(gap))
+        await session.bootstrap()
+        let reads = await http.count("/v1/battles/\(final.battleId)"); XCTAssertEqual(reads, 1)
+        let reports = await http.count("/v1/battles/\(final.battleId)/report"); XCTAssertEqual(reports, 0)
+        XCTAssertEqual(effects.applications, 0)
+        XCTAssertNil(session.presentation.result)
+        XCTAssertNotNil(session.presentation.notice)
+    }
+
 }
