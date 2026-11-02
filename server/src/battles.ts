@@ -28,7 +28,7 @@ export class Battles {
       if (b.state !== "PENDING" || side !== "p1") return fail("invalid_state");
       if (this.store.busy(b.p1, input.snapshot!.instanceId)) return fail("instance_busy");
       changed = canonical(b.snapshots.p1) !== canonical(input.snapshot);
-      this.store.recordReceipt(b, actor.trainer.id, action, input.revision!, input);
+      if (changed) this.store.recordReceipt(b, actor.trainer.id, action, input.revision!, input);
       if (changed) { b.snapshots.p1 = input.snapshot!; b.revision++; b.confirmed = false; b.ready = {}; }
     } else if (action === "accept") {
       if (b.state !== "PENDING" || side !== "p2") return fail("invalid_state");
