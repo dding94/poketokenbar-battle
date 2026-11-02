@@ -363,7 +363,8 @@ SQL 쓰기에는 색인이 이미 포함돼 있다. 보수적 쓰기 산정은 S
 
 - 11:17 KST 사용자 Chrome 대시보드 읽기: 현재 플랜 **Free**. 오늘 계정 합산 Worker 요청 **223/100,000**, DO 요청 **304/100,000**, duration **1.07 GB-s/13,000**, SQL 읽기 **1.53k/5M**, 쓰기 **1.06k/100k**, SQLite 저장 **159.74 kB/5GB**. k 표시는 화면의 반올림 값이다. 다른 서비스 이름·계정 식별값은 기록하지 않는다. DO 목록 오류 **2건**은 원인 미확인으로 유지한다. 이 값은 PR 05가 배포된 계정의 관측이며 PR 06/07 실제 경기 비용을 뜻하지 않는다.
 - 사용자 결정: PR 07은 앱 연결에 집중하고 쓰기 최적화/일일 경기 상한은 **PR 13 전 별도 작업**으로 남긴다. 월 0원 요구와 긴 경기의 한도 초과 추정은 유지한다.
-- 서버 소스는 기존 `d21935b`와 차이 0이다. 실제 배포 없이 `wrangler deploy --env dev --dry-run --outdir <임시 폴더>` 종료 **0**: 78.57 KiB(gzip 19.01 KiB), League DO 바인딩 하나. Worker 번들 SHA-256 `2b5bc854dd146e3d53ebf12d42304aa835c3a2036a2c33fced2c41f1bf93a64d`. env 파일 로딩·프로세스 환경 포함·metrics를 끄고 임시 CLI 설정 폴더를 사용했으며 비밀값을 읽지 않았다. 개발 Worker를 PR 05→PR 06으로 배포하는 별도 사용자 승인을 요청한 상태다.
+- 서버 소스는 기존 `d21935b`와 차이 0이다. 실제 배포 없이 `wrangler deploy --env dev --dry-run --outdir <임시 폴더>` 종료 **0**: 78.57 KiB(gzip 19.01 KiB), League DO 바인딩 하나. 로컬 Worker 번들 SHA-256 `2b5bc854dd146e3d53ebf12d42304aa835c3a2036a2c33fced2c41f1bf93a64d`. env 파일 로딩·프로세스 환경 포함·metrics를 끄고 임시 CLI 설정 폴더를 사용했으며 비밀값을 읽지 않았다.
+- 사용자가 **개발 Worker 배포를 승인**한 뒤 `WRANGLER_SEND_METRICS=false ./node_modules/.bin/wrangler deploy --env dev` 실행, 종료 **0**. 대상 `ptb-battle-league-dev`, 활성 버전 `c7bb8940-caac-4a76-9b6b-bcc166b48d0e`, 업로드 78.57 KiB(gzip 19.01 KiB). 배포 후 `curl --silent --show-error --write-out '\\nHTTP %{http_code}\\n' <DEV_URL>/v1/health` 종료 0·HTTP **200**(`ok:true,api:1`), 같은 방식의 인증 없는 `/v1/battles` 종료 0·HTTP **401**(`unauthorized`). 기존 그룹의 인증 조회·실제 배틀·기존 데이터의 스키마 이관은 이 두 공개 확인으로 검증한 것이 아니다. 실제 비밀값은 조회/출력하지 않았고 설치·두 맥 E2E는 아직 승인/실행 전이다.
 
 ## 8. PR별 작업과 TDD 체크리스트
 
@@ -1146,7 +1147,7 @@ API(`/v1`, JSON 본문, 응답은 `cache-control: no-store`):
 
 ## 부록 E. macOS 온라인 클라이언트 계약 (PR 07, 2026-11-02)
 
-구현 전에 이 계약을 커밋한다. 부록 B~D의 서버 계약을 바꾸지 않는다. 설치·개발 배포·두 맥 E2E는 각각 별도 사용자 승인 후 실행한다. 개발 Worker는 아직 PR 05 코드이며 새 앱으로 바로 정식전을 시험할 수 없다.
+구현 전에 이 계약을 커밋한다. 부록 B~D의 서버 계약을 바꾸지 않는다. 설치·개발 배포·두 맥 E2E는 각각 별도 사용자 승인 후 실행한다. 계약 작성 당시 개발 Worker는 PR 05 코드였고, 2026-11-02 별도 사용자 승인 후 PR 06을 배포했다(§7). 인증된 실제 배틀·설치·두 맥 검증은 별도다.
 
 ### E.1 경계와 설정
 
