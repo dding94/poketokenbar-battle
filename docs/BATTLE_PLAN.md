@@ -288,6 +288,10 @@ Workers Logs는 새 Worker에서 기본으로 켜지고 요청마다 메서드�
 
 ### PR 05·06 무료 실측 기준
 
+PR 06 로컬 측정 방법(2026-11-02 계약 검토): SQL 커서를 끝까지 소비한 뒤 `rowsWritten`을 합산한다. 색인 쓰기가 이미 포함되므로 따로 곱하지 않는다. `setAlarm` 호출은 SQL 합계 밖에서 호출당 1행을 더한다. 저장량은 `sql.databaseSize`의 여러 경기 누적 증가량과, 저장 행의 UTF-8 논리 바이트를 구분한다(논리 바이트에는 페이지·색인 비용이 없음). 스키마·가짜 계정 생성은 기준값을 잡기 전에 끝낸다. [SQLite API](https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/), [과금 기준](https://developers.cloudflare.com/durable-objects/platform/pricing/).
+
+로컬 workerd 결과는 배포된 Free 계정의 사용량·CPU·계정 여유 검증을 대신하지 않는다. 경기당 R요청/W쓰기/B저장 바이트라면 하루 100경기 가정은 일일 `100R/100W/100B`, 90일 `9,000R/9,000W/9,000B`, 1년 `36,500R/36,500W/36,500B`다. 요청·쓰기는 일일 한도이고 장기 값은 처리량 누계다. 결과·입력 기록은 90일 뒤 삭제하지 않으며 저장량은 계속 누적된다. 계정 기본 비용·다른 서비스·재접속·알람 재시도는 별도로 더한다. [로컬 데이터 격리](https://developers.cloudflare.com/workers/local-development/local-data/).
+
 - [x] 실제 Free 플랜과 SQLite 기반 DO 사용을 확인한다. 이미 Paid인 계정을 무료라고 간주하지 않는다. (2026-11-02 로그인한 대시보드에서 Free의 현재 요금제 표시, 개발 League의 SQLite 저장소 확인)
 - [ ] 배포 환경에서 메시지 처리 CPU p99 2ms 이하, 검증 최대 10ms 미만을 측정한다. (2026-11-02 재측정: `wrangler tail` 표본 87건(손실 있는 표본, 정수 ms)에서 WebSocket 메시지·RPC 이벤트 각 11건 CPU 최대 1ms, 모든 호출 최대 3ms(`/v1/connect`), 예외·비정상 결과 0. 메시지 처리는 표본상 목표 안이나, 대시보드 Worker 혼합 p99 2.83ms와 전수 최댓값은 미확보라 체크하지 않는다)
 - [ ] 경기당 DO 요청·행 쓰기·저장량, 상시 연결 수, 재접속 빈도를 측정해 하루·90일·1년 증가량을 계산한다.
