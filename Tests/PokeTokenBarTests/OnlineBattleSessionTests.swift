@@ -2,6 +2,13 @@ import XCTest
 import CryptoKit
 @testable import PokeTokenBar
 
+private final class SessionClock: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: Double = 31
+    func now() -> Double { lock.withLock { value } }
+    func advance(_ seconds: Double) { lock.withLock { value += seconds } }
+}
+
 private actor SessionCredentials: OnlineBattleCredentialStoring {
     var key: String? = "test-key"
     var loads = 0, saves = 0
@@ -35,12 +42,13 @@ private actor SessionHTTP: OnlineBattleHTTPTransport {
     func send(_ request: URLRequest) async throws -> OnlineBattleHTTPResponse {
         requests.append(request)
         let path = request.url!.path
-        if path == suspendPath {
+        if path == suspendPath || (request.httpMethod ?? "GET") + " " + path == suspendPath {
             suspendPath = nil
             return await withCheckedContinuation { suspended = $0; blockedWaiter?.resume(); blockedWaiter = nil }
         }
-        if var queue = queues[path], !queue.isEmpty {
-            let value = queue.removeFirst(); queues[path] = queue; return value
+        let queueKey = (request.httpMethod ?? "GET") + " " + path
+        if var queue = queues[queueKey] ?? queues[path], !queue.isEmpty {
+            let value = queue.removeFirst(); queues[queues[queueKey] == nil ? path : queueKey] = queue; return value
         }
         guard let response = routes[request.url!.path] else { throw OnlineBattleFailure.transport }
         return response
@@ -49,12 +57,21 @@ private actor SessionHTTP: OnlineBattleHTTPTransport {
 }
 private actor SessionConnection: OnlineBattleConnecting {
     var configurationCount = 0
+    var stops = 0
+    var state: OnlineBattleConnectionState = .connected
+    func setState(_ value: OnlineBattleConnectionState) { state = value }
     func configure(origin: OnlineBattleOrigin?, accessKey: String?) { configurationCount += 1 }
     func setPopoverOpen(_ open: Bool) {}
-    func snapshot() -> OnlineBattleConnectionSnapshot { .init(state: .connected, generation: 1, connectionId: "connection", trainerId: "trainer-one", groupId: "group") }
+    func snapshot() -> OnlineBattleConnectionSnapshot { .init(state: state, generation: 1, connectionId: "connection", trainerId: "trainer-one", groupId: "group") }
     func authenticationFailed(generation: UInt64) {}
-    func stop() {}
+    func stop() { stops += 1 }
 }
+@MainActor
+private final class SessionAccess { var allowed = true }
+
+@MainActor
+private final class SessionObserver { var callback: OnlineBattleConnection.Observer? }
+
 @MainActor
 private final class SessionEffects: OnlineBattleEffects {
     var state = CompanionState()
@@ -96,13 +113,13 @@ final class OnlineBattleSessionTests: XCTestCase {
             .init(id: value.instanceId, name: value.publicInfo.species, snapshot: .init(schemaVersion: 1, instanceID: value.instanceId, engineHash: BattleEngineManifest.sha256, rulesVersion: BattleSnapshot.rules, policyVersion: BattleSnapshot.policy, set: value.set, publicInfo: value.publicInfo), blockedReason: nil)
         }
     }
-    private func setup(_ battles: [OnlineBattleView] = [], credential: SessionCredentials = .init(), effects: SessionEffects = .init(), trainer: String = "trainer-one", rosterOverride: [PracticeCandidate]? = nil, clock: OnlineBattleConnectionClock = .init()) async throws -> (OnlineBattleSession, SessionHTTP, SessionCredentials, SessionEffects) {
-        let http = SessionHTTP(), connection = SessionConnection(), room = try battle()
+    private func setup(_ battles: [OnlineBattleView] = [], credential: SessionCredentials = .init(), effects: SessionEffects = .init(), trainer: String = "trainer-one", rosterOverride: [PracticeCandidate]? = nil, connection: SessionConnection = .init(), observer: SessionObserver? = nil, access: SessionAccess? = nil, enabled: Bool = true, clock: OnlineBattleConnectionClock = .init()) async throws -> (OnlineBattleSession, SessionHTTP, SessionCredentials, SessionEffects) {
+        let http = SessionHTTP(), room = try battle()
         let localAccount = OnlineBattleAccount(trainer: .init(trainerId: trainer, displayEmail: account.trainer.displayEmail, role: .member, status: .active), group: account.group)
         await http.route("/v1/me", try JSONEncoder().encode(localAccount))
         await http.route("/v1/group", try JSONEncoder().encode(OnlineBattleGroupMembers(group: account.group, members: [])))
         await http.route("/v1/battles", try JSONEncoder().encode(OnlineBattlePage(battles: battles, before: nil)))
-        let session = OnlineBattleSession(settings: .init(profileID: UUID().uuidString, serverURL: "https://battle.example.invalid"), credentials: credential, transport: http, effects: effects, engineFactory: { try BattleEngine(url: self.engineURL) }, connectionFactory: { _ in connection }, rosterProvider: { rosterOverride ?? self.roster(room) }, clock: clock, automaticTicks: false)
+        let session = OnlineBattleSession(settings: .init(profileID: UUID().uuidString, serverURL: "https://battle.example.invalid"), credentials: credential, transport: http, effects: effects, engineFactory: { try BattleEngine(url: self.engineURL) }, connectionFactory: { callback in observer?.callback = callback; return connection }, rosterProvider: { rosterOverride ?? self.roster(room) }, clock: clock, automaticTicks: false, enabled: enabled, accessAllowed: { access?.allowed ?? true })
         return (session, http, credential, effects)
     }
     func testBootstrapLoadsCredentialsOnceAndRefreshesAccount() async throws {
@@ -228,7 +245,7 @@ final class OnlineBattleSessionTests: XCTestCase {
         let final = try battle(), pending = try changed(battle(), ["state": "PENDING", "config": NSNull(), "result": NSNull(), "roundSeq": 0, "journal": []])
         let (session, http, _, effects) = try await setup()
         await session.bootstrap()
-        await http.queue("/v1/battles", [.init(status: 503, body: Data()), try response(pending)])
+        await http.queue("POST /v1/battles", [.init(status: 503, body: Data()), try response(pending)])
         session.presentation.selectedEntryID = final.p1.snapshot!.instanceId
         session.presentation.selectedOpponentID = "trainer-two"
         await session.perform(.challenge); await session.perform(.challenge)
@@ -307,6 +324,213 @@ final class OnlineBattleSessionTests: XCTestCase {
         let count = await http.count("/v1/me"); XCTAssertEqual(count, 2)
         XCTAssertEqual(session.presentation.room?.battleId, final.battleId)
         XCTAssertEqual(session.presentation.deadline, Date(timeIntervalSince1970: 30))
+    }
+
+    func testOnePrepareGestureStartsAfterOtherPlayerBecomesReady() async throws {
+        let final = try battle()
+        let accepted = try changed(final, ["state": "ACCEPTED", "config": NSNull(), "result": NSNull(), "confirmed": true, "roundSeq": 0, "journal": []])
+        let ready = try changed(final, ["state": "READY", "result": NSNull(), "roundSeq": 0, "journal": []])
+        let running = try changed(final, ["state": "RUNNING", "result": NSNull(), "roundSeq": 1, "journal": []])
+        let (session, http, _, _) = try await setup([accepted])
+        await http.route("/v1/battles/\(final.battleId)/ready", try JSONEncoder().encode(accepted))
+        await http.route("/v1/battles/\(final.battleId)/start", try JSONEncoder().encode(running))
+        await session.bootstrap(); await session.perform(.prepareBattle)
+        await http.route("/v1/battles", try JSONEncoder().encode(OnlineBattlePage(battles: [ready], before: nil)))
+        await session.refresh()
+        let starts = await http.count("/v1/battles/\(final.battleId)/start"); XCTAssertEqual(starts, 1)
+        XCTAssertEqual(session.presentation.room?.state, .running)
+    }
+    func testOldFailureDoesNotDisableNewServerActions() async throws {
+        let (session, http, _, _) = try await setup()
+        await http.suspendNext("/v1/me")
+        let old = Task { await session.bootstrap() }; await http.waitUntilBlocked()
+        await session.configureServer("https://new.example.invalid")
+        await http.resume(.init(status: 401, body: Data())); await old.value
+        let pending = try changed(battle(), ["state": "PENDING", "config": NSNull(), "result": NSNull(), "roundSeq": 0, "journal": []])
+        await http.queue("POST /v1/battles", [try response(pending)])
+        session.presentation.selectedEntryID = "instance-one"; session.presentation.selectedOpponentID = "trainer-two"
+        await session.perform(.challenge)
+        let bodies = await http.bodies("/v1/battles"); XCTAssertEqual(bodies.count, 1)
+    }
+    func testPollingNeverAcknowledgesReadyOrStart() async throws {
+        let final = try battle(), connection = SessionConnection(); await connection.setState(.polling)
+        let ready = try changed(final, ["state": "READY", "result": NSNull(), "roundSeq": 0, "journal": []])
+        let (session, http, _, _) = try await setup([ready], connection: connection)
+        await session.bootstrap(); await session.perform(.prepareBattle)
+        let starts = await http.count("/v1/battles/\(final.battleId)/start"); XCTAssertEqual(starts, 0)
+        XCTAssertFalse(session.presentation.canStart)
+    }
+    func testPersistedHoldMissingFromListIsFetchedAndReleasedOnlyWithEvidence() async throws {
+        let room = try changed(battle(), ["state": "EXPIRED", "result": NSNull()]), effects = SessionEffects()
+        let key = OnlineBattleReceiptKey(scope: .init(originHash: try OnlineBattleOrigin("https://battle.example.invalid").hash, groupID: "group", trainerID: "trainer-one"), battleID: room.battleId)
+        try effects.holdOnlineBattle(key: key, instanceID: "instance-one")
+        let (session, http, _, _) = try await setup([], effects: effects)
+        await http.route("/v1/battles/\(room.battleId)", try JSONEncoder().encode(room))
+        await session.bootstrap()
+        XCTAssertTrue(effects.state.onlineBattleHolds.isEmpty)
+        let reads = await http.count("/v1/battles/\(room.battleId)"); XCTAssertEqual(reads, 1)
+    }
+    func testLocalHealthChangeDuringChallengeCancelsInsteadOfHoldingOldSnapshot() async throws {
+        let pending = try changed(battle(), ["state": "PENDING", "config": NSNull(), "result": NSNull(), "roundSeq": 0, "journal": []])
+        let cancelled = try changed(pending, ["state": "CANCELLED"])
+        let (session, http, _, effects) = try await setup(); await session.bootstrap()
+        session.presentation.selectedEntryID = "instance-one"; session.presentation.selectedOpponentID = "trainer-two"
+        await http.route("/v1/battles/\(pending.battleId)/cancel", try JSONEncoder().encode(cancelled))
+        await http.suspendNext("POST /v1/battles")
+        let challenge = Task { await session.perform(.challenge) }; await http.waitUntilBlocked()
+        effects.setHealthShare(0.5, of: "instance-one")
+        await http.resume(try response(pending)); await challenge.value
+        XCTAssertTrue(effects.state.onlineBattleHolds.isEmpty)
+        let cancels = await http.count("/v1/battles/\(pending.battleId)/cancel"); XCTAssertEqual(cancels, 1)
+        XCTAssertNotNil(session.presentation.notice)
+    }
+
+    func testReadyResumesFrozenBattleAfterLocalGrowthChangesInputs() async throws {
+        let final = try battle()
+        let ready = try changed(final, ["state": "READY", "result": NSNull(), "roundSeq": 0, "journal": []])
+        let running = try changed(final, ["state": "RUNNING", "result": NSNull(), "roundSeq": 1, "journal": []])
+        var entries = roster(final)
+        let original = entries[0].snapshot!, value = original.set
+        let grown = BattleSet(speciesNum: value.speciesNum, form: value.form, level: value.level + 1, gender: value.gender, nature: value.nature, ability: value.ability, moves: value.moves, ivs: value.ivs, shiny: value.shiny)
+        let engine = try BattleEngine(url: engineURL)
+        let info: BattlePublicInfo = try BattleJSON.decode(engine.call(.describeSet, arguments: [BattleJSON.encode(grown)]))
+        entries[0] = .init(id: original.instanceID, name: info.species, snapshot: .init(schemaVersion: 1, instanceID: original.instanceID, engineHash: original.engineHash, rulesVersion: original.rulesVersion, policyVersion: original.policyVersion, set: grown, publicInfo: info), blockedReason: nil)
+        let (session, http, _, _) = try await setup([ready], rosterOverride: entries)
+        await http.route("/v1/battles/\(final.battleId)/start", try JSONEncoder().encode(running))
+        await session.bootstrap(); await session.perform(.prepareBattle)
+        let starts = await http.count("/v1/battles/\(final.battleId)/start"); XCTAssertEqual(starts, 1)
+    }
+
+    func testRevocationInvalidatesAlreadyRunningRefreshBeforeItCanSettle() async throws {
+        let observer = SessionObserver(), connection = SessionConnection()
+        let (session, http, _, effects) = try await setup(connection: connection, observer: observer)
+        await session.bootstrap()
+        await http.route("/v1/battles", try JSONEncoder().encode(OnlineBattlePage(battles: [battle()], before: nil)))
+        await http.suspendNext("/v1/me")
+        let pending = Task { await session.refresh() }; await http.waitUntilBlocked()
+        await connection.setState(.revoked)
+        await observer.callback?(.changed(await connection.snapshot()))
+        await http.resume(.init(status: 200, body: try JSONEncoder().encode(account))); await pending.value
+        XCTAssertEqual(effects.applications, 0)
+        XCTAssertNil(session.presentation.account)
+        let before = await http.count("/v1/me"); await session.refresh()
+        let after = await http.count("/v1/me"); XCTAssertEqual(after, before)
+    }
+    func testOldConnectionEventCannotRevokeChangedServer() async throws {
+        let observer = SessionObserver(), connection = SessionConnection()
+        let (session, _, _, _) = try await setup(connection: connection, observer: observer)
+        await session.bootstrap(); let old = observer.callback
+        await session.configureServer("https://new.example.invalid")
+        await connection.setState(.revoked)
+        await old?(.changed(await connection.snapshot()))
+        XCTAssertEqual(session.presentation.account, account)
+    }
+
+    func testDisabledStartupDoesNotReadCredentialsOrUseNetworkAndEnableResumes() async throws {
+        let (session, http, credentials, _) = try await setup(enabled: false)
+        await session.bootstrap()
+        let loads = await credentials.loads, requests = await http.requests.count
+        XCTAssertEqual(loads, 0); XCTAssertEqual(requests, 0)
+        await session.setEnabled(true)
+        XCTAssertEqual(session.presentation.account, account)
+        let after = await credentials.loads; XCTAssertEqual(after, 1)
+    }
+    func testFreshAccessGateBlocksEffectsBeforeObservationCallbackAndStopsConnection() async throws {
+        let access = SessionAccess(), connection = SessionConnection()
+        let (session, http, credentials, effects) = try await setup(connection: connection, access: access)
+        await session.bootstrap()
+        await http.route("/v1/battles", try JSONEncoder().encode(OnlineBattlePage(battles: [battle()], before: nil)))
+        await http.suspendNext("/v1/me")
+        let pending = Task { await session.refresh() }; await http.waitUntilBlocked()
+        access.allowed = false
+        await http.resume(.init(status: 200, body: try JSONEncoder().encode(account))); await pending.value
+        XCTAssertEqual(effects.applications, 0)
+        await session.setEnabled(false)
+        XCTAssertNil(session.presentation.account)
+        let stops = await connection.stops; XCTAssertEqual(stops, 1)
+        let key = await credentials.key; XCTAssertEqual(key, "test-key", "disabling never deletes saved access keys")
+        let count = await http.requests.count; await session.refresh(); await session.perform(.join(inviteCode: "x", email: "x@example.invalid"))
+        let after = await http.requests.count; XCTAssertEqual(after, count)
+    }
+    func testDisableWhileJoinResponseIsInFlightNeverSavesOrDisplaysGrant() async throws {
+        let access = SessionAccess(), credentials = SessionCredentials(); await credentials.setKey(nil)
+        let (session, http, _, _) = try await setup(credential: credentials, access: access)
+        await session.bootstrap(); await http.suspendNext("/v1/join")
+        let join = Task { await session.join(inviteCode: "invite", email: "synthetic@example.invalid") }; await http.waitUntilBlocked()
+        access.allowed = false; await session.setEnabled(false)
+        let body = try JSONSerialization.data(withJSONObject: ["trainer": JSONSerialization.jsonObject(with: JSONEncoder().encode(account.trainer)), "group": JSONSerialization.jsonObject(with: JSONEncoder().encode(account.group)), "accessKey": "discarded-key", "recoveryCode": "discarded-code"])
+        await http.resume(.init(status: 200, body: body)); await join.value
+        let saves = await credentials.saves; XCTAssertEqual(saves, 0)
+        XCTAssertNil(session.presentation.recoveryCode); XCTAssertNil(session.presentation.account)
+        XCTAssertFalse(session.presentation.canRetryCredentialSave)
+    }
+
+    func testChallengeRefreshesOldCompletionBeforeAdmittingAnotherBattle() async throws {
+        let final = try battle(1)
+        let (session, http, _, effects) = try await setup([], rosterOverride: roster(final)); await session.bootstrap()
+        session.presentation.selectedEntryID = "instance-one"; session.presentation.selectedOpponentID = "trainer-two"
+        await http.route("/v1/battles", try JSONEncoder().encode(OnlineBattlePage(battles: [final], before: nil)))
+        await session.perform(.challenge)
+        XCTAssertEqual(effects.applications, 1)
+        XCTAssertEqual(effects.healthShare(of: "instance-one"), 0)
+        let creates = await http.bodies("/v1/battles"); XCTAssertEqual(creates.count, 0)
+    }
+
+    func testNotificationHoldingCreatedBattleBeforePOSTResponseDoesNotCancelIt() async throws {
+        let pending = try changed(battle(), ["state": "PENDING", "config": NSNull(), "result": NSNull(), "roundSeq": 0, "journal": []])
+        let (session, http, _, effects) = try await setup(); await session.bootstrap()
+        session.presentation.selectedEntryID = "instance-one"; session.presentation.selectedOpponentID = "trainer-two"
+        await http.suspendNext("POST /v1/battles")
+        let challenge = Task { await session.perform(.challenge) }; await http.waitUntilBlocked()
+        await http.route("/v1/battles", try JSONEncoder().encode(OnlineBattlePage(battles: [pending], before: nil)))
+        await session.refresh()
+        XCTAssertEqual(effects.state.onlineBattleHolds.first?.key.battleID, pending.battleId)
+        await http.route("/v1/battles/\(pending.battleId)/cancel", try JSONEncoder().encode(changed(pending, ["state": "CANCELLED"])))
+        await http.resume(try response(pending)); await challenge.value
+        let cancels = await http.count("/v1/battles/\(pending.battleId)/cancel"); XCTAssertEqual(cancels, 0)
+        XCTAssertEqual(effects.state.onlineBattleHolds.count, 1)
+        XCTAssertEqual(session.presentation.room?.state, .pending)
+    }
+
+    func testPaidCompletedHistoryDoesNotRequireReleasedEntrantOrBlockNewAdmission() async throws {
+        let final = try battle(), effects = SessionEffects()
+        let (first, _, _, _) = try await setup([final], effects: effects); await first.bootstrap()
+        XCTAssertEqual(effects.applications, 1)
+        let remainingRoster = Array(roster(final).dropFirst())
+        let (session, http, _, _) = try await setup([final], effects: effects, rosterOverride: remainingRoster)
+        await session.bootstrap()
+        XCTAssertNil(session.presentation.notice)
+        XCTAssertEqual(effects.applications, 1)
+        session.presentation.selectedEntryID = "instance-two"; session.presentation.selectedOpponentID = "trainer-two"
+        var p1 = try JSONSerialization.jsonObject(with: JSONEncoder().encode(final.p1)) as! [String: Any]
+        p1["snapshot"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(final.p2.snapshot))
+        let pending = try changed(final, ["battleId": "bt_new", "state": "PENDING", "p1": p1, "config": NSNull(), "result": NSNull(), "roundSeq": 0, "journal": []])
+        await http.queue("POST /v1/battles", [try response(pending)])
+        await session.perform(.challenge)
+        let creates = await http.bodies("/v1/battles"); XCTAssertEqual(creates.count, 1)
+    }
+    func testNotificationDuringReportForcesOneFollowupReadToCompleted() async throws {
+        let final = try battle(), terminal = try changed(battle(), ["state": "RUNNING", "result": NSNull()])
+        let reported = try changed(final, ["state": "REPORTED", "result": NSNull()])
+        let (session, http, _, effects) = try await setup([terminal])
+        await http.suspendNext("/v1/battles/\(final.battleId)/report")
+        let bootstrap = Task { await session.bootstrap() }; await http.waitUntilBlocked()
+        await http.route("/v1/battles", try JSONEncoder().encode(OnlineBattlePage(battles: [final], before: nil)))
+        session.requestRefresh(); session.requestRefresh()
+        await http.resume(try response(reported)); await bootstrap.value
+        XCTAssertEqual(effects.applications, 1)
+        XCTAssertEqual(session.presentation.room?.state, .completed)
+        let reads = await http.count("/v1/me"); XCTAssertEqual(reads, 2, "two notifications share one followup")
+    }
+
+    func testMissedDeadlineReadRetriesAfterTransientFailureWhileHidden() async throws {
+        let clock = SessionClock()
+        let running = try changed(battle(), ["state": "RUNNING", "result": NSNull(), "roundSeq": 1, "deadline": 30000, "journal": []])
+        let (session, http, _, _) = try await setup([running], clock: .init(now: { clock.now() }, sleep: { _ in }))
+        await session.bootstrap(); await session.perform(.setPopoverVisible(false))
+        await http.queue("/v1/me", [.init(status: 503, body: Data())])
+        await session.tick(); clock.advance(5); await session.tick()
+        let reads = await http.count("/v1/me"); XCTAssertEqual(reads, 3)
     }
 
 }

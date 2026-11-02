@@ -9,7 +9,7 @@ final class OnlineBattleSession {
     private let transport: any OnlineBattleHTTPTransport
     private let effects: any OnlineBattleEffects
     private let engineFactory: () throws -> BattleEngine
-    private let connectionFactory: (OnlineBattleConnection.Observer) -> any OnlineBattleConnecting
+    private let connectionFactory: (@escaping OnlineBattleConnection.Observer) -> any OnlineBattleConnecting
     private let saveSettings: (OnlineBattleSettings) throws -> Void
     private let rosterProvider: (() throws -> [PracticeCandidate])?
     private let clock: OnlineBattleConnectionClock
@@ -41,10 +41,10 @@ final class OnlineBattleSession {
     init(settings: OnlineBattleSettings, credentials: any OnlineBattleCredentialStoring,
          transport: any OnlineBattleHTTPTransport = OnlineBattleURLSessionTransport(), effects: any OnlineBattleEffects,
          engineFactory: @escaping () throws -> BattleEngine,
-         connectionFactory: @escaping (OnlineBattleConnection.Observer) -> any OnlineBattleConnecting,
+         connectionFactory: @escaping (@escaping OnlineBattleConnection.Observer) -> any OnlineBattleConnecting,
          saveSettings: @escaping (OnlineBattleSettings) throws -> Void = { _ in },
          rosterProvider: (() throws -> [PracticeCandidate])? = nil,
-         clock: OnlineBattleConnectionClock = .init(), automaticTicks: Bool = true) {
+         clock: OnlineBattleConnectionClock = .init(), automaticTicks: Bool = true, enabled: Bool = true, accessAllowed: @escaping () -> Bool = { true }) {
         self.settings = settings; self.credentials = credentials; self.transport = transport
         self.effects = effects; self.engineFactory = engineFactory; self.connectionFactory = connectionFactory
         self.saveSettings = saveSettings; self.rosterProvider = rosterProvider
@@ -52,6 +52,8 @@ final class OnlineBattleSession {
         presentation.serverAddress = settings.serverURL ?? ""
         presentation.onAction = { [weak self] action in Task { await self?.perform(action) } }
     }
+    func setEnabled(_ enabled: Bool) async {}
+    func requestRefresh() {}
     func bootstrap() async {
         guard !bootstrapped else { return }
         bootstrapped = true
