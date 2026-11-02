@@ -533,4 +533,51 @@ final class OnlineBattleSessionTests: XCTestCase {
         let reads = await http.count("/v1/me"); XCTAssertEqual(reads, 3)
     }
 
+    func testSelectingCompletedRoomsShowsEachRoomsOwnResult() async throws {
+        let win = try battle(), loss = try battle(1)
+        let (session, _, _, _) = try await setup([win, loss]); await session.bootstrap()
+        await session.perform(.openBattle(win.battleId)); XCTAssertEqual(session.presentation.result?.title, "승리")
+        await session.perform(.openBattle(loss.battleId)); XCTAssertEqual(session.presentation.result?.title, "패배")
+    }
+    func testDismissedResultStaysInLobbyAfterRefresh() async throws {
+        let (session, _, _, _) = try await setup([battle()]); await session.bootstrap()
+        await session.perform(.dismissResult); await session.refresh()
+        XCTAssertEqual(session.presentation.phase, .lobby)
+        XCTAssertNil(session.presentation.room)
+        XCTAssertNil(session.presentation.result)
+    }
+
+    func testSameOriginGrantSeparatesPendingRefreshAndStopsPreviousConnection() async throws {
+        for (action, path, status) in [(OnlineBattleUIAction.recover(code: "recovery"), "/v1/recover", 503), (.reconnect(code: "reconnect"), "/v1/reconnect", 401)] {
+            let connection = SessionConnection(), observer = SessionObserver()
+            let (session, http, credentials, _) = try await setup(connection: connection, observer: observer)
+            await session.bootstrap()
+            let oldObserver = try XCTUnwrap(observer.callback)
+            await http.suspendNext("/v1/me")
+            let oldRead = Task { await session.refresh() }; await http.waitUntilBlocked()
+            let grant = try JSONSerialization.data(withJSONObject: ["trainer": JSONSerialization.jsonObject(with: JSONEncoder().encode(account.trainer)), "group": JSONSerialization.jsonObject(with: JSONEncoder().encode(account.group)), "accessKey": "new-key", "recoveryCode": "new-code"])
+            await http.route(path, grant)
+            await credentials.setFailure(true)
+            await session.perform(action)
+            let stops = await connection.stops; XCTAssertEqual(stops, 1, "accepting a same-origin grant must retire the previous connection even if saving fails")
+            XCTAssertTrue(session.presentation.canRetryCredentialSave)
+            await credentials.setFailure(false)
+            let retry = Task { await session.perform(.retryCredentialSave) }
+            for _ in 0..<300 { if await http.count("/v1/me") == 3 { break }; await Task.yield() }
+            let freshReads = await http.count("/v1/me"); XCTAssertEqual(freshReads, 3, "new credentials must not join the suspended old refresh")
+            await http.resume(.init(status: status, body: Data()))
+            await oldRead.value; await retry.value
+            await connection.setState(.revoked)
+            await oldObserver(.changed(await connection.snapshot()))
+            XCTAssertEqual(session.presentation.account, account, "old HTTP failures and connection events must not revoke new credentials")
+            XCTAssertNil(session.presentation.notice)
+            XCTAssertFalse(session.presentation.isBusy)
+            await session.perform(.selectOpponent("trainer-two"))
+            await session.perform(.challenge)
+            let attempts = await http.bodies("/v1/battles")
+            XCTAssertEqual(attempts.count, 1, "stale catch must not clear new reconciliation")
+            let grants = await http.count(path); XCTAssertEqual(grants, 1)
+        }
+    }
+
 }
