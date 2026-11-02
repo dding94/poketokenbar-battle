@@ -1,5 +1,6 @@
 import Foundation
 import CryptoKit
+import Observation
 
 /// App-lifetime owner: closing a popover never stops the server clock, replay, or settlement.
 @MainActor
@@ -584,6 +585,25 @@ final class OnlineBattleSession {
             presentation.notice = "전투 결과를 확인하지 못해 체력과 경험치를 반영하지 않았어요."
         } else {
             presentation.notice = "온라인 정보를 확인하지 못했어요. 연결을 확인하고 다시 시도해 주세요."
+        }
+    }
+}
+
+/// Re-arms the one-shot settings observation before asynchronous connection work.
+@MainActor
+final class OnlineBattleAccessObservation {
+    private let read: () -> Bool
+    private let changed: (Bool) async -> Void
+    init(read: @escaping () -> Bool, changed: @escaping (Bool) async -> Void) {
+        self.read = read; self.changed = changed
+    }
+    func start() {
+        withObservationTracking { _ = read() } onChange: { [weak self] in
+            Task { @MainActor in
+                guard let self else { return }
+                await self.changed(self.read())
+                self.start()
+            }
         }
     }
 }

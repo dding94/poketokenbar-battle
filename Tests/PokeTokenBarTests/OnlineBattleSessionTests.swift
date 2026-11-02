@@ -1,5 +1,6 @@
 import XCTest
 import CryptoKit
+import Observation
 @testable import PokeTokenBar
 
 private final class SessionClock: @unchecked Sendable {
@@ -64,9 +65,25 @@ private actor SessionConnection: OnlineBattleConnecting {
     func setPopoverOpen(_ open: Bool) {}
     func snapshot() -> OnlineBattleConnectionSnapshot { .init(state: state, generation: 1, connectionId: "connection", trainerId: "trainer-one", groupId: "group") }
     func authenticationFailed(generation: UInt64) {}
-    func stop() { stops += 1 }
+    private var pauseStop = false
+    private var stoppedWaiter: CheckedContinuation<Void, Never>?
+    private var stopWaiter: CheckedContinuation<Void, Never>?
+    func suspendStop() { pauseStop = true }
+    func waitUntilStopping() async {
+        if stopWaiter != nil { return }
+        await withCheckedContinuation { stoppedWaiter = $0 }
+    }
+    func resumeStop() { stopWaiter?.resume(); stopWaiter = nil }
+    func stop() async {
+        stops += 1
+        if pauseStop {
+            pauseStop = false
+            await withCheckedContinuation { stopWaiter = $0; stoppedWaiter?.resume(); stoppedWaiter = nil }
+        }
+    }
 }
 @MainActor
+@Observable
 private final class SessionAccess { var allowed = true }
 
 @MainActor
@@ -655,6 +672,39 @@ final class OnlineBattleSessionTests: XCTestCase {
         XCTAssertEqual(effects.applications, 0)
         XCTAssertNil(session.presentation.result)
         XCTAssertNotNil(session.presentation.notice)
+    }
+
+    func testAccessObservationReceivesDisableWhileEnableIsWaitingForHTTP() async throws {
+        let access = SessionAccess(); access.allowed = false
+        let connection = SessionConnection()
+        let (session, http, _, _) = try await setup(connection: connection, access: access, enabled: false)
+        let observation = OnlineBattleAccessObservation(read: { access.allowed }, changed: { await session.setEnabled($0) })
+        observation.start()
+        await http.suspendNext("/v1/me")
+        access.allowed = true
+        await http.waitUntilBlocked()
+        access.allowed = false
+        for _ in 0..<300 { if await connection.stops == 1 { break }; await Task.yield() }
+        let stops = await connection.stops; XCTAssertEqual(stops, 1, "OFF must be observed while ON bootstrap awaits a response")
+        await http.resume(.init(status: 200, body: try JSONEncoder().encode(account)))
+        for _ in 0..<100 { await Task.yield() }
+        XCTAssertNil(session.presentation.account)
+        access.allowed = true
+        for _ in 0..<300 { if session.presentation.account != nil { break }; await Task.yield() }
+        XCTAssertEqual(session.presentation.account, account, "later ON must bootstrap after the interrupted enable")
+    }
+    func testDelayedDisableStopCannotClearNewlyEnabledAPIKey() async throws {
+        let connection = SessionConnection()
+        let (session, http, _, _) = try await setup(connection: connection)
+        await session.bootstrap(); await connection.suspendStop()
+        let disable = Task { await session.setEnabled(false) }
+        await connection.waitUntilStopping()
+        await session.setEnabled(true)
+        XCTAssertEqual(session.presentation.account, account)
+        await connection.resumeStop(); await disable.value
+        await session.refresh()
+        XCTAssertEqual(session.presentation.account, account)
+        let reads = await http.count("/v1/me"); XCTAssertEqual(reads, 3, "late disable cleanup must not remove the new API credential")
     }
 
 }
