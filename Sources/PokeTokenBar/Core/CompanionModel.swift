@@ -730,6 +730,9 @@ struct CompanionState: Codable, Sendable {
     /// (0 = fainted). An absent key is full HP, so an old save or an upstream import loads at full HP, and an
     /// individual healed back to full drops its entry (`CompanionStore.setHealthShare`).
     var battleHealth: [String: Double] = [:]
+    var onlineBattleReceipts: [OnlineBattleEffectReceipt] = []
+    var onlineBattleHolds: [OnlineBattleHold] = []
+    var onlineLedgerTrusted = true
 
     init() {}
 
@@ -771,6 +774,9 @@ struct CompanionState: Codable, Sendable {
         candyWindowEpoch   = c.lenient([String: String].self, forKey: .candyWindowEpoch, default: [:])
         candyFeatureSeeded = c.lenient(Bool.self, forKey: .candyFeatureSeeded, default: false)
         battleHealth       = c.lenient([String: Double].self, forKey: .battleHealth, default: [:])
+        onlineBattleReceipts = try c.contains(.onlineBattleReceipts) ? c.decode([OnlineBattleEffectReceipt].self, forKey: .onlineBattleReceipts) : []
+        onlineBattleHolds = try c.contains(.onlineBattleHolds) ? c.decode([OnlineBattleHold].self, forKey: .onlineBattleHolds) : []
+        onlineLedgerTrusted = try c.contains(.onlineLedgerTrusted) ? c.decode(Bool.self, forKey: .onlineLedgerTrusted) : true
     }
 
     /// 졸업 기록 또는 현재 개체가 실제로 도달한 단계에 이 종이 포함되는가.

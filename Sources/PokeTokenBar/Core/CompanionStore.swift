@@ -42,6 +42,7 @@ final class CompanionStore {
     private let detailProvider: (any PokemonDetailProviding)?
     private let clock: () -> Date
     private let fileURL: URL
+    private let onlineStateWriter: (Data, URL) throws -> Void
     private var rng: any RandomNumberGenerator
     private let dittoDisguiseRollingEnabled: Bool
     private(set) var pokemonDetailsByID: [Int: PokemonDetails] = [:]
@@ -75,7 +76,8 @@ final class CompanionStore {
          fileURL: URL? = nil,
          rng: any RandomNumberGenerator = SystemRandomNumberGenerator(),
          dittoDisguiseRollingEnabled: Bool = AppEnv.isBundledApp,
-         defaults: UserDefaults = .standard) {
+         defaults: UserDefaults = .standard,
+         onlineStateWriter: @escaping (Data, URL) throws -> Void = { try $0.write(to: $1, options: .atomic) }) {
         self.provider = provider
         self.detailProvider = detailProvider ?? (provider as? any PokemonDetailProviding)
         self.clock = clock
@@ -83,6 +85,7 @@ final class CompanionStore {
         self.rng = rng
         self.dittoDisguiseRollingEnabled = dittoDisguiseRollingEnabled
         self.defaults = defaults
+        self.onlineStateWriter = onlineStateWriter
         let storedGrowth = defaults.object(forKey: "growthDifficulty") as? Double ?? PokemonBalance.defaultDifficulty
         // Previous releases accepted 0.01%–2000%. Reprice their banked progress before
         // persisting the narrower range, otherwise an upgrade silently changes completion.
@@ -2255,4 +2258,15 @@ extension CompanionStore: PracticeBattleEffects {
         state.battleHealth[instanceID] = entry
         return true
     }
+}
+
+
+extension CompanionStore: OnlineBattleEffects {
+    func applyVerifiedOnlineBattleEffect(_ effect: VerifiedOnlineBattleEffect) throws -> OnlineBattleEffectReceipt {
+        OnlineBattleEffectReceipt(key: effect.key, resultHash: effect.resultHash, localInstanceID: effect.localInstanceID,
+                                  appliedHPShare: 1, grantedXP: 0, recipientInstanceID: nil, rewardDate: "")
+    }
+    func holdOnlineBattle(key: OnlineBattleReceiptKey, instanceID: String) throws {}
+    func releaseOnlineBattle(key: OnlineBattleReceiptKey) throws {}
+    func isHeldForBattle(instanceID: String) -> Bool { false }
 }
