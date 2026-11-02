@@ -116,6 +116,8 @@ struct OnlineBattleRoom: View {
     let model: OnlineBattlePresentation
     let l: L
     let artwork: Bool
+    var speciesNameProvider: any PokemonNameProviding = PokemonNameClient.shared
+    var speciesNameStore: PokemonNameDisplayStore = .shared
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             if let room = model.room {
@@ -154,7 +156,8 @@ struct OnlineBattleRoom: View {
             let percent = player.hpPercent ?? player.snapshot.map { Double($0.hp) / Double(max(1, info.stats["hp"] ?? 1)) * 100 } ?? 0
             VStack(alignment: .leading, spacing: 7) {
                 Text(own ? l.practiceYou : l.practiceFoe).font(.caption2).foregroundStyle(.secondary)
-                PracticeNameLevel(name: info.species, level: info.level)
+                OnlineBattleSpeciesNameLevel(speciesNum: info.speciesNum, publicName: info.species, level: info.level, language: l.lang,
+                                           provider: speciesNameProvider, displayStore: speciesNameStore, loadsNames: artwork)
                 HStack {
                     PracticeTypeBadges(types: info.types, l: l, artwork: artwork)
                     Spacer(minLength: 4)

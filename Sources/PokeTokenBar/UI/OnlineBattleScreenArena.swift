@@ -5,6 +5,8 @@ struct OnlineBattleArena: View {
     let model: OnlineBattlePresentation
     let l: L
     let artwork: Bool
+    var speciesNameProvider: any PokemonNameProviding = PokemonNameClient.shared
+    var speciesNameStore: PokemonNameDisplayStore = .shared
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -73,7 +75,8 @@ struct OnlineBattleArena: View {
                 }.frame(width: 40, height: 40)
                 VStack(alignment: .leading, spacing: 5) {
                     Text(own ? l.practiceYou : l.practiceFoe).font(.caption2).foregroundStyle(.secondary)
-                    PracticeNameLevel(name: side.species, level: side.level)
+                    OnlineBattleSpeciesNameLevel(speciesNum: side.speciesNum, publicName: side.species, level: side.level, language: l.lang,
+                                               provider: speciesNameProvider, displayStore: speciesNameStore, loadsNames: artwork)
                     PracticeTypeBadges(types: side.types, l: l, artwork: artwork)
                 }
                 Spacer(minLength: 0)

@@ -12,6 +12,37 @@ struct OnlineBattleSpeciesNameLevel: View {
     var loadsNames = true
 
     var speciesResource: PokemonNameResource { .init(kind: .pokemonSpecies, name: String(speciesNum)) }
-    var displayName: String { publicName }
-    var body: some View { PracticeNameLevel(name: displayName, level: level) }
+    private var publicForm: (form: PokemonForm?, suffix: String)? {
+        guard let english = displayStore.names[speciesResource]?["en"],
+              publicName.lowercased().hasPrefix(english.lowercased() + "-") else { return nil }
+        let suffix = String(publicName.dropFirst(english.count + 1))
+        let key = suffix.filter { $0.isLetter || $0.isNumber }.lowercased()
+        let form = PokemonForm.forms(speciesID: speciesNum).first {
+            $0.rawValue.filter { $0.isLetter || $0.isNumber }.lowercased() == key
+        }
+        return (form, suffix)
+    }
+    private var formResource: PokemonNameResource? {
+        guard let form = publicForm?.form else { return nil }
+        return PokemonForm.nameResource(speciesID: speciesNum, form: form)
+    }
+    var displayName: String {
+        guard let names = displayStore.names[speciesResource], let localized = language.resolveName(names) else {
+            return publicName
+        }
+        guard let publicForm else { return localized }
+        if let form = publicForm.form {
+            return PokemonForm.displayName(localized, speciesID: speciesNum, form: form,
+                                           label: PokemonForm.label(speciesID: speciesNum, form: form, language: language, names: displayStore))
+        }
+        return "\(localized) [\(PokemonNameLocalization.identifier(publicForm.suffix))]"
+    }
+    var body: some View {
+        PracticeNameLevel(name: displayName, level: level)
+            .task(id: [speciesResource.cacheKey, publicName]) {
+                guard loadsNames else { return }
+                _ = await displayStore.load(speciesResource, provider: provider)
+                if let formResource { _ = await displayStore.load(formResource, provider: provider) }
+            }
+    }
 }

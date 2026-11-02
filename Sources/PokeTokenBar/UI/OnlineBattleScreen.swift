@@ -6,10 +6,12 @@ struct OnlineBattleScreen: View {
     let model: OnlineBattlePresentation
     let l: L
     var artwork = true
+    var speciesNameProvider: any PokemonNameProviding = PokemonNameClient.shared
+    var speciesNameStore: PokemonNameDisplayStore = .shared
     let onClose: () -> Void
 
-    var showsGroupBack: Bool { false }
-    func returnToGroup() {}
+    var showsGroupBack: Bool { [.room, .arena, .verifying].contains(model.phase) }
+    func returnToGroup() { model.send(.backToLobby) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -23,6 +25,11 @@ struct OnlineBattleScreen: View {
             }.frame(height: 22)
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
+                    if showsGroupBack {
+                        Button(action: returnToGroup) { Label(l.onlineDone, systemImage: "person.2") }
+                            .buttonStyle(.borderless).font(.caption)
+                            .accessibilityIdentifier("online.backToGroup")
+                    }
                     if !model.connectionStatus.isEmpty {
                         Label(model.connectionStatus, systemImage: "network")
                             .font(.caption).foregroundStyle(.secondary)
@@ -59,8 +66,8 @@ struct OnlineBattleScreen: View {
         switch model.phase {
         case .setup: OnlineBattleSetupForm(model: model, l: l)
         case .lobby: OnlineBattleLobby(model: model, l: l, artwork: artwork)
-        case .room: OnlineBattleRoom(model: model, l: l, artwork: artwork)
-        case .arena: OnlineBattleArena(model: model, l: l, artwork: artwork)
+        case .room: OnlineBattleRoom(model: model, l: l, artwork: artwork, speciesNameProvider: speciesNameProvider, speciesNameStore: speciesNameStore)
+        case .arena: OnlineBattleArena(model: model, l: l, artwork: artwork, speciesNameProvider: speciesNameProvider, speciesNameStore: speciesNameStore)
         case .verifying:
             VStack(alignment: .leading, spacing: 10) {
                 Label(l.onlineVerifying, systemImage: "checkmark.shield").font(.headline)

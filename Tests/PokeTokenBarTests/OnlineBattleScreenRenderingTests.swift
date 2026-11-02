@@ -14,7 +14,7 @@ final class OnlineBattleScreenRenderingTests: XCTestCase {
               policyVersion: BattleSnapshot.policy,
               set: .init(speciesNum: 25, form: nil, level: 50, gender: .male, nature: "Hardy", ability: "static",
                          moves: ["thunderbolt", "quick-attack"], ivs: [:], shiny: false),
-              publicInfo: .init(speciesNum: 25, species: "피카츄", level: 50, types: ["Electric"],
+              publicInfo: .init(speciesNum: 25, species: "Pikachu", level: 50, types: ["Electric"],
                                 stats: ["hp": 110, "atk": 75, "def": 60, "spa": 70, "spd": 70, "spe": 110]))
     }
     static func room(state: OnlineBattleState = .running, mode: OnlineBattleMode = .manual, confirmed: Bool = true) -> OnlineBattleView {
@@ -46,17 +46,21 @@ final class OnlineBattleScreenRenderingTests: XCTestCase {
         model.moveSlugs = [.p1: ["thunderbolt": "thunderbolt", "quickattack": "quick-attack"], .p2: ["splash": "splash"]]
         model.abilitySlugs = [.p1: ["static": "static"]]
         model.arena = .init(turn: 3, ended: false,
-                            p1: .init(speciesNum: 25, species: "피카츄", level: 50, types: ["Electric"], hp: 88, maxhp: 110,
+                            p1: .init(speciesNum: 25, species: "Pikachu", level: 50, types: ["Electric"], hp: 88, maxhp: 110,
                                       status: "", moves: ["thunderbolt", "quickattack"], ability: "static"),
-                            p2: .init(speciesNum: 129, species: "잉어킹", level: 50, types: ["Water"], hp: 42, maxhp: 100,
+                            p2: .init(speciesNum: 129, species: "Magikarp", level: 50, types: ["Water"], hp: 42, maxhp: 100,
                                       status: "", moves: ["splash"], ability: nil))
         model.request = .init(kind: "move", moves: [
             .init(slot: 1, id: "thunderbolt", name: "Thunderbolt", type: "Electric", pp: 14, maxpp: 15, disabled: false),
             .init(slot: 2, id: "quickattack", name: "Quick Attack", type: "Normal", pp: 30, maxpp: 30, disabled: false)])
     }
 
-    private func host(_ model: OnlineBattlePresentation) -> NSView {
-        let host = NSHostingView(rootView: OnlineBattleScreen(model: model, l: L(.ko), artwork: false, onClose: {})
+    private func host(_ model: OnlineBattlePresentation) async -> NSView {
+        let provider = OnlineBattleSyntheticNameProvider()
+        let names = PokemonNameDisplayStore()
+        for id in [25, 129] { _ = await names.load(.init(kind: .pokemonSpecies, name: String(id)), provider: provider) }
+        let host = NSHostingView(rootView: OnlineBattleScreen(model: model, l: L(.ko), artwork: false,
+                                                             speciesNameProvider: provider, speciesNameStore: names, onClose: {})
             .background(Color.white).environment(\.colorScheme, .light))
         host.frame = NSRect(x: 0, y: 0, width: 360, height: 610)
         let window = NSWindow(contentRect: NSRect(x: -10000, y: -10000, width: 360, height: 610),
@@ -83,7 +87,7 @@ final class OnlineBattleScreenRenderingTests: XCTestCase {
     }
     func testSyntheticSetupLobbyArenaAndResultRenderInsidePopover() async throws {
         let model = Self.model()
-        let host = host(model)
+        let host = await host(model)
         let setup = try await capture(host, named: "online-synthetic-setup.png")
         model.phase = .lobby
         let lobby = try await capture(host, named: "online-synthetic-lobby.png")
@@ -98,7 +102,7 @@ final class OnlineBattleScreenRenderingTests: XCTestCase {
     func testPublicRoomVerificationAndVoidStagesRender() async throws {
         let model = Self.model(); model.phase = .room
         model.room = Self.room(state: .accepted, confirmed: false)
-        let host = host(model)
+        let host = await host(model)
         let room = try await capture(host, named: "online-synthetic-room.png")
         model.phase = .verifying
         let verifying = try await capture(host, named: "online-synthetic-verifying.png")
@@ -117,6 +121,6 @@ final class OnlineBattleScreenRenderingTests: XCTestCase {
         let model = Self.model(); model.phase = .lobby
         model.members = (0..<18).map { .init(trainerId: "synthetic-\($0)", displayEmail: String(repeating: "long", count: 14) + "@example.invalid",
                                                    role: .member, status: .active, joinedAt: 0, online: $0 % 2 == 0) }
-        _ = try await capture(host(model), named: "online-synthetic-long-lobby.png")
+        _ = try await capture(await host(model), named: "online-synthetic-long-lobby.png")
     }
 }

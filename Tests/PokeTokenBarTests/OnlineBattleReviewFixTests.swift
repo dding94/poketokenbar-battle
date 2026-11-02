@@ -1,9 +1,12 @@
+import AppKit
 import SwiftUI
 import XCTest
 @testable import PokeTokenBar
 
 actor OnlineBattleSyntheticNameProvider: PokemonNameProviding {
+    private(set) var resources: [PokemonNameResource] = []
     func names(for resource: PokemonNameResource) async throws -> [String: String] {
+        resources.append(resource)
         switch (resource.kind, resource.name) {
         case (.pokemonSpecies, "25"): return ["ko": "피카츄", "en": "Pikachu"]
         case (.pokemonSpecies, "129"): return ["ko": "잉어킹", "en": "Magikarp"]
@@ -84,6 +87,26 @@ final class OnlineBattleReviewFixTests: XCTestCase {
         let offline = OnlineBattleSpeciesNameLevel(speciesNum: 129, publicName: "Magikarp", level: 50, language: .ko,
                                                    provider: provider, displayStore: names, loadsNames: false)
         XCTAssertEqual(offline.displayName, "Magikarp", "Uncached offline names retain the public English name")
+    }
+
+    func testMountedSpeciesLabelLoadsOnlyPublicNumberThroughInjectedProvider() async throws {
+        let provider = OnlineBattleSyntheticNameProvider()
+        let names = PokemonNameDisplayStore()
+        let label = OnlineBattleSpeciesNameLevel(speciesNum: 25, publicName: "Pikachu", level: 50, language: .ko,
+                                                 provider: provider, displayStore: names)
+        XCTAssertEqual(label.displayName, "Pikachu")
+        let host = NSHostingView(rootView: label.frame(width: 320, height: 60))
+        let window = NSWindow(contentRect: NSRect(x: -10000, y: -10000, width: 320, height: 60),
+                              styleMask: .borderless, backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false; window.contentView = host; window.orderFront(nil)
+        defer { window.close() }
+        let deadline = ContinuousClock.now + .seconds(2)
+        while names.names[label.speciesResource] == nil && ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertEqual(label.displayName, "피카츄")
+        let resources = await provider.resources
+        XCTAssertEqual(resources, [.init(kind: .pokemonSpecies, name: "25")])
     }
 
     func testSpeciesClientRoutingAndCacheStaySeparateFromFormKind() async throws {

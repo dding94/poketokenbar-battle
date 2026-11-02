@@ -66,7 +66,7 @@ final class OnlineBattlePresentation {
         case .setPopoverVisible:
             break
         case .backToLobby:
-            return
+            break
         case .selectEntry(let id):
             guard let entry = roster.first(where: { $0.id == id }), entryIsEligible(entry) else { return }
             selectedEntryID = id
