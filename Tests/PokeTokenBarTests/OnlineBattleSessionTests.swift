@@ -760,4 +760,28 @@ final class OnlineBattleSessionTests: XCTestCase {
         XCTAssertNil(session.presentation.notice)
     }
 
+    func testGrantSurvivesServerRevokingOldWebSocketBeforeReturningNewCredentials() async throws {
+        for (action, path) in [(OnlineBattleUIAction.recover(code: "recovery"), "/v1/recover"), (.reconnect(code: "reconnect"), "/v1/reconnect")] {
+            let connection = SessionConnection(), observer = SessionObserver()
+            let (session, http, credentials, _) = try await setup(connection: connection, observer: observer)
+            await http.queue("/v1/me", [.init(status: 503, body: Data())])
+            await session.bootstrap()
+            XCTAssertEqual(session.presentation.phase, .setup)
+            XCTAssertFalse(session.presentation.isBusy, "failed initial read leaves the live-WS recovery UI available")
+            let oldObserver = try XCTUnwrap(observer.callback)
+            await http.suspendNext(path)
+            let recovery = Task { await session.perform(action) }; await http.waitUntilBlocked()
+            await connection.setState(.revoked)
+            await oldObserver(.changed(await connection.snapshot()))
+            await connection.setState(.connected)
+            let grant = try JSONSerialization.data(withJSONObject: ["trainer": JSONSerialization.jsonObject(with: JSONEncoder().encode(account.trainer)), "group": JSONSerialization.jsonObject(with: JSONEncoder().encode(account.group)), "accessKey": "rotated-key", "recoveryCode": "rotated-code"])
+            await http.resume(.init(status: 200, body: grant)); await recovery.value
+            XCTAssertEqual(session.presentation.account, account)
+            XCTAssertEqual(session.presentation.recoveryCode, "rotated-code")
+            XCTAssertNil(session.presentation.notice)
+            let saved = await credentials.key; XCTAssertEqual(saved, "rotated-key")
+            let requests = await http.count(path); XCTAssertEqual(requests, 1, "one-use recovery must never be replayed")
+        }
+    }
+
 }
