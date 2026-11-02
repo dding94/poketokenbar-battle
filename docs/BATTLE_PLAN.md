@@ -364,7 +364,7 @@ SQL 쓰기에는 색인이 이미 포함돼 있다. 보수적 쓰기 산정은 S
 - 11:17 KST 사용자 Chrome 대시보드 읽기: 현재 플랜 **Free**. 오늘 계정 합산 Worker 요청 **223/100,000**, DO 요청 **304/100,000**, duration **1.07 GB-s/13,000**, SQL 읽기 **1.53k/5M**, 쓰기 **1.06k/100k**, SQLite 저장 **159.74 kB/5GB**. k 표시는 화면의 반올림 값이다. 다른 서비스 이름·계정 식별값은 기록하지 않는다. DO 목록 오류 **2건**은 원인 미확인으로 유지한다. 이 값은 PR 05가 배포된 계정의 관측이며 PR 06/07 실제 경기 비용을 뜻하지 않는다.
 - 사용자 결정: PR 07은 앱 연결에 집중하고 쓰기 최적화/일일 경기 상한은 **PR 13 전 별도 작업**으로 남긴다. 월 0원 요구와 긴 경기의 한도 초과 추정은 유지한다.
 - 서버 소스는 기존 `d21935b`와 차이 0이다. 실제 배포 없이 `wrangler deploy --env dev --dry-run --outdir <임시 폴더>` 종료 **0**: 78.57 KiB(gzip 19.01 KiB), League DO 바인딩 하나. 로컬 Worker 번들 SHA-256 `2b5bc854dd146e3d53ebf12d42304aa835c3a2036a2c33fced2c41f1bf93a64d`. env 파일 로딩·프로세스 환경 포함·metrics를 끄고 임시 CLI 설정 폴더를 사용했으며 비밀값을 읽지 않았다.
-- 사용자가 **개발 Worker 배포를 승인**한 뒤 `WRANGLER_SEND_METRICS=false ./node_modules/.bin/wrangler deploy --env dev` 실행, 종료 **0**. 대상 `ptb-battle-league-dev`, 활성 버전 `c7bb8940-caac-4a76-9b6b-bcc166b48d0e`, 업로드 78.57 KiB(gzip 19.01 KiB). 배포 후 `curl --silent --show-error --write-out '\\nHTTP %{http_code}\\n' <DEV_URL>/v1/health` 종료 0·HTTP **200**(`ok:true,api:1`), 같은 방식의 인증 없는 `/v1/battles` 종료 0·HTTP **401**(`unauthorized`). 기존 그룹의 인증 조회·실제 배틀·기존 데이터의 스키마 이관은 이 두 공개 확인으로 검증한 것이 아니다. 실제 비밀값은 조회/출력하지 않았고 설치·두 맥 E2E는 아직 승인/실행 전이다.
+- 사용자가 **개발 Worker 배포를 승인**한 뒤 `WRANGLER_SEND_METRICS=false ./node_modules/.bin/wrangler deploy --env dev` 실행, 종료 **0**. 대상 `ptb-battle-league-dev`, 활성 버전 `c7bb8940-caac-4a76-9b6b-bcc166b48d0e`, 업로드 78.57 KiB(gzip 19.01 KiB). 배포 후 `curl --silent --show-error --write-out '\nHTTP %{http_code}\n' <DEV_URL>/v1/health` 종료 0·HTTP **200**(`ok:true,api:1`), 같은 방식의 인증 없는 `/v1/battles` 종료 0·HTTP **401**(`unauthorized`). 기존 그룹의 인증 조회·실제 배틀·기존 데이터의 스키마 이관은 이 두 공개 확인으로 검증한 것이 아니다. 실제 비밀값은 조회/출력하지 않았고 설치·두 맥 E2E는 아직 승인/실행 전이다.
 
 ## 8. PR별 작업과 TDD 체크리스트
 
@@ -709,6 +709,11 @@ A/B 전체 원복 후 `npm test -- test/battle-rooms.test.ts test/battle-validat
 - [ ] **GREEN:** API·WebSocket 클라이언트, 코드·이메일 입력, Keychain 저장, 최소 배틀 화면(직접 조작·자동), 확정 결과의 효과 적용(기절·경험치 1천만, 온라인 하루 10회, 경기 ID로 한 번)을 구현한다. 효과 적용은 `PracticeBattleEffects` 경로를 다시 쓴다.
 - [ ] **REFACTOR:** UI가 키와 네트워크 응답을 직접 다루지 않도록 Store/Client를 분리한다.
 - [ ] 실제 두 맥에서 직접 조작·자동 정식전을 각각 끝까지 진행해 같은 결과, 진 쪽 기절, 이긴 쪽 경험치를 확인하고 화면 이미지를 남긴다.
+
+검증 중간 기록(2026-11-02, 기능 소스 `3ac4a25`):
+- 부록 E를 구현 전에 `274bfc2`로 커밋했다. API/WS/Keychain·재생/효과 원장·팝오버·앱 수명 세션을 별도 worktree에서 통합했고 Core/UI/Session 독립 리뷰 지적을 반영했다. Session RED와 지적별 회귀·결함 주입은 AI_HANDOFF 및 defect-log에 기록했다. 통신·화면 초안의 테스트 우선 절차 한계도 숨기지 않는다.
+- 명령별 Xcode·임시 상태/캐시를 지정한 `swift test --disable-sandbox --scratch-path <새 임시 빌드> --jobs 2 --enable-code-coverage --filter 'OnlineBattle|SaveTransferTests|PracticeStakesStoreTests|SaveSnapshot|PracticeLaunchTests'`: 종료 **0**, **219건·실패/skip 0**. 같은 필터의 `check-test-filter.sh`도 종료 0. 이전 리소스 캐시 실패·잘못된 필터 대안 0건은 AI_HANDOFF에 별도 기록했다. 로컬 OCR은 최종 명령에 없다.
+- UI/현지화 관련 38건·실패/skip 0, 한국어 합성 데이터 SwiftUI 화면 이미지 생성·시각 검토 완료. 실제 클릭·두 맥·설치 검증은 아니다. 원격 CI와 최종 번들 검증은 진행 중이며 위 체크박스는 최종 근거가 모이면 갱신한다.
 
 ### PR 08 — 개체 등록과 소유권 원장 (폐기, 2026-10-30)
 

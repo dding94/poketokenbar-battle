@@ -1438,6 +1438,61 @@ read_when:
   확인했다(`069f0ac`). CLAUDE.md 결함 대응 3단계의 "테스트가 결함 트리거와 다른 경로로 통과" 부류다.
 
 
+## 온라인 앱 세션 (PR 07)
+
+- **복구 응답은 폐기되는 옛 접속키의 요청 세대와 분리한다.** 서버는 복구/재연결 트랜잭션에서
+  옛 WS에 4003을 보내고 새 grant를 HTTP로 반환한다. 두 응답의 순서가 바뀌면 기존 인증 API의
+  generation 변경이 새 grant까지 버려 일회용 코드가 소비된 채 키를 잃었다. 초기 목록 조회가
+  늦거나 실패해 setup 화면에 머문 상태에서 실제로 도달하며, 이전 테스트는 복구 후 폐기 순서만
+  사용했다. 별도 비인증 API로 grant를 요청하되 Session의 서버 변경/접근 차단 epoch 검사는 유지한다.
+  부류 스윕은 join/recover/reconnect와 HTTP401/WS4003, grant 저장 재시도를 대조했다.
+  `44c73af` 회귀 RED는 성공 grant를 보류하고 old4003을 먼저 전달해 1건·단언 실패 8·종료 1이었다.
+
+- **거절한 journal을 정상 재조회보다 우선하는 캐시 기준으로 남기지 않는다.** 깨진 길이가 더 긴
+  journal을 보관하면 정상적이지만 짧은 전체 재조회가 뒤로 간 상태로 오인되어 복원을 막았다.
+  같은 길이만 교정하는 fixture는 이 조건을 놓쳤다. 재조회 세대·캐시 동일성과 새 엔진의 재생을
+  확인한 뒤에만 거절한 기준을 교체하며, 그 사이 도착한 COMPLETED는 보존한다. 부류 스윕은
+  prefix 변경/누락/길이 감소와 늦은 terminal 응답, 재조회 횟수 상한을 대조했다.
+  `cccc5df` 회귀 RED 1건·단언 실패 2·종료 1, `70dba5f` 수정 후 관련 Session 45건 통과.
+
+- **비동기 작업 중에도 접근 설정 관찰을 유지한다.** 설정 변경 콜백에서 연결 준비를 기다린 뒤
+  Observation을 다시 등록하면, 기다리는 동안의 OFF를 놓친다. 순차적인 설정 테스트는 이 간격을
+  만들지 않았다. 관찰을 먼저 재등록하고 오래된 disable 정리는 당시 API 인스턴스만 비운다.
+  부류 스윕은 AppDelegate 관찰 콜백과 Session의 모든 await 뒤 generation/접근 게이트를 대조했다.
+  `testAccessObservationReceivesDisableWhileEnableIsWaitingForHTTP`와
+  `testDelayedDisableStopCannotClearNewlyEnabledAPIKey`가 실제 HTTP/stop 대기를 유지해 재현한다.
+  RED 2건·단언 실패 4·종료 1, 수정 후 Session 42건·실패/skip 0·종료 0.
+
+- **같은 서버의 새 키도 이전 세션과 구분한다.** 주소 변경만으로 generation을 바꾸던 초안은
+  같은 origin의 복구 응답과 기존 조회가 경합할 때 옛 응답을 받았다. 키 저장 실패 재시도도 같은
+  신규 grant를 보존해야 한다. 부류 스윕은 가입/복구/재연결·설정 변경·401·접근 차단 경계를
+  대조했다. `testSameOriginGrantSeparatesPendingRefreshAndStopsPreviousConnection`은 옛 GET을
+  보류한 채 새 grant 저장 실패/재시도를 거쳐 옛 응답이 새 계정에 적용되지 않는지 검사한다.
+
+- **선택한 경기의 화면과 백그라운드 정산을 구분한다.** 결과 하나를 공유하면 여러 완료 경기를
+  순회한 마지막 결과가 선택 경기 화면을 덮고, 자동 화면 선택은 사용자의 그룹 복귀를 취소했다.
+  최초 fixture는 완료 경기 하나만 써 이 문제를 놓쳤다. 결과를 경기 ID로 보관하고 명시적 그룹
+  복귀 의도를 유지한다. 부류 스윕은 선택/닫기/refresh/늦은 report 응답/정산 경로를 함께 확인했다.
+  `testSelectingCompletedRoomsShowsEachRoomsOwnResult`, `testDismissedResultStaysInLobbyAfterRefresh`,
+  `testBackToLobbyWhileBusyKeepsSettlementRunningAndAllowsSelectingAnotherRoom`이 여러 경기와
+  보류 중 HTTP를 사용한다. UI는 busy 중에도 그룹 이동을 허용하되 배틀을 취소하지 않는다.
+
+- **알림·HTTP 도착 순서와 과거 완료 기록을 실제 전제로 만든다.** 신청 알림이 POST보다 먼저 오면
+  자기 hold가 신청을 차단했고, 보고 중 완료 알림은 합쳐진 조회에 묻힐 수 있었다. 이미 지급한
+  경기의 출전 개체를 놓아준 뒤 재조회하면 과거 기록이 새 신청을 막았으며, 실패한 마감 조회도
+  재시도되지 않았다. 순차 happy-path 테스트로는 이 경로를 지나지 않았다. 부류 스윕은 hold
+  획득/해제, terminal 상태 단조성, 갱신 합치기, 기한 재조회, receipt 우선 조회를 대조했다.
+  Session 테스트의 `testNotificationHoldingCreatedBattleBeforePOSTResponseDoesNotCancelIt`,
+  `testNotificationDuringReportForcesOneFollowupReadToCompleted`,
+  `testPaidCompletedHistoryDoesNotRequireReleasedEntrantOrBlockNewAdmission`,
+  `testMissedDeadlineReadRetriesAfterTransientFailureWhileHidden`이 각 트리거를 고정한다.
+
+- **화면 fixture에 제품 입력 형식을 유지한다.** 엔진 공개 종명은 영문인데 처음 UI fixture가
+  이미 한국어여서 현지화 누락을 가렸다. 공개 speciesNum으로 이름을 조회하고 fixture에는 영문
+  엔진 이름과 주입된 한국어 이름 공급자를 사용한다. 숨은 기술·특성은 이름 조회에 사용하지 않는다.
+  부류 스윕은 방/전투/결과와 표시명 fallback을 확인했다. UI 회귀 RED 4건·단언 실패 12·종료 1,
+  수정 후 관련 38건·실패/skip 0·종료 0. busy 복귀 차단 변형도 1건·단언 실패 1 후 원복했다.
+
 ## 배틀 방·락스텝 (PR 06)
 
 - **revision을 바꾸지 않는 요청은 변경 요청의 멱등 키를 소비하면 안 된다.** 06A 첫 GREEN에서

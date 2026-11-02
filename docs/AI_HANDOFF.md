@@ -1,13 +1,13 @@
 # 다음 AI를 위한 작업 인계
 
-최종 갱신: 2026-11-02. **PR 00~06 서버 구현·독립 리뷰·로컬 검증 완료. PR 06 통합 서버 소스는 `3d7a73c`이며 `9109f9f`의 CI도 성공했다. PR 07은 부록 E 계약을 커밋하고 macOS 클라이언트를 구현 중이며 아직 완료하지 않았다. 실제 Free 비용·CPU·계정 운영 여유는 미검증 항목을 유지한다. 과거 기록의 배포 전·CLT만 설치 등의 표현은 당시 상태다.**
+최종 갱신: 2026-11-02. **PR 00~06 서버 구현·독립 리뷰·로컬 검증 완료. PR 06은 별도 사용자 승인 후 개발 환경에 배포했다. PR 07은 Core·UI·앱 세션을 통합하고 최종 검증 중이며 아직 완료하지 않았다. 두 맥 E2E는 미실행이다. 실제 Free 비용·CPU의 미검증 항목을 유지한다. 아래 초기 stub·배포 전·CLT만 설치 등의 표현은 당시 상태다.**
 
 ### 진행 중인 작업: PR 07 (2026-11-02)
 
 - 인수 시 `feat/local-practice-battle`·origin 모두 `d21935b`, 작업 트리 깨끗함. 원격 origin은 포크, upstream은 원본 참조/푸시 금지 상태를 확인했다.
 - 구현 전 앱 계약을 BATTLE_PLAN 부록 E에 작성·커밋했다(`274bfc2`). 통신/키, 결정적 재생/원자 효과 원장, 팝오버/통합의 세 단계다. 공통 DTO와 RED 주소 테스트를 `86746bf`로 통합했으며 아직 의도한 stub이 남아 있다. **PR 07 GREEN/완료가 아니다.**
 - 네트워크·상태 파일·UI 경계 조사를 완료했다. 효과는 후보 상태의 HP·XP credit·경기 receipt를 한 번 저장한 뒤 기존 성장 경로로 소비한다. 실제 사용자 파일과 키체인은 읽지 않았다.
-- 사용자 답변(2026-11-02): disableKeychainAccess를 배틀 키에도 적용(조회/저장/온라인 연결 중단), 무료 한도 보완은 PR 13 전 별도 처리. 두 번째 맥은 지인에게 부탁할 수 있으나 아직 준비/실행 확인 전이다. 설치·개발 배포·두 맥 E2E 승인은 아직 받지 않았다. 부록 E를 먼저 수정하고 앱 설정 연결을 진행한다.
+- 사용자 답변(2026-11-02): disableKeychainAccess를 배틀 키에도 적용(조회/저장/온라인 연결 중단), 무료 한도 보완은 PR 13 전 별도 처리. 두 번째 맥은 지인에게 부탁할 수 있으나 아직 준비/실행 확인 전이다. 개발 배포는 아래 기록대로 별도 승인 후 완료했고, 설치·두 맥 E2E 승인은 남아 있다.
 - Xcode 27.2(27B52) 설치 확인. 명령별 DEVELOPER_DIR를 사용하며 시스템 xcode-select는 CLT 그대로다. 별도 worktree에서 RED→GREEN→REFACTOR 구현 후 독립 리뷰·통합·CI를 진행한다. 요청한 모델 이름은 현재 도구에 없어 Core/리뷰는 Astra high, UI는 Sol high, 조사는 Sol medium으로 역할을 대체한다고 사용자에게 알렸다.
 - RED 증거: 별도 통신 worktree에서 `swift test --disable-sandbox --jobs 2 --filter OnlineBattleTransportTests` 종료 **1**, 2건 실행·단언 실패 6·skip 0(주소 정규화/금지 입력), 컴파일 성공. 효과 worktree의 `--filter OnlineBattleEffectsTests` 종료 **1**, 9건 실행·단언 실패 34·unexpected/skip 0, RED 커밋 `ed2340e`(미통합). 두 실행 모두 임시 PTB_STATE_DIR·CLANG_MODULE_CACHE_PATH와 명령별 DEVELOPER_DIR를 사용했다. 최초 모듈 캐시 권한 실패(테스트 0건)는 RED 증거가 아니다.
 - CI 준비 `c0c0d40`: OnlineBattle 파일의 커버리지/결정성 경계, resolver 필터, 양쪽 shard 화면 이미지 보존, workflow 변경 시 server 검사, server timeout 2분(기존 37초)을 반영했다. `bash -n`·Ruby YAML 파싱·`git diff --check` 모두 종료 0. 새 resolver 테스트 파일은 아직 별도 worktree에서 구현 중이며 원격 CI는 실행 전이다.
@@ -18,6 +18,11 @@
 - 절차상 한계: 통신 HTTP/WS/키 저장은 초안을 먼저 작성한 뒤 실행 가능한 stub과 행동 테스트로 RED를 만들었다. 최초부터 테스트 우선이었다고 기록하지 않는다. 최초 확장 RED에는 unexpected throw가 있어 다시 단언만 발생하도록 고쳤고, 유효 RED는 **35건·단언 실패 36·unexpected/skip 0·종료 1**이다. 화면 레이아웃 초안도 렌더 테스트보다 먼저 작성됐으며, presentation 행동 RED와 화면 이미지 검증을 구분한다. 나머지 Session 새 행동은 단계별 RED를 먼저 확인 중이다.
 - 한 맥 네이티브 보조 검증(11:13:49–51 KST): 실제 URLSession HTTP/WS와 격리된 로컬 workerd, 두 JSC를 연결해 수동 12라운드·자동 13라운드 경기 COMPLETED/재생/중복 보고를 확인했다. hello 2·presence 1·4001/4003 각 1·HTTP/WS 401 각 1·키 복구 1. 가짜 세이브 4개에서 HP/XP·지갑/사용량 불변·잠금 해제·재시작 1회 지급도 확인했다. **XCTest 1건 통과·실패/skip 0, 재현 스크립트 종료 0**. 임시 source/recipe는 `/private/tmp/ptb-pr07-native-replay/`에만 있으며 저장소/CI 자동 검사나 두 맥 E2E가 아니다. 임시 Worker·포트·DO·세이브는 정리했고 실제 키체인/세이브/개발 Worker는 사용하지 않았다.
 - 개발 배포 완료: BATTLE_PLAN §7에 11:17 KST Free 계정 사용량과 dry-run 성공/번들 해시를 기록했다. 이후 **사용자 승인 후** `wrangler deploy --env dev` 종료 0, 버전 `c7bb8940-caac-4a76-9b6b-bcc166b48d0e`로 PR 06을 배포했다. health HTTP 200, 인증 없는 battles HTTP 401(각 curl 종료 0). 인증 조회/실제 배틀/기존 데이터 이관 실측은 아직 없고, 앱 설치·두 맥 실행 승인은 별도로 남아 있다. 비밀값은 읽거나 출력하지 않았다.
+- UI 통합·독립 리뷰: 그룹으로 돌아가기(전투 진행 유지), 공개 종 번호의 한국어 이름 조회까지 구현했다. 합성 데이터의 실제 SwiftUI 렌더 이미지는 임시 `ptb-pr07-ui-review-images` 폴더에 있다. UI/현지화 대상 38건·실패/skip 0·종료 0, busy 중 그룹 이동 차단 결함 주입은 1건·단언 실패 1·종료 1 후 원복했다. 실제 버튼 조작·OCR은 이 증거에 포함하지 않는다.
+- 절차 오류를 구분한다: Session 초기 검증에서 OCR을 포함한 `PopoverPracticeRoutingTests`가 넓은 필터에 섞여 로컬 실행됐다(95건 중 실패 1, 이어 해당 클래스 2건 중 실패 1). 후자는 이름 조회의 네트워크 DNS 오류를 보고했으나 변경 전 기준을 실행하지 않아 기존 결함으로 단정하지 않는다. 로컬 OCR 금지 지시를 다시 전달했고 이후 필터에서 제외했다. 최종 CI에서 별도로 판정한다.
+- 실기 격리 조사: `PTB_STATE_DIR`만으로는 `UsageStore`의 실제 사용량 공급자·표준 defaults·LoginItem 이관까지 분리되지 않는다. `--practice`도 화면 이동만 한다. 실제 세이브·자격 증명을 피하는 실기 검증은 공급자 로그인이 없는 별도 macOS 테스트 계정에서 합성 상태로 실행하는 방법이 안전하다. 아직 계정 생성·설치·앱 실행은 하지 않았다.
+- 통합 중간 검증(`508b4ab`): `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer PTB_STATE_DIR=<임시 상태> CLANG_MODULE_CACHE_PATH=<임시 캐시> swift test --disable-sandbox --scratch-path <새 임시 빌드> --jobs 2 --enable-code-coverage --filter 'OnlineBattle|SaveTransferTests|PracticeStakesStoreTests|SaveSnapshot|AppDelegateTests'` 종료 **0**, **199건·실패/skip 0**. 기존 `.build` 첫 실행은 199건 중 assertion 실패 50(경기 golden fixture 누락)이었고, 새 빌드에는 내부 리소스 사본까지 생성되어 해소됐다. 필터 가드는 존재하지 않는 `AppDelegateTests` 대안의 0건을 검출해 종료 **1**이었다. 실제 클래스는 `PracticeLaunchTests`이며 최종 필터에서 수정한다. 재생 복원·복구 grant 후속 수정 전 증거이므로 최종 통합 통과로 대신하지 않는다.
+- 최종 기능 소스 `3ac4a25`: 같은 격리 환경의 `swift test --disable-sandbox --scratch-path <새 임시 빌드> --jobs 2 --enable-code-coverage --filter 'OnlineBattle|SaveTransferTests|PracticeStakesStoreTests|SaveSnapshot|PracticeLaunchTests'` 종료 **0**, **219건·실패/skip 0**. `check-test-filter.sh`도 종료 0·모든 대안 실행을 확인했다. Core·UI·Session 독립 리뷰 지적을 반영했다. 마지막 Session 수정은 복구 grant를 별도 비인증 API로 요청해 옛 WS 4003과 경합해도 잃지 않도록 한 것이며, 해당 RED는 1건·단언 실패 8·종료 1, 수정 후 관련 93건·실패/skip 0·종료 0이다. 원격 CI·설치·두 맥 결과는 이 로컬 검사와 구분한다.
 
 ### PR 05 개발 환경 실측 (2026-11-02)
 
