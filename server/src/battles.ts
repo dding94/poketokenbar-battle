@@ -67,6 +67,8 @@ export class Battles {
     if (this.realtime.connectionId(b[side]) !== input.connectionId) return fail("not_ready");
     if (input.rulesVersion !== RULES_VERSION || input.policyVersion !== POLICY_VERSION) return fail("version_mismatch");
     const other: Side = side === "p1" ? "p2" : "p1";
+    const own = b.ready[side];
+    if (own?.connectionId === input.connectionId && own.engineHash !== input.engineHash) return fail("engine_mismatch");
     const peer = b.ready[other];
     if (b.config && b.config.engineHash !== input.engineHash || peer && peer.connectionId === this.realtime.connectionId(b[other]) && peer.engineHash !== input.engineHash) return fail("engine_mismatch");
     if (this.store.busy(b[side], b.snapshots[side]!.instanceId, b.battleId)) return fail("instance_busy");
