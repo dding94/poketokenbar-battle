@@ -180,7 +180,7 @@
 - 다른 그룹의 계정·경기 ID를 알아도 조회·변경 권한이 생기지 않는다.
 - 같은 경기의 결과·전적·연승은 한 번만, 양쪽 보고 해시가 일치할 때만 확정한다.
 - 확정된 경기의 효과(체력·경험치)는 각 앱이 경기 ID로 한 번만 적용한다. VOID·보류 경기는 효과를 적용하지 않는다.
-- 서버는 두 선택을 모두 받기 전에는 어느 쪽 선택도 공개하지 않는다.
+- 서버는 두 선택을 모두 받거나 마감으로 누락 쪽을 시간 초과로 확정하기 전에는 어느 쪽 선택도 공개하지 않는다(자동 방식은 양쪽 정책 제어 정보를 함께 공개).
 - 클라이언트 제출은 선택 토큰(`move 1`~`move 4`)만 통과시킨다. 서버가 생성하는 시간 초과·자동 정책 제어 정보는 부록 D의 닫힌 종류만 허용한다(2026-11-02 사용자 승인). 앱은 중계받은 텍스트를 시뮬레이터 스트림에 넣지 않는다.
 - 양쪽 엔진 해시가 다르면 경기를 시작하지 않는다.
 - 기절한 개체는 신청·수락할 수 없다(로컬 확인 + 서버는 보고된 체력으로 확인).
@@ -1006,8 +1006,8 @@ API(`/v1`, JSON 본문, 응답은 `cache-control: no-store`):
 ### D.4 준비·동결·출전 잠금
 
 - PENDING에는 신청자 snapshot, ACCEPTED에는 상대 snapshot과 그 동의가 있다. 신청자의 confirm이 같은 revision을 승인해야 ready를 받는다. 성장 진행도는 입력 필드가 아니며 동의에 영향을 주지 않는다. 기절·현재 출전 중인 개체는 신청/수락 단계에서도 거절하고, 실제 잠금 경쟁은 READY 트랜잭션에서 재확인한다.
-- ready는 해당 계정의 **현재 열린 WebSocket 연결**에 묶는다. 연결마다 난수 connectionId를 attachment에 저장하고 hello에 포함한다(같은 밀리초 재연결도 구별). ready/start 요청은 그 connectionId를 제출하며 현재 열린 연결 ID와 다르면 거절한다. 옛 앱의 지연된 HTTP 요청을 새 연결의 확인으로 취급하지 않는다. 두 ready가 현재 연결과 일치하고 엔진 해시·규칙·정책이 같을 때, 한 `transactionSync`에서 두 `(trainerId,instanceId)` 유일 잠금·양쪽 snapshot·암호학적 난수 seed(16비트 정수 4개)·policySeed(uint32)·버전·`readyToken`을 저장하고 READY로 간다. 하나라도 충돌하면 부분 잠금이나 부분 동결이 남지 않는다.
-- readyToken은 서버가 발급한 불변 준비 식별자다. 앱은 이를 포함한 동결 config를 `createBattle`로 검증한 뒤 start한다. 양쪽 현재 연결의 start ACK가 있어야 RUNNING이다. READY에서 연결이 교체되면 새 연결의 ACK가 필요하다. 한쪽의 과거 연결 확인으로 시작하지 않는다. seed/config는 재접속·재시도 때 바뀌지 않는다.
+- ready는 해당 계정의 **현재 열린 WebSocket 연결**에 묶는다. 연결마다 난수 connectionId를 attachment에 저장하고 hello에 포함한다(같은 밀리초 재연결도 구별). ready/start 요청은 그 connectionId를 제출하며 현재 열린 연결 ID와 다르면 거절한다. 옛 앱의 지연된 HTTP 요청을 새 연결의 확인으로 취급하지 않는다. 같은 연결에서 이미 준비한 엔진 해시를 다른 값으로 바꾸면 `engine_mismatch`로 거절한다. 두 ready가 현재 연결과 일치하고 엔진 해시·규칙·정책이 같을 때, 한 `transactionSync`에서 두 `(trainerId,instanceId)` 유일 잠금·양쪽 snapshot·암호학적 난수 seed(16비트 정수 4개)·policySeed(uint32)·버전·`readyToken`을 저장하고 READY로 간다. 하나라도 충돌하면 부분 잠금이나 부분 동결이 남지 않는다.
+- readyToken은 서버가 발급한 불변 준비 식별자다. 응답 config는 readyToken·버전 메타데이터와 엔진 입력을 함께 담는다. 앱은 그중 정확히 `{seed,policySeed,p1,p2}`만 부록 A `createBattle`에 전달해 검증한 뒤 start한다(엔진은 추가 키를 거절). 양쪽 현재 연결의 start ACK가 있어야 RUNNING이다. READY에서 연결이 교체되면 새 연결의 ACK가 필요하다. 한쪽의 과거 연결 확인으로 시작하지 않는다. seed/config는 재접속·재시도 때 바뀌지 않는다.
 - config는 `p1=신청자`, `p2=수락자`, 이름은 고정 `p1`·`p2`(이메일 없음), 정책 `standard`, 정확한 시작 HP를 사용한다. 다른 그룹/제3자와 READY 전에는 전체 config를 주지 않는다.
 
 ### D.5 라운드·동시 공개·재생
