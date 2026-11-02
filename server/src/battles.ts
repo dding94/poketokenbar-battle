@@ -1,3 +1,4 @@
+import { permitsRoomAction } from "./battle-policy";
 import { GroupAccess, type Actor } from "./access";
 import { canonical, POLICY_VERSION, RELAY_VERSION, RULES_VERSION, type BattleAction, type BattleInput, type Side } from "./battle-input";
 import { ACTIVE, BattleStore, CHALLENGE_MS, PRESTART, REPORT_MS, type Battle } from "./battle-store";
@@ -25,21 +26,21 @@ export class Battles {
     if (!ACTIVE.has(b.state)) return fail("invalid_state");
     let changed = true;
     if (action === "update") {
-      if (b.state !== "PENDING" || side !== "p1") return fail("invalid_state");
+      if (!permitsRoomAction(action, b.state, side)) return fail("invalid_state");
       if (this.store.busy(b.p1, input.snapshot!.instanceId)) return fail("instance_busy");
       changed = canonical(b.snapshots.p1) !== canonical(input.snapshot);
       if (changed) this.store.recordReceipt(b, actor.trainer.id, action, input.revision!, input);
       if (changed) { b.snapshots.p1 = input.snapshot!; b.revision++; b.confirmed = false; b.ready = {}; }
     } else if (action === "accept") {
-      if (b.state !== "PENDING" || side !== "p2") return fail("invalid_state");
+      if (!permitsRoomAction(action, b.state, side)) return fail("invalid_state");
       if (this.store.busy(b.p2, input.snapshot!.instanceId)) return fail("instance_busy");
       this.store.recordReceipt(b, actor.trainer.id, action, input.revision!, input);
       b.snapshots.p2 = input.snapshot!; b.revision++; b.state = "ACCEPTED";
     } else if (action === "confirm") {
-      if (b.state !== "ACCEPTED" || side !== "p1") return fail("invalid_state");
+      if (!permitsRoomAction(action, b.state, side)) return fail("invalid_state");
       changed = !b.confirmed; b.confirmed = true;
     } else if (action === "decline" || action === "cancel") {
-      if (action === "decline" ? b.state !== "PENDING" || side !== "p2" : !PRESTART.has(b.state)) return fail("invalid_state");
+      if (!permitsRoomAction(action, b.state, side)) return fail("invalid_state");
       b.state = action === "decline" ? "DECLINED" : "CANCELLED"; this.store.unlock(b.battleId);
     } else if (action === "ready") {
       const result = this.ready(b, side, input); if (!result.ok) return result; changed = result.value;
@@ -62,7 +63,7 @@ export class Battles {
   }
   private ready(b: Battle, side: Side, input: BattleInput): Result<boolean> {
     if (!b.confirmed) return fail("not_ready");
-    if (b.state !== "ACCEPTED" && b.state !== "READY") return fail("invalid_state");
+    if (!permitsRoomAction("ready", b.state, side)) return fail("invalid_state");
     if (this.realtime.connectionId(b[side]) !== input.connectionId) return fail("not_ready");
     if (input.rulesVersion !== RULES_VERSION || input.policyVersion !== POLICY_VERSION) return fail("version_mismatch");
     const other: Side = side === "p1" ? "p2" : "p1";
@@ -83,7 +84,7 @@ export class Battles {
   }
   private start(b: Battle, side: Side, input: BattleInput, now: number): Result<boolean> {
     if (this.realtime.connectionId(b[side]) !== input.connectionId) return fail("not_ready");
-    if (b.state !== "READY" && b.state !== "RUNNING") return fail("invalid_state");
+    if (!permitsRoomAction("start", b.state, side)) return fail("invalid_state");
     if (!b.config || input.readyToken !== b.config.readyToken) return fail("not_ready");
     if (input.engineHash !== b.config.engineHash) return fail("engine_mismatch");
     if (b.state === "RUNNING" || b.starts[side] === input.connectionId) return ok(false);
