@@ -35,6 +35,8 @@ lipo)
     else
         binary="$1"; shift
         [[ "$1" == -verify_arch ]]; shift
+        # Xcode 27's lipo accepts only one requested architecture per verification call.
+        (($# == 1)) || { echo 'verify_arch requires exactly one architecture' >&2; exit 1; }
         actual=" $(cat "$binary") "
         for arch in "$@"; do [[ "$actual" == *" $arch "* ]] || exit 1; done
     fi
