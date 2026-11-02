@@ -18,7 +18,8 @@ enum OnlineBattleConnectionEvent: Sendable {
 enum OnlineBattleSocketEvent: Sendable, Equatable {
     case text(String), closed(Int), failed(Int?)
     static func receiveFailure(httpStatus: Int?, closeCode: Int) -> Self {
-        closeCode != 0 ? .closed(closeCode) : .failed(httpStatus)
+        if httpStatus == 401 { return .failed(401) }
+        return closeCode != 0 ? .closed(closeCode) : .failed(httpStatus)
     }
 }
 protocol OnlineBattleSocket: Sendable {
