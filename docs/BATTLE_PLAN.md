@@ -329,6 +329,36 @@ PR 06 로컬 측정 방법(2026-11-02 계약 검토): SQL 커서를 끝까지 �
 - 단순 앱 내 사용량 추정은 Cloudflare 계정 전체 한도를 대신하지 않는다. 대시보드 실제 사용량과 함께 확인한다.
 - 무료 운영 검증에 실패하면 기능 확대를 멈추고 대안(예: Supabase Free)을 사용자와 다시 결정한다.
 
+### PR 06 로컬 경기 비용 (2026-11-02, 서버 소스 `3d7a73c`)
+
+`cd server && npm run measure:battles` 종료 **0**, 9개 시나리오 통과·실패/skip 0. 로컬 workerd의 가짜 계정·snapshot만 사용했다. **실제 Free 과금·CPU 측정이 아니다.** 각 시나리오는 새 로컬 DO이며 스키마·계정·초대 생성 후 DB 184,320바이트에서 측정을 시작했다. 두 WS 업그레이드를 포함하고, 10경기 배치는 같은 연결을 유지한다. DO 산정은 실제 호출한 Worker→DO 요청과 알람 실행의 합이다. 상시 ping·닫기 콜백·정리·재시도·계정의 다른 사용량은 별도이며, 알람 실행 도우미의 `deleteAlarm`은 애플리케이션 비용에서 제외했다.
+
+| 시나리오 | 경기 수 | HTTP/DO 호출 | 알람 실행 | DO 산정 합 | SQL 읽기 | SQL 쓰기 | setAlarm / 앱 deleteAlarm | 논리 셀 바이트 | DB 증가 바이트 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 직접 25턴 | 1 | 85 | 0 | 85 | 2,112 | 374 | 51 / 1 | 9,310 | 4,096 |
+| 직접 25턴 배치 | 10 | 832 | 0 | 832 | 21,657 | 3,722 | 510 / 10 | 91,738 | 122,880 |
+| 직접 200턴 | 1 | 610 | 0 | 610 | 68,787 | 2,649 | 401 / 1 | 38,988 | 49,152 |
+| 자동 25턴 | 1 | 35 | 0 | 35 | 838 | 200 | 2 / 1 | 8,353 | 4,096 |
+| 매 턴 시간 초과 25턴 | 1 | 35 | 25 | 60 | 1,088 | 375 | 52 / 1 | 8,610 | 4,096 |
+| 보고 불일치 | 1 | 13 | 0 | 13 | 132 | 58 | 3 / 1 | 4,764 | 4,096 |
+| 상대 보고 누락 | 1 | 13 | 1 | 14 | 134 | 56 | 3 / 0 | 4,381 | 4,096 |
+| 보고 없음 | 1 | 10 | 1 | 11 | 95 | 45 | 2 / 0 | 3,943 | 4,096 |
+| 재접속·조회 복원 | 1 | 15 | 0 | 15 | 143 | 62 | 3 / 1 | 5,258 | 4,096 |
+
+SQL 쓰기에는 색인이 이미 포함돼 있다. 보수적 쓰기 산정은 SQL 쓰기 + `setAlarm` 호출당 1 + 앱 `deleteAlarm` 호출당 1이다(자동 소모·테스트 도우미 삭제를 다시 더하지 않음). 단일 경기의 4,096바이트 증가를 경기 크기로 일반화하지 않는다. 페이지 재사용 때문에 **10경기 배치의 경기당 DB 증가 12,288바이트**로 장기 추정한다. 논리 셀은 문자열 UTF-8·숫자 8바이트 합이며 색인·페이지 비용과 다르다. seed의 자릿수 때문에 실행마다 논리 바이트는 수 바이트 달라질 수 있다.
+
+25턴 배치를 하루 100경기로 환산한 **추정**(고정 DB·계정·다른 서비스 비용 별도):
+
+| 기간 | DO 산정 요청 누계 | SQL 읽기 누계 | 쓰기 산정 누계 | DB 증가 추정 |
+|---|---:|---:|---:|---:|
+| 하루 | 8,320 | 216,570 | 42,420 | 1,228,800 B |
+| 90일 | 748,800 | 19,491,300 | 3,817,800 | 110,592,000 B |
+| 365일 | 3,036,800 | 79,048,050 | 15,483,300 | 448,512,000 B |
+
+요청·읽기·쓰기는 매일 리셋되므로 누계를 일일 한도와 비교하지 않는다. 반면 저장은 계속 누적된다. **200턴 경기 100판/일은 읽기 6,878,700행·쓰기 305,100행으로 무료 일일 읽기 5M·쓰기 100k를 넘는다.** 다른 사용량이 0이어도 쓰기 기준 이론상 32판/일까지이며, 서버에 새 일일 경기 제한을 임의로 추가하지 않았다. 같은 저장 증가를 1년 외삽하면 1,794,048,000바이트로 §7의 보수적 객체당 1GB 가정도 넘는다. 따라서 모든 경기 길이·계정 부하에서 운영 여유를 검증했다는 뜻이 아니며 §7의 실제 Free 완료 항목은 미체크다.
+
+누적 이력 조회 검증: 완료 1,000경기 + 진행 1경기에서 마감 조회 1,001→1행, 목록은 독립 검토 fixture 2,003→102행(양쪽 역할 회귀 fixture는 수정 전 2,004행)으로 줄였다. 기존 부분 색인에 맞는 조건과 두 참가자 색인의 UNION ALL 병합을 사용한다. 탈퇴·제거 때의 참가자 활성 경기 조회는 아직 그 참가자의 이력을 읽는다(같은 fixture 1,001행→활성 1건). 추가 색인의 턴 쓰기 비용과 비교할 후속 최적화 범위이며 모든 조회가 상수 비용이라고 주장하지 않는다.
+
 ## 8. PR별 작업과 TDD 체크리스트
 
 수작업 변경량은 PR당 대략 200~650 LOC를 목표로 하며 700 LOC를 넘을 것으로 보이면 구현 전에 분할한다. 외부 엔진·잠금 파일을 복사하는 양으로 기능 PR 크기를 판단하지 않는다. 각 PR은 기존 기능을 유지하면서 독립적으로 빌드·관련 테스트를 통과할 수 있어야 한다.
@@ -589,11 +619,80 @@ PR 06 로컬 측정 방법(2026-11-02 계약 검토): SQL 커서를 끝까지 �
 
 ### PR 06 — 배틀 방과 락스텝 프로토콜
 
-- 의존: PR 03, 05.
-- [ ] **RED:** 먼저 제출한 쪽 선택의 비공개, 시간 초과 자동 선택, 연결 끊김 후 재생 복원, 엔진 해시 불일치 거절, 보고 해시 불일치 VOID, 보고 누락 기한, 선택 토큰 외 입력 거절을 검증한다.
-- [ ] **GREEN:** 신청·수락(배틀 방식, 출전 스냅샷·현재 체력)·READY·seed·턴 제출과 동시 공개·30초 턴 타이머(알람)·보고 대조·진행 중 출전 확인을 구현한다.
-- [ ] **REFACTOR:** 방 상태 전이와 실패 에러를 명시적 정책으로 분리한다.
-- [ ] 경기당 요청·행 쓰기·저장량을 측정해 §7에 기록한다.
+- 의존: PR 03, 05. 계약은 부록 D.
+- [x] **RED:** 먼저 제출한 쪽 선택의 비공개, 시간 초과 자동 선택, 연결 끊김 후 재생 복원, 엔진 해시 불일치 거절, 보고 해시 불일치 VOID, 보고 누락 기한, 선택 토큰 외 입력 거절을 검증한다.
+- [x] **GREEN:** 신청·수락(배틀 방식, 출전 스냅샷·현재 체력)·READY·seed·턴 제출과 동시 공개·30초 턴 타이머(알람)·보고 대조·진행 중 출전 확인을 구현한다.
+- [x] **REFACTOR:** 방 상태 전이와 실패 에러를 명시적 정책으로 분리한다.
+- [x] 경기당 요청·행 쓰기·저장량을 측정해 §7에 기록한다. (로컬 workerd 9개 시나리오 완료. 실제 Free 비용·CPU·계정 여유는 §7의 미검증 항목으로 유지.)
+
+검증(2026-11-02, 통합 서버 `3d7a73c`, 배포 없음):
+
+| 단계 | 실제 명령 (`server/` 기준) | 종료·결과 |
+|---|---|---|
+| 06A RED `5d70e51` | `npm test -- --project api test/battle-rooms.test.ts test/battle-validation.test.ts`; `npm test -- --project ws test/ws/battle-ready.test.ts` | 각각 1; 29건·4건 단언 실패, 컴파일/설정 오류 0 |
+| 06A GREEN `bc20301` | 방·입력·준비·storage·alarm 대상 실행 | 0; 5파일 37건 통과·실패/skip 0 |
+| 06B RED `7b2e640` | `npm test -- --project ws test/ws/battle-rounds.test.ts` | 1; 8건 단언 실패·skip 0 (실제 RUNNING 전제 충족) |
+| 06B GREEN/정리 `442bb67`·`a6366c5` | `npm test`; 이후 `npm test -- --project ws test/ws/battle-rounds.test.ts --project api test/battle-journal.test.ts` | 0; 전체 284건, 정리 대상 9건 통과·실패/skip 0 |
+| 06C RED `03d2369` | `npm test -- --project ws test/ws/battle-results.test.ts` | 1; 14건 중 11건 단언 실패·기존 경로 3건 통과·skip 0 |
+| 06C GREEN/정리 `677f7e8`·`85b8f7f` | `npm run typecheck`; `npm test` | 0; 전체 299건 통과·실패/skip 0 |
+| 최종 깨끗한 설치 | `npm ci`; `npm run typecheck`; `npm test` | 모두 0; 86패키지 설치·87개 audit 취약점 0; **30파일 318건 통과·실패/skip 0**, 파일 순서 seed `1793582643045` |
+| 비용 | `npm run measure:battles` | 0; 9건 통과·실패/skip 0, 수치는 §7 |
+| 소스·문서 | `git diff --exit-code de16369 HEAD -- server/`; `git diff --check` | 0; 별도 worktree 최종본과 통합본 동일·공백 오류 없음 |
+
+- 깨끗한 설치는 최종 Git 아카이브를 새 임시 폴더에 펼쳐 검증했다. 초기 로컬 실행의 loopback 권한 오류는 테스트 0건이며 RED/통과에서 제외했다. 일부 초기 GREEN에서는 새 hello의 connectionId 기대값 2곳, 공유 WS 저장소를 단독 알람으로 가정한 fixture 1곳이 실패했고 고친 뒤 위 전체 검증을 통과했다.
+- 계약 검토·서버 구현·독립 코드 리뷰는 GPT-6 Astra high, 코드 조사·공식 과금 문서 확인은 GPT-6.1 Sol medium으로 병렬 수행했다(요청한 Opus/Sonnet은 도구에 없음). 독립 리뷰 수정: 무변경 update 영수증 충돌, 같은 연결 ready의 해시 변경, 마감/목록 조회의 누적 읽기 비용. 자체 수정: 만료 후 탈퇴 우선순위·READY 이후 confirm 재시도. defect-log에 원인·스윕·회귀 증거를 남겼다.
+- 독립 전체 검증은 당시 299건 + 별도 4건 = 303건 통과, 마지막 상태 수정 관련 34건 통과, 마지막 조회 수정·HTTP 103경기 페이지 검증 15건 통과(각 종료 0). 미해결 차단 지적은 없으며 탈퇴/제거 조회의 선형 읽기는 위에 명시했다.
+- 예상한 SQL `test_fault` 스택은 결과 확정 중 실패를 주입해 보고·전적·잠금이 모두 rollback되고 재시도가 한 번만 확정하는 테스트다. 종료 때의 `read end of pipe was aborted` 진단은 변경 전 `986aec9`에서도 같은 의존성으로 재현됐다(22파일 241건 통과·종료 0). 테스트 실패·소켓 정리 실패는 없었으며 PR 06이 새로 만든 진단으로 분류하지 않는다.
+- 엔진 scratch 대조: Node 24.14.0에서 기존 2,200 + 집중 3경기, 45,757pair, 200턴 무승부 200경기, 승인 입력 재생 2,204회 불일치 0. 기존 `node --test --test-name-pattern='PP exhaustion and recharge|hidden Imprison' tests/policy.test.cjs` 2건도 통과. 이번 JavaScriptCore·Swift·두 맥 E2E는 미실행이며 PR 07 범위다.
+- 원격 CI는 통합본 푸시 후 확인한다. 개발 Worker 추가 배포·실제 운영 비밀값 읽기·앱/세이브 변경은 하지 않았다. 다음 ci.yml 수정 때 server timeout 10분을 줄이는 메모는 유지한다.
+
+<details>
+<summary>결함 주입 명령과 결과 (필터 제외는 통과로 계산하지 않음)</summary>
+
+36회 주입 중 최초 수락 busy 검사 삭제 1회는 살아남아 검증 공백으로 기록했고, 전제를 보강한 테스트가 같은 결함을 검출했다. 나머지 35회는 단언 실패로 검출했다. 모든 변형을 원복했다. 아래 A/B 명령은 `server/`에서 `npm test -- --project <프로젝트> <파일> -t '<필터>'`이며, 당시 출력 옵션은 `--silent --reporter=default --reporter=json --outputFile=/private/tmp/ptb-pr06-mutation-logs-vN/<이름>.json`이었다. C는 `npm test -- --project ws test/ws/battle-results.test.ts -t '<필터>'`다.
+
+| 변형 | 프로젝트·파일·필터 | 변형 종료 / 통과·실패·제외 | 원복 종료 / 통과 |
+|---|---|---|---|
+| 01-opponent-snapshot-leak | `api test/battle-rooms.test.ts -t creates PENDING` | 1 / 0·1·9 | 0 / 1 |
+| 02-opponent-choice-http-leak | `ws test/ws/battle-rounds.test.ts -t opens round1` | 1 / 0·1·7 | 0 / 1 |
+| 03-first-choice-ws-leak | `ws test/ws/battle-rounds.test.ts -t opens round1` | 1 / 0·1·7 | 0 / 1 |
+| 04-timeout-boundary | `ws test/ws/battle-rounds.test.ts -t accepts just before 30s` | 1 / 0·1·7 | 0 / 1 |
+| 05-delayed-alarm-expiry | `ws test/ws/battle-rounds.test.ts -t accepts just before 30s` | 1 / 0·1·7 | 0 / 1 |
+| 06-peer-engine-hash | `ws test/ws/battle-ready.test.ts -t rejects version and engine mismatch` | 1 / 0·1·4 | 0 / 1 |
+| 07-own-engine-hash | `ws test/ws/battle-ready.test.ts -t rejects a changed engine hash` | 1 / 0·1·4 | 0 / 1 |
+| 08-ready-instance-busy | `ws test/ws/battle-ready.test.ts -t checks original instance locks` | 1 / 0·1·4 | 0 / 1 |
+| 09-accept-instance-busy | `ws test/ws/battle-ready.test.ts -t checks original instance locks` | 0 / 1·0·4 | 0 / 1 |
+| 10-fainted-create | `api test/battle-validation.test.ts -t rejects fainted` | 1 / 0·1·19 | 0 / 1 |
+| 11-third-party-access | `api test/battle-rooms.test.ts -t hides rooms` | 1 / 0·1·9 | 0 / 1 |
+| 12-cross-group-target | `api test/battle-rooms.test.ts -t hides rooms` | 1 / 0·1·9 | 0 / 1 |
+| 13-old-connection-start | `ws test/ws/battle-ready.test.ts -t requires fresh ACK` | 1 / 0·1·4 | 0 / 1 |
+| 14-noop-receipt-consumed | `api test/battle-rooms.test.ts -t does not consume` | 1 / 0·1·9 | 0 / 1 |
+| 15-original-revision-retry | `api test/battle-rooms.test.ts -t accepts, requires confirmation\|updates only applicant` | 1 / 0·2·8 | 0 / 2 |
+| 16-choice-conflict-erased | `ws test/ws/battle-rounds.test.ts -t opens round1` | 1 / 0·1·7 | 0 / 1 |
+| 17-journal-order-reversed | `ws test/ws/battle-rounds.test.ts -t stops advancing after 200` | 1 / 0·1·7 | 0 / 1 |
+| 18-shared-alarm-starvation | `ws test/ws/battle-rounds.test.ts -t shares its alarm` | 1 / 0·1·7 | 0 / 1 |
+| 19-challenge-deadline-boundary | `api test/battle-rooms.test.ts -t expires at the original 24h` | 1 / 0·1·9 | 0 / 1 |
+| 20-invalid-choice-accepted | `ws test/ws/battle-rounds.test.ts -t rejects malicious choices` | 1 / 0·1·7 | 0 / 1 |
+| 21-accept-busy-new-test | `ws test/ws/battle-ready.test.ts -t checks original instance locks` | 1 / 0·1·5 | 0 / 1 |
+| 22-fainted-accept-new-test | `api test/battle-rooms.test.ts -t rejects a fainted acceptance` | 1 / 0·1·11 | 0 / 1 |
+| 23-obsolete-ready-peer | `ws test/ws/battle-ready.test.ts -t ignores an obsolete ready session` | 1 / 0·1·5 | 0 / 1 |
+| 24-create-instance-busy | `ws test/ws/battle-ready.test.ts -t checks original instance locks` | 1 / 0·1·5 | 0 / 1 |
+| C: foreign-token | `ws test/ws/battle-results.test.ts -t foreign config` | 1 / 1 failed / 17 skipped (18) | 원복 후 결과 테스트 18건·전체 318건 통과 |
+| C: foreign-engine | `ws test/ws/battle-results.test.ts -t foreign config` | 1 / 1 failed / 17 skipped (18) | 원복 후 결과 테스트 18건·전체 318건 통과 |
+| C: mismatch | `ws test/ws/battle-results.test.ts -t two valid reports differing` | 1 / 5 failed / 13 skipped (18) | 원복 후 결과 테스트 18건·전체 318건 통과 |
+| C: report-retry | `ws test/ws/battle-results.test.ts -t keeps first report private` | 1 / 1 failed / 17 skipped (18) | 원복 후 결과 테스트 18건·전체 318건 통과 |
+| C: rollback | `ws test/ws/battle-results.test.ts -t rolls back result` | 1 / 1 failed / 17 skipped (18) | 원복 후 결과 테스트 18건·전체 318건 통과 |
+| C: fresh-rematch | `ws test/ws/battle-results.test.ts -t requires a completed source` | 1 / 1 failed / 17 skipped (18) | 원복 후 결과 테스트 18건·전체 318건 통과 |
+| C: report-terminal-seq | `ws test/ws/battle-results.test.ts -t unprocessed rounds` | 1 / 1 failed / 17 skipped (18) | 원복 후 결과 테스트 18건·전체 318건 통과 |
+| C: report-hp | `ws test/ws/battle-results.test.ts -t unprocessed rounds` | 1 / 1 failed / 17 skipped (18) | 원복 후 결과 테스트 18건·전체 318건 통과 |
+| C: report-deadline | `ws test/ws/battle-results.test.ts -t 72h from first report` | 1 / 1 failed / 17 skipped (18) | 원복 후 결과 테스트 18건·전체 318건 통과 |
+| C: streak | `ws test/ws/battle-results.test.ts -t increments consecutive wins` | 1 / 1 failed / 17 skipped (18) | 원복 후 결과 테스트 18건·전체 318건 통과 |
+| 마감 색인 조건 삭제 | `api test/battle-scheduler-cost.test.ts -t 'schedules from'` | 1 / 0·1·1 | 전체 318건 통과 |
+| 목록 OR 조회 복구 | `api test/battle-scheduler-cost.test.ts -t 'page read'` | 1 / 0·1·1 | 전체 318건 통과 |
+
+A/B 전체 원복 후 `npm test -- test/battle-rooms.test.ts test/battle-validation.test.ts test/battle-journal.test.ts test/ws/battle-ready.test.ts test/ws/battle-rounds.test.ts` 종료 0, 5파일 47건 통과·실패/skip 0. 소스 17개가 기준 커밋과 바이트 단위로 같음을 확인했다. C·조회 변형 원복은 최종 전체 318건과 소스 diff 0으로 확인했다.
+
+</details>
 
 ### PR 07 — macOS 연결과 정식전 E2E (2026-10-30 범위 변경)
 
