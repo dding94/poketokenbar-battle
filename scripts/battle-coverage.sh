@@ -7,7 +7,8 @@ BIN="$BIN_PATH/PokeTokenBarPackageTests.xctest/Contents/MacOS/PokeTokenBarPackag
 PROF="$BIN_PATH/codecov/default.profdata"
 # Globs, so a new battle or practice file is reported without editing this list.
 xcrun llvm-cov show "$BIN" -instr-profile="$PROF" --show-regions --show-line-counts-or-regions \
-  Sources/PokeTokenBar/Core/Battle*.swift Sources/PokeTokenBar/Core/Practice*.swift Sources/PokeTokenBar/Core/HatchRule.swift
+  Sources/PokeTokenBar/Core/Battle*.swift Sources/PokeTokenBar/Core/Practice*.swift \
+  Sources/PokeTokenBar/Core/OnlineBattle*.swift Sources/PokeTokenBar/Core/HatchRule.swift
 xcrun llvm-cov show "$BIN" -instr-profile="$PROF" --show-regions --show-line-counts-or-regions \
   --name-regex='applicationShouldHandleReopen|launchRequestsPractice|applyOpenRoute|menuLines|menuToolTip' \
   Sources/PokeTokenBar/PokeTokenBarApp.swift

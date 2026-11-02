@@ -22,6 +22,7 @@ THRESHOLD="${THRESHOLD:-75}"
 LOGIC_CORE=(
   # The fork's practice battle: a glob, so a new Practice*.swift joins the gate (03B-3/4 files were missed by hand).
   Sources/PokeTokenBar/Core/Practice*.swift
+  Sources/PokeTokenBar/Core/OnlineBattle*.swift
   "Sources/PokeTokenBar/Core/HatchRule.swift"
   "Sources/PokeTokenBar/Core/BattleSnapshot.swift"
   "Sources/PokeTokenBar/Core/CompanionModel.swift"

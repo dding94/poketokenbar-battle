@@ -2,7 +2,7 @@ name: CI
 
 # Public since 2026-10-29, so standard runners are free. Pushes to feat/** and pull requests run the
 # app jobs unless only server/ changed, determinism when the engine boundary or this file changed, and
-# the server job when server/ changed (see `changes`); a dispatch picks the scope. Push and PR events
+# the server job when server/ or this workflow changed (see `changes`); a dispatch picks the scope. Push and PR events
 # have no inputs, hence the `inputs.<name> || <default>` fallbacks.
 # A push or PR that changes only docs (docs/**, *.md) runs nothing: no test or script reads them.
 on:
@@ -104,11 +104,11 @@ jobs:
           path: ${{ runner.temp }}/test-logs
           retention-days: 1
 
-      - name: Preserve native snapshot-history renders
-        if: ${{ always() && matrix.shard == 'rendering' }}
+      - name: Preserve native screen renders
+        if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
-          name: snapshot-history-renders
+          name: screen-renders-${{ matrix.shard }}
           path: ${{ runner.temp }}/snapshot-history-renders
           if-no-files-found: ignore
           retention-days: 1
@@ -157,7 +157,7 @@ jobs:
 
   # Decides what a push or PR runs: determinism when the engine boundary or this file changed (an edit
   # to the determinism job, such as its FILTER, has to run it), the app jobs unless only server/ or docs
-  # changed, and the server job when server/ changed. A PR compares with its base, a push with the
+  # changed, and the server job when server/ or this workflow changed. A PR compares with its base, a push with the
   # newest green push run it builds on (scripts/changed-since-green.sh says why).
   changes:
     if: ${{ github.event_name != 'workflow_dispatch' }}
@@ -188,7 +188,8 @@ jobs:
         id: engine
         run: |
           ./scripts/changed-since-green.sh engine Package.swift .github/workflows/ci.yml \
-            'Sources/PokeTokenBar/Core/Battle*.swift' 'Sources/PokeTokenBar/Core/Practice*.swift'
+            'Sources/PokeTokenBar/Core/Battle*.swift' 'Sources/PokeTokenBar/Core/Practice*.swift' \
+            'Sources/PokeTokenBar/Core/OnlineBattle*.swift'
 
       # Everything but server/ and docs, so a new top-level path runs the app jobs by default. No Swift
       # file, Package.swift or script reads server/ (the tests read Sources/, engine/ and scripts/ by
@@ -208,7 +209,7 @@ jobs:
       - name: Server changed
         id: server
         if: hashFiles('server/**') != ''
-        run: ./scripts/changed-since-green.sh server
+        run: ./scripts/changed-since-green.sh server .github/workflows/ci.yml
 
   determinism:
     needs: changes
@@ -231,7 +232,7 @@ jobs:
         run: echo "PTB_STATE_DIR=$RUNNER_TEMP/ptb-engine-state" >> "$GITHUB_ENV"
       - name: Swift JavaScriptCore boundary
         env:
-          FILTER: "BattleEngineTests|BattleSnapshotTests|PracticeBattleTests|PracticeSessionTests|PracticePlaybackTests|PracticeHintsTests|PracticeWild|PracticeRecord|PracticeDaily|PracticeTemperament|PracticeStakes|PracticeWordingTests|PracticeScreenRenderingTests|LocalizedUILiteralTests|ScrollerLaneTests"
+          FILTER: "BattleEngineTests|BattleSnapshotTests|OnlineBattleResolverTests|PracticeBattleTests|PracticeSessionTests|PracticePlaybackTests|PracticeHintsTests|PracticeWild|PracticeRecord|PracticeDaily|PracticeTemperament|PracticeStakes|PracticeWordingTests|PracticeScreenRenderingTests|LocalizedUILiteralTests|ScrollerLaneTests"
         run: |
           set -o pipefail
           swift test --enable-code-coverage --filter "$FILTER" 2>&1 | tee "$RUNNER_TEMP/jsc-boundary.log"
@@ -252,8 +253,8 @@ jobs:
     if: ${{ needs.changes.outputs.server == 'true' }}
     name: server
     runs-on: ubuntu-latest
-    # No green run to size this from until server/ lands; then set it to about 1.5x the slowest one.
-    timeout-minutes: 10
+    # PR 06 took 37 s; two minutes leaves install/startup headroom on the standard runner.
+    timeout-minutes: 2
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v4
