@@ -13,6 +13,8 @@
 - 기준 upstream commit: `77f789d7ccf6e692c805f599abf7dcf0c834c56b` (`v2.5.6`)
 - 현재 작업 상태와 다음 진입점: [AI_HANDOFF.md](AI_HANDOFF.md).
 
+사용자 변경 승인(2026-11-02): 가입 표시값을 이메일에서 **닉네임**으로 변경한다. 로그인/인증 방식은 그대로이며 서버 ID·개인 접속키로 계정을 구분한다. 닉네임은 NFKC 정규화 후 1~254자, 공백·제어/숨은 문자 금지, 같은 그룹에서 대소문자 무시 중복 금지다. 기존 저장값과 클라이언트 호환을 위해 API/SQLite의 `displayEmail`·기존 오류 코드 이름은 유지하지만 값은 닉네임이다. 서버 주소는 계속 로컬 사용자 입력이며 공개 저장소에 개발 주소를 넣지 않는다.
+
 ## 1. 사용자와 확정한 내용
 
 2026-10-28 인터뷰로 정하고 2026-10-29 개정에서 바꾼 결정이다.
@@ -715,7 +717,9 @@ A/B 전체 원복 후 `npm test -- test/battle-rooms.test.ts test/battle-validat
 - 명령별 Xcode·임시 상태/캐시를 지정한 `swift test --disable-sandbox --scratch-path <새 임시 빌드> --jobs 2 --enable-code-coverage --filter 'OnlineBattle|SaveTransferTests|PracticeStakesStoreTests|SaveSnapshot|PracticeLaunchTests'`: 종료 **0**, **219건·실패/skip 0**. 같은 필터의 `check-test-filter.sh`도 종료 0. 이전 리소스 캐시 실패·잘못된 필터 대안 0건은 AI_HANDOFF에 별도 기록했다. 로컬 OCR은 최종 명령에 없다.
 - UI/현지화 관련 38건·실패/skip 0, 한국어 합성 데이터 SwiftUI 화면 이미지 생성·시각 검토 완료. 실제 클릭·두 맥·설치 검증은 아니다. 원격 CI와 최종 번들 검증은 진행 중이며 위 체크박스는 최종 근거가 모이면 갱신한다.
 
-최종 자동 검증: [CI 41381225381](https://github.com/dding94/poketokenbar-battle/actions/runs/41381225381), `ac552a7`, 전체 성공. macOS 15 앱은 2,082건 실행·2,066건 통과·16 skip·실패 0(rest 2,076, rendering 6), 코어 라인 94.15%. test-gate.sh·union·포크 가드·공용 slice 2시나리오·secret-scan 종료 0. 서버 npm ci·typecheck·test 종료 0, 30파일 318건·실패/skip 0. macOS 15·26 각각 Swift 경계 349건·실패/skip 0, 엔진 계약 49건 및 Node/JSC 2,200판 불일치/재생/상태 실패 0(200턴 무승부 200건), 관련 명령 종료 0. 중복 검사는 합산하지 않는다. 기존 skip 16건과 설치·실제 두 맥 E2E는 미검증이다. 앞선 실패/보강 근거와 공용 번들·합성 상태 ZIP은 AI_HANDOFF에 기록했다. **PR 07 전체 완료는 두 맥 검증 후다.**
+최종 자동 검증: [CI 41381225381](https://github.com/dding94/poketokenbar-battle/actions/runs/41381225381), `ac552a7`, 전체 성공. macOS 15 앱은 2,082건 실행·2,066건 통과·16 skip·실패 0(rest 2,076, rendering 6), 코어 라인 94.15%. test-gate.sh·union·포크 가드·공용 slice 2시나리오·secret-scan 종료 0. 서버 npm ci·typecheck·test 종료 0, 30파일 318건·실패/skip 0. macOS 15·26 각각 Swift 경계 349건·실패/skip 0, 엔진 계약 49건 및 Node/JSC 2,200판 불일치/재생/상태 실패 0(200턴 무승부 200건), 관련 명령 종료 0. 중복 검사는 합산하지 않는다. 기존 skip 16건과 실제 두 맥 E2E는 미검증이다. 앞선 실패/보강 근거와 공용 번들·합성 상태 ZIP은 AI_HANDOFF에 기록했다. **PR 07 전체 완료는 두 맥 검증 후다.**
+
+설치 기록(2026-11-02): 사용자 승인 후 `/Applications/PokeTokenBar Battle.app` 교체 설치·서명/실행 파일 해시 검증 종료 0. 설치본 실행·두 맥 경기는 미실행이며 위 E2E 체크박스는 유지한다.
 
 ### PR 08 — 개체 등록과 소유권 원장 (폐기, 2026-10-30)
 
@@ -1157,6 +1161,8 @@ API(`/v1`, JSON 본문, 응답은 `cache-control: no-store`):
 구현 전에 이 계약을 커밋한다. 부록 B~D의 서버 계약을 바꾸지 않는다. 설치·개발 배포·두 맥 E2E는 각각 별도 사용자 승인 후 실행한다. 계약 작성 당시 개발 Worker는 PR 05 코드였고, 2026-11-02 별도 사용자 승인 후 PR 06을 배포했다(§7). 인증된 실제 배틀·설치·두 맥 검증은 별도다.
 
 ### E.1 경계와 설정
+
+- 2026-11-02 후속: 사용자 승인에 따라 가입 UI는 닉네임으로 받는다(위 변경 승인). 서버 주소 적용→초대코드/닉네임 입력 순서와 비활성 사유를 화면에 표시한다. 입력 중 서버 주소가 적용된 주소와 다르면 가입/복구를 막아 이전 서버에 요청하지 않는다. 배포 대상은 기존 개발 Worker와 전달 전 테스트 앱이다.
 
 - 앱 수명의 MainActor 온라인 세션이 화면 상태·동의·엔진을 소유한다. HTTP/WS·자격 증명은 주입 가능한 경계로 분리하며 UI는 키 원문이나 HTTP 본문을 취급하지 않는다. 팝오버가 닫혀도 진행 중 정식전의 30초 서버 시계는 멈추지 않는다. 화면 재생만 멈출 수 있다.
 - 서버 주소는 온라인 화면에서 입력하고 해당 상태 폴더의 로컬 설정에 저장한다. 저장소·앱 번들에는 실제 개발 주소를 넣지 않는다. HTTPS origin만 허용하고 userinfo·query·fragment를 거절한다. 테스트의 명시적 loopback HTTP 허용은 제품 기본값과 분리한다. 인증 헤더가 다른 origin으로 전달되는 redirect를 허용하지 않는다.
