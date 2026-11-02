@@ -705,15 +705,17 @@ A/B 전체 원복 후 `npm test -- test/battle-rooms.test.ts test/battle-validat
 
 - 의존: PR 00, 01, 06.
 - 앱 계약은 부록 E. 07A 통신·설정·키, 07B 결정적 재생·효과 원장, 07C 팝오버·통합·E2E로 나누어 검증한다.
-- [ ] **RED:** 첫 가입, 자동 재연결, 키 폐기·복구, 통신 실패를 네트워크·Keychain 대역으로 검증한다.
-- [ ] **GREEN:** API·WebSocket 클라이언트, 코드·이메일 입력, Keychain 저장, 최소 배틀 화면(직접 조작·자동), 확정 결과의 효과 적용(기절·경험치 1천만, 온라인 하루 10회, 경기 ID로 한 번)을 구현한다. 효과 적용은 `PracticeBattleEffects` 경로를 다시 쓴다.
-- [ ] **REFACTOR:** UI가 키와 네트워크 응답을 직접 다루지 않도록 Store/Client를 분리한다.
+- [x] **RED:** 첫 가입, 자동 재연결, 키 폐기·복구, 통신 실패를 네트워크·Keychain 대역으로 검증한다.
+- [x] **GREEN:** API·WebSocket 클라이언트, 코드·이메일 입력, Keychain 저장, 최소 배틀 화면(직접 조작·자동), 확정 결과의 효과 적용(기절·경험치 1천만, 온라인 하루 10회, 경기 ID로 한 번)을 구현한다. 효과 적용은 `PracticeBattleEffects` 경로를 다시 쓴다.
+- [x] **REFACTOR:** UI가 키와 네트워크 응답을 직접 다루지 않도록 Store/Client를 분리한다.
 - [ ] 실제 두 맥에서 직접 조작·자동 정식전을 각각 끝까지 진행해 같은 결과, 진 쪽 기절, 이긴 쪽 경험치를 확인하고 화면 이미지를 남긴다.
 
 검증 중간 기록(2026-11-02, 기능 소스 `3ac4a25`):
 - 부록 E를 구현 전에 `274bfc2`로 커밋했다. API/WS/Keychain·재생/효과 원장·팝오버·앱 수명 세션을 별도 worktree에서 통합했고 Core/UI/Session 독립 리뷰 지적을 반영했다. Session RED와 지적별 회귀·결함 주입은 AI_HANDOFF 및 defect-log에 기록했다. 통신·화면 초안의 테스트 우선 절차 한계도 숨기지 않는다.
 - 명령별 Xcode·임시 상태/캐시를 지정한 `swift test --disable-sandbox --scratch-path <새 임시 빌드> --jobs 2 --enable-code-coverage --filter 'OnlineBattle|SaveTransferTests|PracticeStakesStoreTests|SaveSnapshot|PracticeLaunchTests'`: 종료 **0**, **219건·실패/skip 0**. 같은 필터의 `check-test-filter.sh`도 종료 0. 이전 리소스 캐시 실패·잘못된 필터 대안 0건은 AI_HANDOFF에 별도 기록했다. 로컬 OCR은 최종 명령에 없다.
 - UI/현지화 관련 38건·실패/skip 0, 한국어 합성 데이터 SwiftUI 화면 이미지 생성·시각 검토 완료. 실제 클릭·두 맥·설치 검증은 아니다. 원격 CI와 최종 번들 검증은 진행 중이며 위 체크박스는 최종 근거가 모이면 갱신한다.
+
+최종 자동 검증: [CI 41381225381](https://github.com/dding94/poketokenbar-battle/actions/runs/41381225381), `ac552a7`, 전체 성공. macOS 15 앱은 2,082건 실행·2,066건 통과·16 skip·실패 0(rest 2,076, rendering 6), 코어 라인 94.15%. test-gate.sh·union·포크 가드·공용 slice 2시나리오·secret-scan 종료 0. 서버 npm ci·typecheck·test 종료 0, 30파일 318건·실패/skip 0. macOS 15·26 각각 Swift 경계 349건·실패/skip 0, 엔진 계약 49건 및 Node/JSC 2,200판 불일치/재생/상태 실패 0(200턴 무승부 200건), 관련 명령 종료 0. 중복 검사는 합산하지 않는다. 기존 skip 16건과 설치·실제 두 맥 E2E는 미검증이다. 앞선 실패/보강 근거와 공용 번들·합성 상태 ZIP은 AI_HANDOFF에 기록했다. **PR 07 전체 완료는 두 맥 검증 후다.**
 
 ### PR 08 — 개체 등록과 소유권 원장 (폐기, 2026-10-30)
 
