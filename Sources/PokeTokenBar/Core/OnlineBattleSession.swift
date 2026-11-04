@@ -275,7 +275,7 @@ final class OnlineBattleSession {
                 try await process(room, account: account, api: api, epoch: epoch)
             }
             try current(epoch); reconciled = true
-            try rebuildRoster(); reconcileRematchIntent(account: account); publish()
+            try rebuildRoster(); _ = try await reconcileRematchIntent(account: account, api: api, epoch: epoch); publish()
             if let connection { let snapshot = await connection.snapshot(); try current(epoch); presentation.canStart = snapshot.state == .connected }
         } catch {
             guard epoch == generation, onlineAllowed else { return }
@@ -543,7 +543,19 @@ final class OnlineBattleSession {
         case .refresh: await refresh()
         default:
             do { try await battleAction(action, epoch: epoch) }
-            catch { publish(); await handle(error, epoch: epoch) }
+            catch {
+                // A notification can publish the created room before the POST reports failure.
+                // Resolve the submitted intent while this action still owns the busy gate.
+                if case .submitRematch = action, epoch == generation, authenticated,
+                   let api, let account = presentation.account {
+                    do {
+                        if try await reconcileRematchIntent(account: account, api: api, epoch: epoch, completingSubmission: true) {
+                            publish(); return
+                        }
+                    } catch { publish(); await handle(error, epoch: epoch); return }
+                }
+                publish(); await handle(error, epoch: epoch)
+            }
         }
     }
     private var standingsVisible: Bool {
@@ -597,15 +609,30 @@ final class OnlineBattleSession {
     }
     /// A lost POST response can be discovered by the ordinary list read. It is the same
     /// explicitly submitted intent, so expose its room instead of trapping the UI on a held entry.
-    private func reconcileRematchIntent(account: OnlineBattleAccount) {
-        guard !actionInFlight, let intent = challengeIntent, let sourceID = intent.sourceID,
+    private func reconcileRematchIntent(account: OnlineBattleAccount, api: OnlineBattleAPI, epoch: UInt64,
+                                        completingSubmission: Bool = false) async throws -> Bool {
+        guard !actionInFlight || completingSubmission, let intent = challengeIntent, let sourceID = intent.sourceID,
               presentation.rematchSourceID == sourceID,
               let room = views.values.first(where: {
                   $0.state.isActive && $0.rematchOf == sourceID && $0.p1.trainerId == account.trainer.trainerId &&
                   $0.p2.trainerId == intent.target && $0.mode == intent.mode && $0.p1.snapshot == intent.snapshot
-              }), (try? selectedSnapshot(allow: receiptKey(room, account: account))) == intent.snapshot else { return }
+              }) else { return false }
+        guard (try? selectedSnapshot(allow: receiptKey(room, account: account))) == intent.snapshot else {
+            try await cancelChangedRematch(room, account: account, api: api, epoch: epoch)
+            throw OnlineBattleFailure.invalidRequest
+        }
         challengeIntent = nil; presentation.rematchSourceID = nil; rematchFromHistory = false
+        presentation.notice = nil
         clearHistory(); prefersLobby = false; selectedBattleID = room.battleId
+        return true
+    }
+    private func cancelChangedRematch(_ room: OnlineBattleView, account: OnlineBattleAccount,
+                                      api: OnlineBattleAPI, epoch: UInt64) async throws {
+        guard [.pending, .accepted, .ready].contains(room.state) else { throw OnlineBattleFailure.invalidRequest }
+        let cancelled = try await api.cancel(id: room.battleId, revision: room.revision); try current(epoch)
+        try await process(cancelled, account: account, api: api, epoch: epoch)
+        challengeIntent = nil
+        try rebuildRoster()
     }
 
     private func prepareRematch(_ id: String) {
@@ -691,6 +718,10 @@ final class OnlineBattleSession {
             }
             let snapshot = try selectedSnapshot(allow: previousRoom.map { try receiptKey($0, account: account) })
             guard let target = presentation.selectedOpponentID, target != account.trainer.trainerId else { throw OnlineBattleFailure.invalidRequest }
+            if isRematch, let previousRoom, previousRoom.p1.snapshot != snapshot {
+                try await cancelChangedRematch(previousRoom, account: account, api: api, epoch: epoch)
+                throw OnlineBattleFailure.invalidRequest
+            }
             if challengeIntent?.sourceID != sourceID || challengeIntent?.snapshot != snapshot || challengeIntent?.target != target || challengeIntent?.mode != presentation.mode {
                 challengeIntent = .init(sourceID: sourceID, requestID: UUID().uuidString, target: target, mode: presentation.mode, snapshot: snapshot)
             }
