@@ -35,6 +35,7 @@ if name=='git':
     elif args[:1]==['log']: print('feat: battle screen' if os.environ.get('DOC_FAIL') else '')
     elif args[:1]==['rev-parse']: print(os.environ.get('BRANCH','feat/release-fixture') if '--abbrev-ref' in args else '1'*40)
     elif args[:1]==['status']: print(' M source.swift' if os.environ.get('DIRTY') else '')
+    elif args[:1]==['ls-files']: print(os.environ.get('UNTRACKED_SOURCE',''))
     elif args[:1] and args[0] in ('add','commit','push') and os.environ.get('ALLOW_PUBLICATION_STUB'): pass
     else: sys.exit(90)
 elif name=='security': print('  1) '+os.environ.get('ACTUAL_LEAF',os.environ['PTB_EXPECTED_LEAF'])+' "PokeTokenBar Battle Local"')
@@ -301,8 +302,9 @@ bash scripts/package-battle-engines.sh "build/PokeTokenBar Battle.app/Contents/R
 
     def test_ci_gate_rejects_stale_sha_missing_jobs_skips_and_missing_native_passes(self):
         self.fake_build()
-        for mutation in ('sha','workflow','repository','failed-run','partial-jobs','skipped-job','skipped-step','native-skip','native-missing','attempt'):
+        for mutation in ('sha','workflow','repository','failed-run','partial-jobs','skipped-job','skipped-step','native-skip','native-missing','attempt','job-run','job-sha','pagination'):
             with self.subTest(mutation=mutation):
+                (self.repo/'calls').unlink(missing_ok=True)
                 run=json.loads(json.dumps(self.ci_run));jobs=json.loads(json.dumps(self.ci_jobs));log=self.ci_log
                 if mutation=='sha': run['head_sha']='2'*40
                 elif mutation=='workflow': run['path']='.github/workflows/other.yml'
@@ -314,6 +316,9 @@ bash scripts/package-battle-engines.sh "build/PokeTokenBar Battle.app/Contents/R
                 elif mutation=='native-skip': log=log.replace('passed=3 skipped=0','passed=2 skipped=1')
                 elif mutation=='native-missing': log=log.replace('testSessionsRecoverCommittedResponseLossAndApplyDurablyOnce','otherTest')
                 elif mutation=='attempt': jobs['jobs'][2]['run_attempt']=2
+                elif mutation=='job-run': jobs['jobs'][2]['run_id']=54321
+                elif mutation=='job-sha': jobs['jobs'][2]['head_sha']='2'*40
+                elif mutation=='pagination': jobs['total_count']+=1
                 for name,value in (('run',run),('jobs',jobs),('log',log)):
                     (self.repo/('ci-'+name+'.json')).write_text(value if isinstance(value,str) else json.dumps(value))
                 result=self.run_release('--prepare-build','3.0.0')
@@ -332,6 +337,16 @@ bash scripts/package-battle-engines.sh "build/PokeTokenBar Battle.app/Contents/R
                 self.assertIn('Release CI:',result.stderr)
                 self.assertNotIn('build:',self.calls())
                 self.assertNotIn('local-test-gate',self.calls())
+
+    def test_ci_rejects_untracked_source_but_allows_unrelated_logs(self):
+        self.fake_build()
+        rejected=self.run_release('--prepare-build','3.0.0',UNTRACKED_SOURCE='Sources/New.swift')
+        self.assertNotEqual(rejected.returncode,0)
+        self.assertIn('Untracked build/test inputs',rejected.stderr)
+        self.assertNotIn('build:',self.calls())
+        allowed=self.run_release('--prepare-build','3.0.0',UNTRACKED_SOURCE='scripts/build.log\nscripts/tests/__pycache__/test_release_workflow.cpython-314.pyc')
+        self.assertEqual(allowed.returncode,0,allowed.stdout+allowed.stderr)
+        self.assertNotIn('local-test-gate',self.calls())
 
     def test_publish_readiness_guard_stops_before_any_command(self):
         result=self.run_release('3.0.0')

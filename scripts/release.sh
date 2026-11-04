@@ -110,7 +110,7 @@ trap 'rm -rf "$TMP_RELEASE"' EXIT
 if [[ "$MODE" == publish ]]; then
   BRANCH=$(git rev-parse --abbrev-ref HEAD)
   [[ "$BRANCH" == main ]] || { echo "Publication requires main (current: $BRANCH)" >&2; exit 1; }
-  [[ -z "$(git status --porcelain)" ]] || { echo 'Publication requires a clean working tree' >&2; exit 1; }
+  [[ -z "$(git status --porcelain --untracked-files=no)" ]] || { echo 'Publication requires a clean working tree' >&2; exit 1; }
   # Read only: a missing/unconfigured tap is a blocker, never a reason to create one.
   gh api "repos/$TAP_REPO/contents/$CASK_PATH" > "$TMP_RELEASE/tap.json"
   python3 - "$TMP_RELEASE/tap.json" "$TMP_RELEASE/cask.rb" <<'TAP'
@@ -121,6 +121,11 @@ pathlib.Path(sys.argv[2]).write_bytes(base64.b64decode(value['content'], validat
 TAP
   python3 scripts/release-validate.py check-cask "$TMP_RELEASE/cask.rb"
 fi
+
+# CI is the full-suite criterion. Do not run local OCR or an unisolated/opt-out native test gate.
+# This selector is verified against GitHub's run/jobs/logs API; it is never a manual assertion.
+python3 scripts/release-ci.py "${PTB_CI_RUN_ID:-}"
+CI_HEAD=$(git rev-parse HEAD)
 
 # Public identity metadata only; no certificate creation or secret lookup.
 SIGN_IDENTITY="${CODESIGN_IDENTITY:-PokeTokenBar Battle Local}"
@@ -133,12 +138,15 @@ LEAF=$(security find-identity -v -p codesigning | awk -v id="\"$SIGN_IDENTITY\""
 mkdir -p build/release
 # A failed rebuild must not leave a prior cask preview looking current.
 rm -f "build/release/$EXEC_NAME.zip" "build/release/$CASK_NAME.rb"
-./scripts/test-gate.sh
 # Never install or terminate either app while building a release artifact.
 PTB_SKIP_INSTALL=1 PTB_NATIVE_ARCH_ONLY=0 PTB_REQUIRE_STABLE_SIGN=1 \
   PTB_RELEASE_VERSION="$VERSION" CODESIGN_IDENTITY="$SIGN_IDENTITY" ./scripts/build-app.sh
 APP="build/$APP_NAME.app"
 python3 scripts/release-validate.py bundle . "$APP" "$VERSION" "$EXPECTED_LEAF"
+# Build outputs are ignored, but any tracked source change invalidates exact-HEAD evidence.
+[[ "$(git rev-parse HEAD)" == "$CI_HEAD" && -z "$(git status --porcelain --untracked-files=no)" ]] || {
+  echo 'Source changed during build; CI evidence no longer matches' >&2; exit 1;
+}
 ZIP="build/release/$EXEC_NAME.zip"
 ditto -c -k --keepParent "$APP" "$ZIP"
 ZIP_SHA=$(shasum -a 256 "$ZIP" | awk '{print $1}')
