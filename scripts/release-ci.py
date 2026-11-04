@@ -46,7 +46,11 @@ def command(*args):
 
 def api(endpoint):
     # All endpoints are constructed here; no caller-supplied URL, method, token, or response file.
-    return command('gh', 'api', f'repos/{REPO}/{endpoint}', '--hostname', 'github.com')
+    # gh rejects colored job logs by default. Capture them privately, remove CSI codes, and never
+    # forward their terminal controls/output to the caller. JSON endpoints retain gh's default guard.
+    options = ('--allow-escape-sequences',) if endpoint.endswith('/logs') else ()
+    value = command('gh', 'api', f'repos/{REPO}/{endpoint}', '--hostname', 'github.com', *options)
+    return re.sub(r'\x1b\[[0-?]*[ -/]*[@-~]', '', value) if options else value
 
 
 def clean_head():

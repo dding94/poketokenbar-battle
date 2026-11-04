@@ -1,6 +1,6 @@
 # PokeTokenBar Battle release preparation
 
-The fork has not completed public release acceptance. PR 12's ad-hoc development ZIP is not a public release. Version, actual signing identity, release targets and notes/images require separate confirmation before publication. A script passing local checks does not complete two-Mac acceptance, Free-plan measurement/recovery, Gatekeeper, or company policy validation.
+The fork has not completed public release acceptance. Development ZIPs, including PR 13's ad-hoc build, are not public releases. Version, actual signing identity, release targets and notes/images require separate confirmation before publication. A script passing local checks does not complete two-Mac acceptance, Free-plan measurement/recovery, Gatekeeper, or company policy validation.
 
 ## Safe local commands
 
