@@ -15,6 +15,15 @@ final class OnlineBattlePresentation {
     var members: [OnlineBattleMember] = []
     var battles: [OnlineBattleView] = []
     /// Archive navigation is independent of the live room and arena.
+    var showsStandings = false
+    var standings: OnlineBattleStandings?
+    var standingsLoading = false
+    var standingsError: String?
+    var rematchSourceID: String?
+    var rematchOpponent: OnlineBattleMember? { selectedOpponent }
+    var rematchMode: OnlineBattleMode? { rematchSourceID == nil ? nil : mode }
+    var canSubmitRematch: Bool { false }
+    func canRematch(_ battle: OnlineBattleView) -> Bool { false }
     var showsHistory = false
     var selectedHistoryBattle: OnlineBattleView?
     var replay: OnlineBattleReplay?
@@ -77,6 +86,8 @@ final class OnlineBattlePresentation {
     func send(_ action: OnlineBattleUIAction) {
         // These are presentation guards. The session independently validates server state and replay state.
         switch action {
+        case .showStandings, .refreshStandings, .prepareRematch, .submitRematch, .cancelRematch:
+            break
         case .setPopoverVisible:
             break
         case .backToLobby:
@@ -146,6 +157,7 @@ enum OnlineBattleUIAction {
     case setPopoverVisible(Bool)
     case selectEntry(String), selectOpponent(String), setMode(OnlineBattleMode)
     case challenge, openBattle(String), accept, confirm, prepareBattle, decline, cancel
+    case showStandings, refreshStandings, prepareRematch(String), submitRematch, cancelRematch
     case showHistory, openReplay(String), seekReplay(Int), closeReplay
     case chooseMove(Int), dismissResult, backToLobby
 }

@@ -207,3 +207,21 @@ struct OnlineBattleAudit: Codable, Sendable {
     }
     let entries: [Entry]
 }
+
+/// Server-authoritative group records; no battle snapshots or local settlement state.
+struct OnlineBattleStanding: Codable, Equatable, Sendable, Identifiable {
+    let trainerId: String
+    let displayName: String
+    let wins: Int
+    let losses: Int
+    let draws: Int
+    let streak: Int
+    let bestStreak: Int
+    let winRate: Double?
+    var id: String { trainerId }
+}
+struct OnlineBattleStandings: Codable, Equatable, Sendable {
+    let groupId: String
+    let championTrainerId: String?
+    let rows: [OnlineBattleStanding]
+}
