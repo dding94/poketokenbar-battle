@@ -1,104 +1,46 @@
-# 릴리스 프로세스
+# PokeTokenBar Battle release preparation
 
-버전 배포 시 **코드뿐 아니라 문서(README·웹페이지·cask)까지 일관되게** 갱신하기 위한 런북.
-기계적 단계는 `scripts/release.sh` 가 자동화하고, 내용 판단이 필요한 부분은 아래 체크리스트로 검토한다.
+The fork has not completed public release acceptance. PR 12's ad-hoc development ZIP is not a public release. Version, actual signing identity, release targets and notes/images require separate confirmation before publication. A script passing local checks does not complete two-Mac acceptance, Free-plan measurement/recovery, Gatekeeper, or company policy validation.
 
-## 한 줄 배포
+## Safe local commands
 
-```bash
-# 템플릿을 복사한 뒤 실제 변경사항과 Contributors를 작성한다(필수).
-cp docs/reference/release-notes-template.md /tmp/notes.md
-# /tmp/contributors.txt: 포함된 PR에서 확인한 GitHub handle을 한 줄에 하나씩 작성한다.
-# 외부 기여자가 없는 릴리스만 빈 파일을 사용하며, 노트에도 없음을 명시한다.
+| Command | Behavior | Required input |
+|---|---|---|
+| `./scripts/release.sh --check-only` | Reads fork origin/source identity and committed documentation/image changes. No build or GitHub access. | None |
+| `./scripts/release.sh --prepare <version>` | Validates local source/documents and release notes; prints targets and remaining blockers. Works on feature branches. No signing identity or GitHub access. | Candidate version, notes, contributor roster |
+| `./scripts/release.sh --prepare-build <version>` | Runs test-gate, builds without installation, validates the signed universal bundle, creates a ZIP and cask preview under `build/release/`. Works on feature branches. | Above plus approved existing signing identity and pinned public certificate leaf |
+| `./scripts/release.sh <version>` | Separately authorized publication; requires explicit readiness, clean `main`, and an existing compatible fork cask. | All above, explicit user approval and publication access |
 
-PTB_NOTES_FILE=/tmp/notes.md PTB_CONTRIBUTORS_FILE=/tmp/contributors.txt ./scripts/release.sh 2.1.1
-```
+Check-only returns the document check's actual exit status: 0 means its local checks passed, 1 means a warning/failed preflight, 2 means the mandatory new UI asset gate failed. It does not declare external release readiness. Preparation modes never edit the tracked version, install/terminate apps, create keys/certificates, commit, push, tag, publish a GitHub Release, or modify a tap/Pages.
 
-`scripts/release.sh <version>` 가 순서대로 수행:
-
-0. **노트·Contributors 검사** — 필수 섹션·설치 안내와 확인한 기여자 목록 대조. 누락 시 빌드·앱 교체·push 전에 중단.
-1. **test-gate** (`./scripts/test-gate.sh`) — 전체 테스트 + 로직 커버리지. 실패 시 중단.
-2. **문서 일관성 검토** — 정적 버전 배지·제거된 의존성(예: `ccusage`) 잔존을 자동 경고 + 아래 수동 체크리스트 출력. 경고 시 진행 여부를 묻는다.
-3. **VERSION 범프** (`scripts/build-app.sh`, 아직 미커밋).
-4. **빌드 + zip** (`build/PokeTokenBar.zip`) + 빌드 버전 일치 + universal(arm64 + x86_64) 바이너리 확인 — **push 전 검증**(실패해도 범프 미커밋이라 origin/main 무손상).
-5. **커밋 + push** (`git push origin main`, 빌드 성공 후).
-6. **GitHub Release** 생성 (`PTB_NOTES_FILE` 원문 사용, 최소 노트 자동 대체 없음).
-7. **Homebrew cask** 버전 갱신 (`chattymin/homebrew-tap`).
-8. **GitHub Pages 재빌드** 요청 (랜딩 동적 배지 갱신 유도).
-
-> `main` 브랜치에서만 실행(스크립트가 가드). 비-main 에서 실행 시 즉시 중단.
-
-검토만 하려면: `./scripts/release.sh --check-only`
-
-노트만 검사하려면: `python3 scripts/release-metadata.py check-notes /tmp/notes.md /tmp/contributors.txt`
-
-## 릴리스 노트와 기여자
-
-- [v2.5.3](https://github.com/chattymin/PokeTokenBar/releases/tag/v2.5.3)을 기준으로 영어
-  `New / Fixed / Other / Contributors`와 `Install / Upgrade` 안내를 유지한다.
-- 기능은 사용자에게 달라지는 동작을 설명하고 PR 번호와 작성자 `@handle`을 연결한다.
-  변경 없는 분류는 `None.`으로 남긴다. 문서·스크린샷 변경은 `Other`에 정리한다.
-- **직전 공개 릴리스 태그부터 배포 대상 커밋까지** 포함된 PR을 전수 확인한다. 날짜 검색만으로
-  대체하지 않는다. PR 작성자와 확인 가능한 실제 공동기여자의 GitHub handle을 수집한다.
-  기본 Contributors는 v2.5.3처럼 저장소 소유자와 봇을 제외한 외부 기여자이며, 중복 제거·정렬한다.
-  직접 커밋된 외부 기여도 확인한다. 로그인 이름을 확인할 수 없으면 임의로 만들지 말고 해결 후 배포한다.
-- 확인한 목록을 `PTB_CONTRIBUTORS_FILE`에 한 줄 한 handle로 저장하고 노트 Contributors와 대조한다.
-  검사기는 이 목록 및 변경 설명에 등장한 외부 `@handle`의 누락을 차단한다. 목록 자체의 완전성은
-  위 PR·커밋 대조로 확인해야 한다. 이전 릴리스 목록을 복사하지 않는다.
-- 외부 기여자가 없을 때만 빈 목록 파일과 `No external contributors in this release.`를 사용한다.
-  기여자가 있으면 v2.5.3처럼 `@alice · @bob` 목록 아래 `Thank you all.`을 적는다.
-
-## 커밋 공동작성자
-
-릴리스 커밋에는 기본적으로 `Co-Authored-By`를 붙이지 않는다. 실제 해당 커밋에 공동작업한
-참여자가 확인될 때만 `PTB_COAUTHORS_FILE`에 한 줄당 `Name <email>`로 작성해 전달한다.
-특정 AI 이름은 고정하지 않으며, 현재 도구나 이전 커밋만 보고 추측하지 않는다.
-전체 릴리스의 Contributors와 릴리스 준비 커밋의 공동작성자는 별도로 판정한다.
+Prepare notes by copying [the existing template](docs/reference/release-notes-template.md) to a temporary file and filling every section. Supply verified external contributor handles, one per line, in a second temporary file; use an empty file only when there are none. Then select a candidate version and run:
 
 ```bash
-PTB_NOTES_FILE=/tmp/notes.md PTB_CONTRIBUTORS_FILE=/tmp/contributors.txt \
-  PTB_COAUTHORS_FILE=/tmp/coauthors.txt ./scripts/release.sh 2.1.1
+PTB_NOTES_FILE=/tmp/ptb-notes.md \
+PTB_CONTRIBUTORS_FILE=/tmp/ptb-contributors.txt \
+  ./scripts/release.sh --prepare <version>
 ```
 
-## E2E 스모크 (선택 — GUI 세션 필요)
+For an explicitly requested local release build, supply the approved existing certificate's public SHA-1 as `PTB_EXPECTED_LEAF` and its name as `CODESIGN_IDENTITY`, then use `--prepare-build`. The script does not create or replace certificates. A missing/mismatched leaf stops without a prompt or fallback to ad-hoc. Signing uses the existing key only during this explicit build step; public identity/certificate metadata is inspected for validation. Do not commit private keys, signing credentials, colleague emails, or real battle records.
 
-```bash
-./scripts/e2e.sh
-```
+Every release build forces `PTB_SKIP_INSTALL=1`, `PTB_NATIVE_ARCH_ONLY=0`, and `PTB_REQUIRE_STABLE_SIGN=1`. `PTB_RELEASE_VERSION` selects the artifact version without editing `scripts/build-app.sh`. Validation checks fork bundle/executable/version, `/Applications/PokeTokenBar Battle.app` LaunchAgent target, arm64 and x86_64 individually, each Mach-O deployment target 15.0, strict code signature, public leaf equality, signed JIT entitlement, and every packaged engine trust pin. A failed rebuild removes the previous release ZIP/cask preview before building so it cannot appear current.
 
-실제 앱 번들로 빌드→기동→데이터 파이프라인(스냅샷 갱신·구조 검증·AppLog)→메뉴바
-status item(AX)→팝오버 오픈(AXPress)까지 7개 체크. 5단계는 터미널에 손쉬운 사용
-(Accessibility) 권한 필요 — 미허용이면 해당 단계만 SKIP. release.sh 에 포함하지 않는
-이유: GUI 세션·권한 의존이라 헤드리스 실행이 깨질 수 있음. 릴리스 전 수동 1회 권장.
+The cask preview uses the actual ZIP's SHA-256, `PokeTokenBarBattle.zip` under this fork's `v<version>` release URL, `PokeTokenBar Battle.app`, and macOS Sequoia (15) or later. It neither writes to a real tap nor proves that the release asset or cask is available. No Homebrew installation command is advertised until the fork cask has actually been published and verified.
 
-## 문서 검토 체크리스트 (내용 변경 시)
+## Notes, contributors, and documentation
 
-`release.sh` 2단계가 출력하는 것 — **기능/동작이 바뀐 릴리스면 반드시 갱신**:
+Keep English `New / Fixed / Other / Contributors` sections and `Install / Upgrade` guidance. Use `None.` for an empty change category. Review every PR/direct commit from the preceding public fork release (or the fork's starting point for its first release), including actual human contributors; do not copy an older roster. Notes must reference the fork ZIP/app and replace only the fork app. Upstream installation commands are rejected.
 
-- [ ] **README.md / README.ko.md / README.ja.md** — 기능 목록, 요구사항, 데이터 소스, 스크린샷. 3개 언어 동시.
-- [ ] **랜딩 페이지** (`gh-pages` 브랜치 `index.html`) — hero·features·companion·install·works-with·요구사항·푸터.
-  - 릴리스 배지는 **동적**(`img.shields.io/github/v/release/...`) → 버전 자동 반영. **기능/문구만 수동.**
-  - i18n 사전 **en/ko/ja 동시** 갱신 + 마크업 키 ⊆ 사전, en==ko==ja 키 정합 유지.
-  - 갱신은 worktree 로: `git worktree add /tmp/ptb-gh-pages gh-pages` → 편집 → commit/push → `git worktree remove`.
-- [ ] **homebrew-tap cask** caveats — 설치 요구사항(의존성 등) 최신인지. 버전은 release.sh 가 갱신.
+If no external contributor exists, use exactly `No external contributors in this release.` Otherwise list verified `@handles` and thank them. `PTB_CONTRIBUTORS_FILE` is mandatory. The checker catches missing handles; completeness still requires the PR/commit review. Release commits have no automatic coauthor. An explicitly verified `PTB_COAUTHORS_FILE` may contain `Name <email>` lines for actual coauthors only.
 
-## 자동으로 갱신되는 것 (수동 불필요)
+Update README.md/ko/ja, applicable fork screenshots, and any confirmed fork landing page consistently. New UI features need new assets; committed staleness/coverage checks do not replace visual review. Do not publish or create a landing page/tap merely to make a gate pass. Original license/author attribution and unofficial fan-project notices remain required.
 
-- README·랜딩의 **release 배지** = shields 동적 배지 → 최신 릴리스 자동(캐시로 수 분 지연 가능).
-- 인앱 업데이트 알림 — `releases/latest` 기준 자동.
+## Publication boundary and recovery
 
-## 배포 후 검증
+Before approving publication, review the exact version, notes/images, fork source, signed ZIP/hash, signing trust status, existing tap/cask, installation/backup targets, and remaining acceptance results. Stable self-signing is neither Developer ID signing nor notarization and does not guarantee Gatekeeper acceptance or continuous Keychain permission. Public distribution/trust policy needs an explicit decision.
 
-```bash
-brew update && brew upgrade --cask poke-token-bar
-```
+Only after approval, the publication form additionally requires `PTB_FORK_RELEASE_READY=1`. It reads `dding94/homebrew-tap/Casks/poke-token-bar-battle.rb` before building; missing/incompatible content blocks publication. The cask must match the reviewed fork template, including its existing version/checksum. No tap is created. After all build checks, the script updates the tracked default version, commits/pushes `main`, publishes the exact ZIP/notes, then updates both cask version and SHA using the existing tap file SHA. No Pages request is made. A late failure can leave a partially published release; inspect actual remote state before retrying rather than recreating tags or changing signing identity automatically.
 
-`brew list --cask --versions poke-token-bar` 와 `/Applications/PokeTokenBar.app` 버전이 새 버전인지 확인.
+Installation is separate from release preparation/publication. Before an approved install/upgrade, quit the fork normally and back up `~/Library/Application Support/PokeTokenBarBattle` to a private location; keep real backups out of Git. Preserve the current app separately for rollback. Replace only `/Applications/PokeTokenBar Battle.app`; never remove `/Applications/PokeTokenBar.app` or its state. Verify the approved asset checksum, bundle ID, architectures, macOS 15 minimum, and signature before running. Test rollback against a copy of fork state in an isolated test account/`PTB_STATE_DIR`; do not overwrite a live save with a test fixture. Keychain/online key recovery is a separate operation, never solved by regenerating the signing certificate.
 
-## 서명 (2026-07-08 부터)
-
-릴리스 빌드는 이 머신의 `PokeTokenBar Local` 자체서명 인증서로 서명된다
-(`scripts/create-signing-cert.sh` 로 생성, keychain 에만 존재 — 레포 미커밋).
-- designated requirement 가 버전 간 고정 → 사용자의 Keychain "항상 허용"이 업데이트 후에도 유지.
-- 전환 직후 첫 업데이트 1회는 기존(ad-hoc 시절) 허용이 무효라 마지막 프롬프트가 뜰 수 있음.
-- 인증서를 분실/재생성하면 DR 이 바뀌어 전 사용자 재프롬프트 — 재생성 금지(스크립트가 가드).
+Two-Mac invitation → manual/auto battle → faint/heal/experience → standings, original/fork isolation, Free usage/storage and recovery remain manual acceptance items. Record actual results in `docs/AI_HANDOFF.md` and `docs/BATTLE_PLAN.md`; skipped/unexecuted work is not a pass.

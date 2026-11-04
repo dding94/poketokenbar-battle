@@ -8,6 +8,11 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 VERSION="2.5.6"
+# Release preparation selects an artifact version without editing this tracked file.
+if [[ -n "${PTB_RELEASE_VERSION:-}" ]]; then
+    [[ "$PTB_RELEASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'Invalid PTB_RELEASE_VERSION' >&2; exit 1; }
+    VERSION="$PTB_RELEASE_VERSION"
+fi
 APP_NAME="PokeTokenBar Battle"
 EXEC_NAME="PokeTokenBarBattle"
 BUNDLE_ID="io.github.dding94.poketokenbar-battle"

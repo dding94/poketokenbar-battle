@@ -1,15 +1,16 @@
+> **Battle 포크 안내:** 이 저장소는 `dding94/poketokenbar-battle`이며 최소 macOS 15입니다. 아래 기존 육성 앱 소개는 upstream에서 가져온 설명입니다. 온라인 기능의 최신 구현/검증 상태는 [AI_HANDOFF](docs/AI_HANDOFF.md), 설치·공개 경계는 [RELEASE.md](RELEASE.md)를 따릅니다. 공개 배포/두 맥 검증은 아직 완료되지 않았습니다.
+
 <div align="center">
 
 <img src="assets/icon.png" width="128" alt="PokeTokenBar 아이콘">
 
-# PokeTokenBar
+# PokeTokenBar Battle
 
 **당신의 AI 코딩 토큰을 포켓몬으로 — 메뉴바에서.**
 
-[![Release](https://img.shields.io/github/v/release/chattymin/PokeTokenBar?color=444d56&label=release)](https://github.com/chattymin/PokeTokenBar/releases)
-[![macOS](https://img.shields.io/badge/macOS-14%2B-0969da)](https://www.apple.com/macos/)
+[![Release](https://img.shields.io/github/v/release/dding94/poketokenbar-battle?color=444d56&label=release)](https://github.com/dding94/poketokenbar-battle/releases)
+[![macOS](https://img.shields.io/badge/macOS-15%2B-0969da)](https://www.apple.com/macos/)
 [![Swift](https://img.shields.io/badge/Swift-6-f05138)](https://swift.org)
-[![Homebrew](https://img.shields.io/badge/Homebrew-cask-8957e5)](#homebrew)
 [![License](https://img.shields.io/badge/license-MIT-3fb950)](LICENSE)
 [![Sponsor](https://img.shields.io/badge/Sponsor-%E2%99%A5-ea4aaa?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/chattymin)
 
@@ -207,38 +208,24 @@ Pi는 모델 여러 개를 세션 로그 하나로 흘려보낼 수 있습니다
 
 모두 로컬에서 읽습니다 — 외부 사용량 CLI 불필요. 도구는 프로바이더 구현과 등록으로 추가합니다([CONTRIBUTING.ko.md](CONTRIBUTING.ko.md) 참고).
 
-## 설치
+## 온라인 화면 미리보기
 
-### 요구사항
+아래는 합성 fixture로 렌더한 **한국어 SwiftUI 화면**이며 실제 두 사용자 경기 캡처가 아닙니다. 포켓몬 그림 대신 회색 대체 아이콘을 사용합니다. 두 맥 인수 검증은 아직 남아 있습니다.
 
-macOS 14+ (Apple Silicon 또는 Intel). 끝입니다 — 토큰 사용량은 로컬 Claude Code·Codex·Gemini CLI·Antigravity·OpenCode·Hermes Agent·Cursor·Grok CLI·Copilot CLI·Kiro CLI·Pi Agent·omp·Aside·Kimi Code 데이터에서 직접 읽으며 외부 사용량 CLI가 필요 없습니다.
+![합성 한국어 화면: 그룹 전적판](assets/screenshot-online-standings.png)
+![합성 한국어 화면: 재대결 출전 준비](assets/screenshot-online-rematch.png)
 
-### Homebrew
+## 설치와 릴리스 준비
 
-```bash
-brew install --cask chattymin/tap/poke-token-bar
-```
+포크 최소 지원은 **macOS 15+**, Apple Silicon과 Intel입니다. 공개 릴리스·설치·Homebrew cask 검증은 아직 완료되지 않았습니다. 원본 앱의 설치 명령으로 Battle 포크를 설치할 수 없습니다. 준비/검증/별도 승인 게시와 백업 절차는 [RELEASE.md](RELEASE.md)를 확인하세요.
 
-ad-hoc/자체 서명 앱이라 Cask 설치 시 격리 속성을 자동 제거합니다.
-
-### 직접 설치 (Homebrew 없이)
-
-Homebrew를 쓰지 않는다면 [최신 릴리스](https://github.com/chattymin/PokeTokenBar/releases/latest)에서 `PokeTokenBar.zip`을 내려받아 압축을 풀고 `PokeTokenBar.app`을 `/Applications`로 드래그합니다.
-
-이 앱은 ad-hoc/자체 서명(Apple 개발자 계정 공증 없음)이라 첫 실행 시 Gatekeeper가 "확인되지 않은 개발자" 경고를 띄웁니다. 아래 둘 중 하나로 한 번만 해제하면 됩니다.
-
-- **Finder:** `PokeTokenBar.app`을 우클릭(또는 Control+클릭) → **열기** → 대화상자에서 **열기**를 다시 클릭.
-- **터미널:** `xattr -dr com.apple.quarantine /Applications/PokeTokenBar.app`
-
-(Homebrew Cask는 격리 속성을 자동 제거하므로 이 과정이 필요 없습니다.)
-
-### 소스 빌드
+설치 없이 소스 번들만 만들려면:
 
 ```bash
-swift build                  # 디버그
-swift test                   # 단위 테스트
-./scripts/build-app.sh       # release → PokeTokenBar.app → /Applications
+PTB_SKIP_INSTALL=1 ./scripts/build-app.sh
 ```
+
+생성 위치는 `build/PokeTokenBar Battle.app`입니다. 인증서가 없으면 ad-hoc 개발 서명이며 공개 배포의 서명·공증을 의미하지 않습니다. 개발 실행은 별도 시험 계정과 `PTB_STATE_DIR`로 실제 세이브를 분리해야 합니다. 원본 앱이나 세이브를 덮어쓰지 마세요.
 
 ## 데이터 소스
 

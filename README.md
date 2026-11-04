@@ -48,6 +48,8 @@ PR 00~03C(포크 격리·엔진·연습전)는 끝났습니다. 구현 요청을
 
 ## 검증과 배포 상태
 
+공개 릴리스·Homebrew cask·실제 두 맥 인수 검증은 아직 완료되지 않았습니다. PR 12의 ad-hoc 개발 ZIP은 공개 릴리스가 아닙니다. 설치 없는 로컬 준비는 `./scripts/release.sh --check-only`, 노트/버전 검토는 `--prepare <version>`이며 자세한 경계와 백업 절차는 [RELEASE.md](RELEASE.md)를 따릅니다. 실제 서명 빌드·설치·외부 게시에는 별도 확인이 필요합니다.
+
 `npm test --prefix engine`과 `cd engine && npm run corpus && npm run compatibility`로 엔진을 검증합니다. Node와 JavaScriptCore의 같은 2,200판을 로컬 macOS 26.5 및 CI macOS 15·26에서 실행했습니다. 정책 auto-v2(standard는 v1과 같음)는 불일치·재생·상태 복원 실패 0건입니다. BW2 541개 기술 호출 검사는 모든 조건별 효과 조합을 증명하지 않습니다.
 
 앱 검증은 `swift build`, `swift test`, `./scripts/test-gate.sh`입니다. Command Line Tools에는 XCTest가 없으므로 로컬에서는 Xcode를 설치하고 `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`로 `swift test`를 실행합니다. 통과 기준은 GitHub Actions(macOS 15)입니다. 실제 명령·개수·skip·미검증 범위는 [AI_HANDOFF](docs/AI_HANDOFF.md)에 기록합니다.
@@ -63,6 +65,13 @@ GitHub Actions는 `feat/**` 브랜치 푸시와 PR에서 자동으로 돌고(문
 5. `open -a 'PokeTokenBar Battle' --args --practice`로 실행하거나, 이미 실행 중일 때 Finder에서 앱을 다시 열면 팝오버가 연습전 화면으로 열립니다.
 
 스프라이트와 이름 번역은 실행 중 내려받습니다. 오프라인이면 대체 그림/식별자를 표시합니다. 원본 앱 설치본·세이브를 덮어쓰지 않으며, 릴리스·공개 전환·서버 배포는 별도 작업입니다.
+
+### 온라인 화면 미리보기
+
+아래는 합성 fixture로 렌더한 **한국어 SwiftUI 화면**이며 실제 두 사용자 경기 캡처가 아닙니다. 포켓몬 그림 대신 회색 대체 아이콘을 사용합니다. 두 맥 인수 검증은 아직 남아 있습니다.
+
+![합성 한국어 화면: 그룹 전적판](assets/screenshot-online-standings.png)
+![합성 한국어 화면: 재대결 출전 준비](assets/screenshot-online-rematch.png)
 
 ## 라이선스와 고지
 

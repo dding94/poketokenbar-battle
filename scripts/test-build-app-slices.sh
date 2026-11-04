@@ -65,7 +65,7 @@ for layout in shared distinct; do
     cp "$ROOT"/engine/archive/*.js "$repo/engine/archive/"
     touch "$repo/assets/AppIcon.icns" "$repo/engine/LICENSE.pokemon-showdown" "$repo/scripts/battle.entitlements"
     if ! PATH="$TEST_DIR/bin:$PATH" FIXTURE_REPO="$repo" OUTPUT_LAYOUT="$layout" FAKE_LOG="$repo/calls.log" \
-         TMPDIR="$repo/tmp" PTB_SKIP_INSTALL=1 PTB_NATIVE_ARCH_ONLY=0 PTB_REQUIRE_STABLE_SIGN=0 \
+         TMPDIR="$repo/tmp" PTB_RELEASE_VERSION=9.8.7 PTB_SKIP_INSTALL=1 PTB_NATIVE_ARCH_ONLY=0 PTB_REQUIRE_STABLE_SIGN=0 \
          bash "$repo/scripts/build-app.sh" > "$repo/build.log" 2>&1; then
         cat "$repo/build.log" >&2
         echo "FAIL: $layout output layout must assemble both original architectures" >&2
@@ -73,6 +73,8 @@ for layout in shared distinct; do
     fi
     grep -qx 'combined:arm64 x86_64' "$repo/calls.log"
     [[ "$(cat "$repo/build/PokeTokenBar Battle.app/Contents/MacOS/PokeTokenBarBattle")" == 'arm64 x86_64' ]]
+    grep -q '<key>CFBundleShortVersionString</key><string>9.8.7</string>' "$repo/build/PokeTokenBar Battle.app/Contents/Info.plist"
+    grep -qx 'VERSION="2.5.6"' "$repo/scripts/build-app.sh"
     ! grep -Eq '^pkill |/Applications' "$repo/calls.log"
     [[ -z "$(ls -A "$repo/tmp")" ]] || { echo 'FAIL: temporary slices were not removed' >&2; exit 1; }
     echo "PASS: $layout outputs preserve both slices, skip installation, and clean temporary files"

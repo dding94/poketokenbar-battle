@@ -1,64 +1,20 @@
 ---
-summary: "릴리스 실행 절차 — 문서·에셋 갱신 의무, 스크린샷 재생성 방법, release.sh 게이트의 함정."
+summary: "포크 릴리스 준비·검증·별도 승인 게시 절차. 원본 설치/tap/Pages를 사용하지 않는다."
 read_when:
-  - 버전을 배포할 때 (자연어 트리거 포함: "배포해줘", "릴리스 올려줘", "패치 배포")
-  - release.sh 가 문서·에셋 경고나 하드 게이트로 중단됐을 때
-  - UI 를 바꿔 스크린샷·랜딩을 갱신해야 할 때
+  - 릴리스를 준비하거나 게시할 때
+  - release.sh의 문서·에셋·식별·서명 게이트에 막혔을 때
 ---
 
-# 릴리스 실행 절차
+# PokeTokenBar Battle 릴리스 절차
 
-버전 결정 규칙과 트리거는 `CLAUDE.md` §릴리스에 있다. 이 문서는 그 다음의 *실행 세부*를 담는다.
-체크리스트 원본은 `RELEASE.md`.
+명령과 승인 경계의 기준은 [RELEASE.md](../../RELEASE.md)다. 이 포크의 공개 버전·실제 서명 신원·게시 대상은 아직 별도 확인이 필요하다. PR 12 ad-hoc 개발 ZIP은 공개 릴리스가 아니다.
 
-## 1. 문서·이미지 갱신 (매 릴리스 필수 — "할까요?" 묻지 말고 무조건 한다)
+1. `./scripts/release.sh --check-only`로 로컬 포크 식별값과 커밋된 문서/이미지 변경을 확인한다. 종료 1/2를 무시하거나 통과로 보고하지 않는다. 0도 실제 두 맥·Free 운영·서명 신뢰·tap 존재를 확인했다는 뜻은 아니다.
+2. 영어 노트 템플릿의 New / Fixed / Other / Contributors와 Install / Upgrade를 채우고 포함 PR/직접 커밋의 실제 외부 기여자를 대조한다. `PTB_NOTES_FILE`, `PTB_CONTRIBUTORS_FILE`을 전달해 `--prepare <version>`을 실행한다. 이 경로는 feature 브랜치에서 사용할 수 있으며 빌드·서명·GitHub 조회·설치·키 생성·tracked 버전 변경·commit/push/tag·Release/tap/Pages 변경을 하지 않는다.
+3. 사용자가 로컬 릴리스 빌드를 요청한 경우에만 기존 승인 인증서 이름과 공개 leaf SHA-1을 `CODESIGN_IDENTITY`, `PTB_EXPECTED_LEAF`로 지정해 `--prepare-build <version>`을 쓴다. test-gate, 설치 없는 universal 빌드, 포크 bundle/LaunchAgent/설치 경로·버전·각 arch의 minOS 15.0·strict signature·실제 공개 인증서 leaf·JIT·엔진 해시를 검사한다. 결과는 `build/release/PokeTokenBarBattle.zip`과 실제 ZIP SHA-256이 든 cask preview다. tracked VERSION은 바꾸지 않는다. 실패한 재빌드는 이전 ZIP/preview를 지워 낡은 결과를 현재 결과로 오인하지 않게 한다.
+4. README.md/ko/ja의 요구사항·현재 상태·이미지 참조와 새 화면의 실제/명시된 합성 이미지를 검토한다. 원본 릴리스 링크는 출처·형식 참조에만 사용하며 설치 명령으로 사용하지 않는다. 포크 랜딩이 확정되지 않은 상태에서 upstream gh-pages를 수정/푸시하거나 새 리소스를 만들지 않는다.
+5. 버전, 노트 요약, 정확한 ZIP/hash, 서명 종류, 게시 대상, 기존 fork tap/cask와 남은 인수 결과를 보여준 뒤 외부 게시를 별도로 승인받는다. 자체 서명은 Developer ID/공증이나 Gatekeeper/회사 정책 통과를 증명하지 않는다. 인증서 재생성으로 승인 문제를 해결하지 않는다.
 
-`./scripts/release.sh --check-only` 로 경고를 확인한 뒤 아래를 모두 반영한다.
+게시 형식 `release.sh <version>`은 `PTB_FORK_RELEASE_READY=1`, 깨끗한 main, 사전 검증된 노트/서명 및 기존 포크 cask를 요구한다. tap이 없거나 fork URL/checksum/macOS15/app 템플릿과 다르면 빌드 전에 차단한다. 빌드도 항상 `PTB_SKIP_INSTALL=1`이며 성공 후에만 tracked 버전 변경→commit/push→GitHub Release→동일 ZIP 기반 cask 버전/SHA 갱신을 수행한다. tap 생성·Pages 변경은 하지 않는다. 이 경로를 준비 작업 중 실행하지 않는다.
 
-- **README.md/ko/ja**: 기능 목록·how-it-works·스크린샷 참조.
-- **랜딩(gh-pages orphan 브랜치) — 필수.** `git worktree add /tmp/ptb-ghpages gh-pages` → `index.html`
-  기능 카드(f#) + i18n 사전(en/ko/ja 동시·키 정합) 갱신 → 커밋 → `git push origin gh-pages` →
-  `git worktree remove`. (Pages 자동 재빌드. 커밋은 gh-pages log 모방 = `landing:` 프리픽스.)
-- **스크린샷(`assets/`)**: UI(`Sources/PokeTokenBar/UI/`) 변경 시 재생성. 기존 방식 = **HTML 렌더**
-  (팝오버 라이브 캡처 아님) — Chrome `--headless --screenshot --force-device-scale-factor=2` 로 다크
-  팝오버를 720px PNG 로 그린다. 애니 GIF(home)는 프레임 합성 후 `gifsicle -O3 --lossy` 로 최적화
-  (PIL 재인코딩 단독은 용량 팽창 주의). 언어별 이미지(`settings.png`/`-ko`/`-ja` 등) 각 README 참조.
-- homebrew-tap cask caveat.
-
-### 게이트의 함정
-
-- `release.sh` 문서검토는 *커밋된* 상태를 비교 → 스크린샷을 스테이징만 하면 경고 프롬프트가
-  여전히 뜬다. 갱신을 미리 커밋한다. 릴리스 커밋에는 이미 스테이징된 다른 변경도 함께 담기므로 대상도 확인한다.
-- **신규 기능 = 신규 에셋 (하드 게이트, 프롬프트로 못 넘김).** 직전 태그 이후 `Sources/**/UI/` 를 건드린
-  `feat:` 커밋이 있는데 `assets/` 에 **새로 추가된** 파일이 없으면 `release.sh` 가 중단한다
-  (**예외 없음** — 통과시키려면 에셋을 만들거나 커밋 타입을 바꿔야 한다). 기존 staleness 검사는 "에셋이 하나라도 바뀌었나"만
-  보기 때문에 **기존 스크린샷만 다시 그려도 통과**한다 — 2.5.0 에서 플로팅 펫이 이미지 없이 나간 경로가
-  정확히 이것이다(`settings.png` 를 갱신해 둔 탓에 조용히 통과). 갱신(stale)과 커버리지(신규)는 다른 질문이다.
-
-## 2. 실행
-
-먼저 `RELEASE.md`의 릴리스 노트·기여자 절차에 따라 준비한다.
-
-- `release-notes-template.md`를 복사하고 v2.5.3처럼 영어 New / Fixed / Other / Contributors 및
-  Install / Upgrade를 작성한다. 필수 섹션을 지우거나 `Release vX.Y.Z` 한 줄로 대체하지 않는다.
-- 직전 공개 릴리스 태그부터 배포 대상까지의 PR·직접 커밋을 확인해 외부 기여자 목록을 만든다.
-  PR 작성자와 실제 공동기여자를 빠짐없이 확인하고 `PTB_CONTRIBUTORS_FILE`과 노트의 Contributors를 맞춘다.
-  기존 릴리스 목록 재사용이나 날짜만으로 범위를 정하는 방식은 쓰지 않는다.
-- 실제 공동작업이 확인된 릴리스 준비 커밋만 `PTB_COAUTHORS_FILE`에 참여자의 이름·이메일을 지정한다.
-  기본은 없음이며 Claude/Codex 등 특정 이름을 자동으로 붙이지 않는다.
-- 노트 원문과 기여자 목록 검사를 마친 뒤 적용 버전과 노트 요약을 사용자에게 보여준다.
-
-그 다음 반드시 `main` 브랜치에서:
-
-```bash
-# 직전 릴리스 이후 변경을 요약해 노트 파일 작성
-PTB_NOTES_FILE=/tmp/ptb-notes.md PTB_CONTRIBUTORS_FILE=/tmp/ptb-contributors.txt ./scripts/release.sh <version>
-```
-
-스크립트가 노트·Contributors 검증 → test-gate → 문서검토 → 범프 → 빌드검증 → 커밋·push →
-GitHub Release → cask → Pages를 순서대로 수행한다. 빌드 단계에서 기존 로컬 앱 종료·교체도 수행한다.
-노트나 기여자가 누락되면 앱 교체·push 전에 중단하며, 게시에는 검증한 노트 파일을 그대로 사용한다.
-
-## 3. 검증
-
-완료 후 `brew upgrade --cask poke-token-bar` 로 실제 업그레이드 동작을 확인한다.
+설치/업그레이드와 실제 복구 시험은 별도 승인 범위다. fork 앱과 `PokeTokenBarBattle` 상태를 비공개로 백업하고 원본 `/Applications/PokeTokenBar.app`을 교체하지 않는다. 구체적인 백업/rollback 대상과 두 맥·무료 한도·복구 미검증 범위는 RELEASE.md와 기존 AI_HANDOFF/BATTLE_PLAN에서 추적한다. 공개/설치가 안 된 상태에 미래 Homebrew 명령을 지금 사용할 수 있는 것처럼 안내하지 않는다.

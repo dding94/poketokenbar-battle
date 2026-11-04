@@ -23,6 +23,10 @@ When there are none, write exactly: No external contributors in this release. --
 
 ---
 
-**Install:** `brew install --cask chattymin/tap/poke-token-bar` — or download `PokeTokenBar.zip` below.
+**Install:** Download `PokeTokenBarBattle.zip` from this fork release, verify the published checksum, and move `PokeTokenBar Battle.app` to `/Applications`.
 
-**Upgrade:** `brew upgrade --cask poke-token-bar`
+**Upgrade:** Back up `~/Library/Application Support/PokeTokenBarBattle` and replace only `/Applications/PokeTokenBar Battle.app`.
+
+<!-- State the approved signing/notarization status and remaining manual checks.
+Add a fork Homebrew command only after the fork cask is published and verified.
+Never use the upstream app, ZIP, cask, or install path. -->
