@@ -124,7 +124,7 @@ actor OnlineBattleConnection: OnlineBattleConnecting {
         receiver?.cancel(); receiver = nil
         let old = socket; socket = nil
         connectionId = nil; trainerId = nil; groupId = nil; nextPing = nil; openedAt = nil
-        state = .connecting; nextAction = clock.now() + 15
+        state = .connecting; nextAction = clock.now() + OnlineBattleProtocolPing.timeout
         await old?.close()
         guard epoch == generation else { return }
         await publish()
@@ -132,7 +132,7 @@ actor OnlineBattleConnection: OnlineBattleConnecting {
         var parts = URLComponents(url: origin.url, resolvingAgainstBaseURL: false)!
         parts.scheme = origin.url.scheme == "http" ? "ws" : "wss"; parts.path = "/v1/connect"
         var request = URLRequest(url: parts.url!)
-        request.timeoutInterval = 15; request.setValue("Bearer " + accessKey, forHTTPHeaderField: "Authorization")
+        request.timeoutInterval = OnlineBattleProtocolPing.timeout; request.setValue("Bearer " + accessKey, forHTTPHeaderField: "Authorization")
         do {
             let candidate = try await driver.connect(request)
             guard epoch == generation, state == .connecting else { await candidate.close(); return }
@@ -245,6 +245,63 @@ actor OnlineBattleConnection: OnlineBattleConnecting {
     }
 }
 
+/// A missing control-frame pong must not leave the connection ticker suspended forever.
+/// The single-resume gate does not wait for URLSession's callback to cooperate with cancellation.
+enum OnlineBattleProtocolPing {
+    static let timeout: TimeInterval = 15 // Same boundary as the WebSocket handshake.
+    static func wait(sleep: @escaping @Sendable (TimeInterval) async throws -> Void = { try await Task.sleep(for: .seconds($0)) },
+                     send: @Sendable (@escaping @Sendable (Error?) -> Void) -> Void,
+                     cancel: @escaping @Sendable () -> Void) async throws {
+        let completion = PingCompletion()
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                guard completion.install(continuation) else { return }
+                let timer = Task {
+                    do { try await sleep(timeout) } catch { return }
+                    completion.finish(.failure(URLError(.timedOut)), beforeResume: cancel)
+                }
+                completion.setTimer(timer)
+                send { error in _ = completion.finish(error.map { .failure($0) } ?? .success(())) }
+            }
+        } onCancel: {
+            completion.finish(.failure(CancellationError()), beforeResume: cancel)
+        }
+    }
+    private final class PingCompletion: @unchecked Sendable {
+        private let lock = NSLock()
+        private var continuation: CheckedContinuation<Void, Error>?
+        private var result: Result<Void, Error>?
+        private var timer: Task<Void, Never>?
+        func install(_ value: CheckedContinuation<Void, Error>) -> Bool {
+            let finished: Result<Void, Error>? = lock.withLock {
+                if let result { return result }
+                continuation = value; return nil as Result<Void, Error>?
+            }
+            if let finished { value.resume(with: finished); return false }
+            return true
+        }
+        func setTimer(_ value: Task<Void, Never>) {
+            let finished = lock.withLock {
+                if result != nil { return true }
+                timer = value; return false
+            }
+            if finished { value.cancel() }
+        }
+        @discardableResult
+        func finish(_ value: Result<Void, Error>, beforeResume: () -> Void = {}) -> Bool {
+            let pending: (CheckedContinuation<Void, Error>?, Task<Void, Never>?)? = lock.withLock {
+                guard result == nil else { return nil }
+                result = value
+                let pending = (continuation, timer); continuation = nil; timer = nil
+                return pending
+            }
+            guard let pending else { return false }
+            pending.1?.cancel(); beforeResume(); pending.0?.resume(with: value)
+            return true
+        }
+    }
+}
+
 struct OnlineBattleURLSessionSocketDriver: OnlineBattleSocketDriver {
     func connect(_ request: URLRequest) async throws -> any OnlineBattleSocket { OnlineBattleURLSessionSocket(request: request) }
 }
@@ -282,7 +339,11 @@ private final class OnlineBattleURLSessionSocket: NSObject, OnlineBattleSocket, 
             }
         }
     }
-    func sendPing() async throws { try await task.send(.string("ping")) }
+    func sendPing() async throws {
+        let task = task!
+        try await OnlineBattleProtocolPing.wait(send: { completion in task.sendPing(pongReceiveHandler: completion) },
+            cancel: { task.cancel(with: .goingAway, reason: nil) })
+    }
     func close() async {
         receiveTask?.cancel(); task.cancel(with: .normalClosure, reason: nil); session.invalidateAndCancel(); continuation.finish()
     }

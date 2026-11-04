@@ -57,6 +57,15 @@ private actor OnlineSleepGate {
     func release() { continuation?.resume(); continuation = nil }
     func close() { closed = true; continuation?.resume(throwing: CancellationError()); continuation = nil }
 }
+private final class OnlinePingProbe: @unchecked Sendable {
+    private let lock = NSLock()
+    private var callback: (@Sendable (Error?) -> Void)?
+    private var cancelled = 0
+    func send(_ value: @escaping @Sendable (Error?) -> Void) { lock.withLock { callback = value } }
+    func complete(_ error: Error?) { let value = lock.withLock { callback }; value?(error) }
+    func cancel() { lock.withLock { cancelled += 1 } }
+    var cancelCount: Int { lock.withLock { cancelled } }
+}
 @MainActor
 final class OnlineBattleConnectionTests: XCTestCase {
     private let hello = #"{"v":1,"type":"hello","trainerId":"synthetic-trainer","groupId":"synthetic-group","connectionId":"synthetic-connection","online":[]}"#
@@ -79,6 +88,47 @@ final class OnlineBattleConnectionTests: XCTestCase {
         let count = await events.refreshCount
         XCTAssertEqual(count, 1)
         await connection.stop()
+    }
+    func testProtocolPingCompletesOnPongAndPropagatesSocketError() async throws {
+        for fails in [false, true] {
+            let gate = OnlineSleepGate(), probe = OnlinePingProbe()
+            let ping = Task { try await OnlineBattleProtocolPing.wait(sleep: { delay in
+                XCTAssertEqual(delay, 15); try await gate.sleep()
+            }, send: { probe.send($0) }, cancel: { probe.cancel() }) }
+            await gate.waitUntilSleeping()
+            probe.complete(fails ? URLError(.networkConnectionLost) : nil)
+            do { try await ping.value; XCTAssertFalse(fails) }
+            catch { XCTAssertTrue(fails); XCTAssertEqual((error as? URLError)?.code, .networkConnectionLost) }
+            probe.complete(nil) // A duplicate/late callback cannot resume twice.
+            XCTAssertEqual(probe.cancelCount, 0); await gate.close()
+        }
+    }
+    func testAlreadyCancelledProtocolPingDoesNotSendOrArmTimer() async throws {
+        let probe = OnlinePingProbe()
+        let ping = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            try await OnlineBattleProtocolPing.wait(sleep: { _ in XCTFail("Cancelled ping must not arm a timeout") },
+                send: { _ in XCTFail("Cancelled ping must not send a frame") }, cancel: { probe.cancel() })
+        }
+        do { try await ping.value; XCTFail("Expected cancellation") }
+        catch { XCTAssertTrue(error is CancellationError) }
+        XCTAssertEqual(probe.cancelCount, 1)
+    }
+    func testProtocolPingTimeoutAndCancellationIgnoreLatePong() async throws {
+        for cancel in [false, true] {
+            let gate = OnlineSleepGate(), probe = OnlinePingProbe()
+            let ping = Task { try await OnlineBattleProtocolPing.wait(sleep: { _ in try await gate.sleep() },
+                send: { probe.send($0) }, cancel: { probe.cancel() }) }
+            await gate.waitUntilSleeping()
+            if cancel { ping.cancel() } else { await gate.release() }
+            do { try await ping.value; XCTFail("Ping must terminate when no pong can arrive") }
+            catch {
+                if cancel { XCTAssertTrue(error is CancellationError) }
+                else { XCTAssertEqual((error as? URLError)?.code, .timedOut) }
+            }
+            probe.complete(nil)
+            XCTAssertEqual(probe.cancelCount, 1); await gate.close()
+        }
     }
     func testBattleNotificationsDoNotRequestFullAccountRefresh() async throws {
         let (connection, _, _, events) = try await setup()
