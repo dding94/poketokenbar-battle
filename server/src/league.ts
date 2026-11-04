@@ -1,3 +1,5 @@
+import { AlarmScheduler } from "./alarm-scheduler";
+import { migratePackedBattles } from "./battle-packing";
 import { migrateStandings, readStandings, type Standings } from "./standings";
 import { Battles } from "./battles";
 import type { BattleEffect } from "./battle-effects";
@@ -24,7 +26,7 @@ import { type GroupChange, KEY_HASH_HEADER, Realtime } from "./realtime";
 
 // The League never sees a raw key or code: every *Hash argument is computed by the Worker.
 
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 const MINUTE = 60_000;
 const DAY = 24 * 60 * MINUTE;
 export const ATTEMPT_LIMIT = 10;
@@ -142,6 +144,7 @@ export class League extends DurableObject<Env> {
   private readonly access: GroupAccess;
   private readonly realtime: Realtime;
   private readonly battles: Battles;
+  private readonly scheduler: AlarmScheduler;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -149,7 +152,9 @@ export class League extends DurableObject<Env> {
     this.access = new GroupAccess(this.sql);
     this.realtime = new Realtime(ctx);
     this.migrate();
-    this.battles = new Battles(this.sql, this.access, this.realtime);
+    this.battles = new Battles(this.sql, this.access, this.realtime, at => this.scheduler.changed(at));
+    this.scheduler = new AlarmScheduler(ctx.storage, () => this.nextAlarm(), () => ctx.abort("alarm scheduling failed"));
+    void ctx.blockConcurrencyWhile(() => this.scheduler.initialize());
   }
 
   // ---- schema ----
@@ -166,6 +171,7 @@ export class League extends DurableObject<Env> {
       if (version < 1) for (const statement of SCHEMA_V1) this.sql.exec(statement);
       if (version < 2) for (const statement of BATTLE_SCHEMA) this.sql.exec(statement);
       if (version < 3) migrateStandings(this.sql);
+      if (version < 4) migratePackedBattles(this.sql);
       this.sql.exec(
         "INSERT INTO meta (key, value) VALUES ('schema_version', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
         String(SCHEMA_VERSION),
@@ -204,15 +210,16 @@ export class League extends DurableObject<Env> {
   }
 
   battle(input: { keyHash: string; id: string | null; action: BattleAction | "get" | "list"; body: BattleInput; before?: number }): Result<unknown> {
+    const now = this.clock();
     return this.tx((after) => {
       const auth = this.access.actor(input.keyHash, "member");
       if (!auth.ok) return auth;
       const effects: BattleEffect[] = [];
-      this.battles.expire(this.clock(), effects);
-      const result = this.battles.dispatch(auth.value, input.id, input.action, input.body, this.clock(), effects, input.before);
+      if (this.scheduler.due(now)) this.battles.expire(now, effects);
+      const result = this.battles.dispatch(auth.value, input.id, input.action, input.body, now, effects, input.before);
       after.push(...effects.map(effect => ({ kind: "battle" as const, effect })));
       return result;
-    });
+    }, now);
   }
 
   standings(input: { keyHash: string }): Result<Standings> {
@@ -562,14 +569,14 @@ export class League extends DurableObject<Env> {
 
   /** All persisted deadlines share the DO's single alarm. */
   override alarm(): void {
+    const now = this.clock();
     this.tx((after) => {
-      this.sql.exec("DELETE FROM meta WHERE key = 'attempts_alarm_at'");
-      this.purgeAttempts(this.clock());
+      this.purgeAttempts(now);
       const effects: BattleEffect[] = [];
-      this.battles.expire(this.clock(), effects);
+      this.battles.expire(now, effects);
       after.push(...effects.map(effect => ({ kind: "battle" as const, effect })));
       return ok(null);
-    });
+    }, now, true);
   }
 
   // ---- internals ----
@@ -577,10 +584,13 @@ export class League extends DurableObject<Env> {
   /** A failed Result does NOT roll back SQL. Validate before writes; throw to roll back.
    * Notifications describe committed transitions (including expiry before a rejected action).
    */
-  private tx<T>(fn: (after: Effect[]) => Result<T>): Result<T> {
+  private tx<T>(fn: (after: Effect[]) => Result<T>, now = this.clock(), consumed = false): Result<T> {
     const after: Effect[] = [];
-    const result = this.ctx.storage.transactionSync(() => fn(after));
-    this.scheduleAlarm();
+    this.scheduler.begin(now, consumed);
+    let result: Result<T>;
+    try { result = this.ctx.storage.transactionSync(() => fn(after)); }
+    catch (error) { this.scheduler.discard(); throw error; }
+    this.scheduler.finish();
     for (const effect of after) {
       if (effect.kind === "revoke") this.realtime.revoke(effect.trainerId);
       else if (effect.kind === "group_changed") this.realtime.groupChanged(effect.groupId, effect.change);
@@ -752,6 +762,7 @@ export class League extends DurableObject<Env> {
 
   private failAttempt(ipHash: string, kind: AttemptKind, now: number, code: Fail["code"]): Fail {
     this.sql.exec("INSERT INTO attempts (ip_hash, kind, at) VALUES (?, ?, ?)", ipHash, kind, now);
+    this.scheduler.changed(now + ATTEMPT_RETENTION_MS + 1000);
     return fail(code);
   }
 
@@ -759,18 +770,11 @@ export class League extends DurableObject<Env> {
     this.sql.exec("DELETE FROM attempts WHERE at <= ?", now - ATTEMPT_RETENTION_MS);
   }
 
-  /** Schedule the earliest battle or attempt deadline; SQL metadata avoids redundant writes. */
-  private scheduleAlarm(): void {
-    const oldest = this.sql.exec<{ at: number | null }>("SELECT MIN(at) AS at FROM attempts").toArray()[0]?.at ?? null;
+  /** Full reconciliation only on activation, alarm delivery, or a late request. */
+  private nextAlarm(): number | null {
+    const oldest = this.sql.exec<{ at: number | null }>("SELECT MIN(at) AS at FROM attempts").one().at;
     const attempt = oldest === null ? null : oldest + ATTEMPT_RETENTION_MS + 1000;
     const battle = this.battles.store.earliest();
-    const at = attempt === null ? battle : battle === null ? attempt : Math.min(attempt, battle);
-    const stored = this.sql.exec<{ value: string }>("SELECT value FROM meta WHERE key='attempts_alarm_at'").toArray()[0]?.value;
-    if (at === null) {
-      if (stored !== undefined) { this.sql.exec("DELETE FROM meta WHERE key='attempts_alarm_at'"); void this.ctx.storage.deleteAlarm(); }
-    } else if (stored !== String(at)) {
-      this.sql.exec("INSERT INTO meta(key,value) VALUES('attempts_alarm_at',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", String(at));
-      void this.ctx.storage.setAlarm(at);
-    }
+    return attempt === null ? battle : battle === null ? attempt : Math.min(attempt, battle);
   }
 }

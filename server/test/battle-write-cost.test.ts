@@ -59,14 +59,14 @@ it.each(["p1", "p2"] as const)("stores second %s choice and pair in one write wi
   const result = await runInDurableObject(leagueStub(), (_instance, state) => state.storage.transactionSync(() => {
     const sql = state.storage.sql, store = new BattleStore(sql), relay = new BattleRelay(store), b = store.get(f.view.battleId)!;
     b.state = "RUNNING"; b.startedAt = 1000;
-    const effects: BattleEffect[] = []; relay.open(b, 1000, effects);
+    const effects: BattleEffect[] = []; relay.open(b, 1000, effects); store.put(b);
     const first = second === "p1" ? "p2" : "p1";
-    const firstWrites = writes(sql, () => expect(relay.choice(b, first, 1, "move 3", 1001, effects)).toEqual({ ok: true, value: false }));
-    const privateRound = store.round(b.battleId, 1), privateJournal = store.journal(b.battleId), privateEffects = [...effects];
-    const secondWrites = writes(sql, () => expect(relay.choice(b, second, 1, "move 2", 1002, effects)).toEqual({ ok: true, value: true }));
+    const firstWrites = writes(sql, () => { expect(relay.choice(b, first, 1, "move 3", 1001, effects)).toEqual({ ok: true, value: true }); store.put(b); });
+    const privateRound = store.round(b, 1), privateJournal = store.journal(b), privateEffects = [...effects];
+    const secondWrites = writes(sql, () => { expect(relay.choice(b, second, 1, "move 2", 1002, effects)).toEqual({ ok: true, value: true }); store.put(b); });
     const retryWrites = writes(sql, () => expect(relay.choice(b, second, 1, "move 2", 1003, effects)).toEqual({ ok: true, value: false }));
     const conflict = relay.choice(b, second, 1, "move 4", 1003, effects);
-    return { firstWrites, secondWrites, retryWrites, privateRound, privateJournal, privateEffects, conflict, journal: store.journal(b.battleId), effects };
+    return { firstWrites, secondWrites, retryWrites, privateRound, privateJournal, privateEffects, conflict, journal: store.journal(b), effects };
   }));
   expect(result.privateRound![second]).toBeNull(); expect(result.privateRound!.pair).toBeNull();
   expect(result.privateJournal).toEqual([]); expect(result.privateEffects).toEqual([]);
@@ -75,18 +75,18 @@ it.each(["p1", "p2"] as const)("stores second %s choice and pair in one write wi
   expect(result.journal[0]).toMatchObject({ [second]: { kind: "move", slot: 2 }, releasedAt: 1002 });
 });
 
-it("inserts auto round and policy pair together and does not write on duplicate advance", async () => {
+it("stores auto round and policy pair together and does not write on duplicate advance", async () => {
   const f = await room("auto");
   const result = await runInDurableObject(leagueStub(), (_instance, state) => state.storage.transactionSync(() => {
     const sql = state.storage.sql, store = new BattleStore(sql), relay = new BattleRelay(store), b = store.get(f.view.battleId)!;
     b.state = "RUNNING"; b.startedAt = 1000;
-    const effects: BattleEffect[] = [];
-    const firstWrites = writes(sql, () => relay.open(b, 1000, effects));
-    const nextWrites = writes(sql, () => expect(relay.advance(b, 1, 1001, effects)).toEqual({ ok: true, value: true }));
+    const effects: BattleEffect[] = []; store.put(b);
+    const firstWrites = writes(sql, () => { relay.open(b, 1000, effects); store.put(b); });
+    const nextWrites = writes(sql, () => { expect(relay.advance(b, 1, 1001, effects)).toEqual({ ok: true, value: true }); store.put(b); });
     const retryWrites = writes(sql, () => expect(relay.advance(b, 1, 1002, effects)).toEqual({ ok: true, value: false }));
-    return { firstWrites, nextWrites, retryWrites, effects, journal: store.journal(b.battleId), round: store.round(b.battleId, 2) };
+    return { firstWrites, nextWrites, retryWrites, effects, journal: store.journal(b), round: store.round(b, 2) };
   }));
-  expect(result.firstWrites).toBe(2); expect(result.nextWrites).toBe(2); expect(result.retryWrites).toBe(0);
+  expect(result.firstWrites).toBe(1); expect(result.nextWrites).toBe(1); expect(result.retryWrites).toBe(0);
   expect(result.journal).toHaveLength(2); expect(result.effects).toHaveLength(2);
   expect(result.journal[1]).toEqual({ roundSeq: 2, p1: { kind: "policy" }, p2: { kind: "policy" }, releasedAt: 1001 });
   expect(result.round).toMatchObject({ deadline: null, p1: null, p2: null });

@@ -27,6 +27,7 @@ async function migrate(corrupt: string | null = null) {
         state: "COMPLETED",
         result,
         createdAt: 100,
+        roundSeq: 0, startedAt: null, mode: "manual",
         reportedAt: 100,
       };
       sql.exec(
@@ -80,7 +81,7 @@ async function migrate(corrupt: string | null = null) {
 it("migrates v2 using second report order, preserving aggregates and seeding above all reports", async () => {
   const r = await migrate();
   expect(r.failed).toBe(false);
-  expect(r.meta).toContainEqual({ key: "schema_version", value: "3" });
+  expect(r.meta).toContainEqual({ key: "schema_version", value: "4" });
   expect(r.meta).toContainEqual({ key: "battle_completion_sequence", value: "5" });
   expect(r.records).toEqual(
     r.before.map((row) => ({

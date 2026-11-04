@@ -38,7 +38,7 @@ describe("League storage", () => {
   it("keeps a schema version", async () => {
     await createGroup();
     const tables = await dumpTables();
-    expect(tables.meta).toContainEqual({ key: "schema_version", value: "3" });
+    expect(tables.meta).toContainEqual({ key: "schema_version", value: "4" });
   });
 
   it("holds no raw secret, IP or departed email anywhere", async () => {

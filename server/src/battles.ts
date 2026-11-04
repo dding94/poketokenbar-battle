@@ -1,3 +1,4 @@
+import { emptyRelay } from "./battle-packing";
 import { battleChanged, type BattleEffect } from "./battle-effects";
 import { BattleResults } from "./battle-results";
 import { battleView } from "./battle-view";
@@ -12,7 +13,7 @@ export class Battles {
   readonly store: BattleStore;
   private readonly relay: BattleRelay;
   private readonly results: BattleResults;
-  constructor(sql: SqlStorage, private readonly access: GroupAccess, private readonly realtime: Realtime) { this.store = new BattleStore(sql); this.relay = new BattleRelay(this.store); this.results = new BattleResults(this.store); }
+  constructor(sql: SqlStorage, private readonly access: GroupAccess, private readonly realtime: Realtime, changedDeadline?: (at: number | null) => void) { this.store = new BattleStore(sql, changedDeadline); this.relay = new BattleRelay(this.store); this.results = new BattleResults(this.store); }
   dispatch(actor: Actor, id: string | null, action: BattleAction | "get" | "list", input: BattleInput, now: number, after: BattleEffect[], before = Number.MAX_SAFE_INTEGER): Result<unknown> {
     if (action === "list") {
       const rows = this.store.list(actor.trainer.id, before), page = rows.slice(0, 100);
@@ -81,7 +82,7 @@ export class Battles {
     if (previous) return previous.payload === payload ? ok(battleView(this.store, this.store.get(previous.battle_id)!, actor.trainer.id)) : fail("idempotency_conflict");
     const target = this.access.target(actor, input.targetTrainerId!, { activeOnly: true }); if (!target.ok) return target;
     if (this.store.busy(actor.trainer.id, input.snapshot!.instanceId)) return fail("instance_busy");
-    const b: Battle = { battleId: `bt_${crypto.randomUUID().replaceAll("-", "")}`, groupId: actor.groupId, p1: actor.trainer.id, p2: target.value.id, state: "PENDING", revision: 1, mode: input.mode!, createdAt: now, expiresAt: now + CHALLENGE_MS, startedAt: null, reportedAt: null, confirmed: false, snapshots: { p1: input.snapshot!, p2: null }, ready: {}, starts: {}, config: null, roundSeq: 0, result: null, reason: null, rematchOf };
+    const b: Battle = { relay: emptyRelay(), battleId: `bt_${crypto.randomUUID().replaceAll("-", "")}`, groupId: actor.groupId, p1: actor.trainer.id, p2: target.value.id, state: "PENDING", revision: 1, mode: input.mode!, createdAt: now, expiresAt: now + CHALLENGE_MS, startedAt: null, reportedAt: null, confirmed: false, snapshots: { p1: input.snapshot!, p2: null }, ready: {}, starts: {}, config: null, roundSeq: 0, result: null, reason: null, rematchOf };
     this.store.put(b);
     this.store.sql.exec("INSERT INTO battle_requests(trainer_id,request_id,payload,battle_id) VALUES(?,?,?,?)", actor.trainer.id, input.requestId!, payload, b.battleId);
     after.push(battleChanged(b)); return ok(battleView(this.store, b, actor.trainer.id));

@@ -109,6 +109,6 @@ describe("battle rooms", () => {
       }); new League(state, {} as Env);
     });
     const after = await dumpTables(); for (const table of ["trainers", "groups", "invites", "attempts"]) expect(after[table]).toEqual(before[table]);
-    expect(after.meta).toContainEqual({ key: "schema_version", value: "3" }); expect(after.battle_locks).toBeDefined();
+    expect(after.meta).toContainEqual({ key: "schema_version", value: "4" }); expect(after.battle_locks).toBeDefined();
   });
 });

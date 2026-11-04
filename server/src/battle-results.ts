@@ -16,7 +16,7 @@ export class BattleResults {
     if (own) return own.payload === payload ? ok(null) : fail("report_conflict");
     if (b.state !== "RUNNING" && b.state !== "REPORTED") return fail("invalid_state");
     if (b.state === "RUNNING") {
-      const round = this.store.round(b.battleId, b.roundSeq);
+      const round = this.store.round(b, b.roundSeq);
       if (report.terminalSeq !== b.roundSeq || !round?.pair) return fail("stale_round");
     }
     // No checks that can return fail remain after this first write.

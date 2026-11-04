@@ -1,3 +1,4 @@
+import { type PackedRelay, unpackPair } from "./battle-packing";
 import { canonical, type BattleMode, type Report, type Side, type Snapshot } from "./battle-input";
 export type BattleState = "PENDING" | "ACCEPTED" | "READY" | "RUNNING" | "REPORTED" | "COMPLETED" | "DECLINED" | "CANCELLED" | "EXPIRED" | "VOID";
 export const PRESTART = new Set<BattleState>(["PENDING", "ACCEPTED", "READY"]);
@@ -14,7 +15,7 @@ export interface FrozenConfig {
 }
 export interface Battle {
   battleId: string; groupId: string; p1: string; p2: string; state: BattleState; revision: number;
-  mode: BattleMode; createdAt: number; expiresAt: number; startedAt: number | null; reportedAt: number | null;
+  relay: PackedRelay; mode: BattleMode; createdAt: number; expiresAt: number; startedAt: number | null; reportedAt: number | null;
   confirmed: boolean; snapshots: { p1: Snapshot; p2: Snapshot | null };
   ready: Partial<Record<Side, ReadyAck>>; starts: Partial<Record<Side, string>>;
   config: FrozenConfig | null; roundSeq: number; result: Report | null; reason: string | null; rematchOf: string | null;
@@ -37,33 +38,36 @@ export const BATTLE_SCHEMA = [
 ];
 /** All methods are synchronous and run inside the League's transaction. */
 export class BattleStore {
-  constructor(readonly sql: SqlStorage) {}
+  constructor(readonly sql: SqlStorage, private readonly changedDeadline: (at: number | null) => void = () => {}) {}
   get(id: string): Battle | null { const row = this.sql.exec<StoredBattle>("SELECT data FROM battle_rooms WHERE id=?", id).toArray()[0]; return row ? JSON.parse(row.data) : null; }
   put(b: Battle): void {
-    const deadline = this.deadline(b);
-    // Read the persisted deadline inside the caller's transaction, after any round changes.
-    // UPSERT would consume an AUTOINCREMENT value even for an existing room.
-    const existing = this.sql.exec<{ deadline: number | null }>("SELECT deadline FROM battle_rooms WHERE id=?", b.battleId).toArray()[0];
+    const deadline = this.lifecycleDeadline(b), turn = b.state === "RUNNING" ? b.relay.current?.deadline ?? null : null;
+    const existing = this.sql.exec<{ deadline: number | null; state: string }>("SELECT state,deadline FROM battle_rooms WHERE id=?", b.battleId).toArray()[0];
     const data = JSON.stringify(b);
     if (!existing) {
-      this.sql.exec("INSERT INTO battle_rooms(id,group_id,p1,p2,state,deadline,data) VALUES(?,?,?,?,?,?,?)", b.battleId, b.groupId, b.p1, b.p2, b.state, deadline, data);
-    } else if (existing.deadline === deadline) {
-      // Omitting the indexed column avoids its write even when SQLite sees the same value.
-      this.sql.exec("UPDATE battle_rooms SET state=?,data=? WHERE id=?", b.state, data, b.battleId);
+      this.sql.exec("INSERT INTO battle_rooms(id,group_id,p1,p2,state,deadline,turn_deadline,data) VALUES(?,?,?,?,?,?,?,?)", b.battleId, b.groupId, b.p1, b.p2, b.state, deadline, turn, data);
     } else {
-      this.sql.exec("UPDATE battle_rooms SET state=?,deadline=?,data=? WHERE id=?", b.state, deadline, data, b.battleId);
+      // Never mention an unchanged indexed column, including partial-index predicates.
+      const columns = ["data=?", "turn_deadline=?"], values: SqlStorageValue[] = [data, turn];
+      if (existing.state !== b.state) { columns.push("state=?"); values.push(b.state); }
+      if (existing.deadline !== deadline) { columns.push("deadline=?"); values.push(deadline); }
+      this.sql.exec(`UPDATE battle_rooms SET ${columns.join(",")} WHERE id=?`, ...values, b.battleId);
     }
+    this.changedDeadline(turn === null ? deadline : deadline === null ? turn : Math.min(turn, deadline));
   }
-  deadline(b: Battle): number | null {
+  lifecycleDeadline(b: Battle): number | null {
     if (PRESTART.has(b.state)) return b.expiresAt;
     if (b.state === "REPORTED") return b.reportedAt! + REPORT_MS;
-    if (b.state !== "RUNNING") return null;
-    const expiry = b.startedAt! + REPORT_MS;
-    const round = this.round(b.battleId, b.roundSeq);
-    return round?.deadline != null && round.pair === null ? Math.min(expiry, round.deadline) : expiry;
+    return b.state === "RUNNING" ? b.startedAt! + REPORT_MS : null;
   }
-  earliest(): number | null { return this.sql.exec<{ at: number | null }>("SELECT MIN(deadline) AS at FROM battle_rooms WHERE deadline IS NOT NULL").toArray()[0]?.at ?? null; }
-  due(now: number): Battle[] { return this.sql.exec<StoredBattle>("SELECT data FROM battle_rooms WHERE deadline<=?", now).toArray().map(r => JSON.parse(r.data)); }
+  earliest(): number | null {
+    const life = this.sql.exec<{ at: number | null }>("SELECT MIN(deadline) AS at FROM battle_rooms WHERE deadline IS NOT NULL").one().at;
+    const turn = this.sql.exec<{ at: number | null }>("SELECT MIN(turn_deadline) AS at FROM battle_rooms WHERE state='RUNNING'").one().at;
+    return life === null ? turn : turn === null ? life : Math.min(life, turn);
+  }
+  due(now: number): Battle[] {
+    return this.sql.exec<StoredBattle>("SELECT data FROM battle_rooms WHERE deadline<=? UNION ALL SELECT data FROM battle_rooms WHERE state='RUNNING' AND turn_deadline<=? AND deadline>?", now, now, now).toArray().map(r => JSON.parse(r.data));
+  }
   forTrainer(id: string): Battle[] { return this.sql.exec<StoredBattle>("SELECT data FROM battle_rooms WHERE (p1=? OR p2=?) AND deadline IS NOT NULL", id, id).toArray().map(r => JSON.parse(r.data)); }
   list(id: string, before: number): StoredBattle[] { return this.sql.exec<StoredBattle>("SELECT seq,data FROM battle_rooms WHERE p1=? AND seq<? UNION ALL SELECT seq,data FROM battle_rooms WHERE p2=? AND seq<? ORDER BY seq DESC LIMIT 101", id, before, id, before).toArray(); }
   busy(trainerId: string, instanceId: string, except?: string): boolean {
@@ -77,6 +81,13 @@ export class BattleStore {
     return row?.payload === canonical(payload);
   }
   recordReceipt(b: Battle, actor: string, action: string, revision: number, payload: unknown): void { this.sql.exec("INSERT INTO battle_receipts(battle_id,actor,action,revision,payload) VALUES(?,?,?,?,?)", b.battleId, actor, action, revision, canonical(payload)); }
-  round(id: string, seq: number): Round | null { return this.sql.exec<Round>("SELECT battle_id,seq,deadline,p1,p2,pair FROM battle_rounds WHERE battle_id=? AND seq=?", id, seq).toArray()[0] ?? null; }
-  journal(id: string): Pair[] { return this.sql.exec<{ pair: string }>("SELECT pair FROM battle_rounds WHERE battle_id=? AND pair IS NOT NULL ORDER BY seq", id).toArray().map(r => JSON.parse(r.pair)); }
+  round(b: Battle, seq: number): Round | null {
+    const tuple = b.relay.pairs[seq - 1];
+    if (tuple) {
+      const pair = unpackPair(b, tuple, seq - 1);
+      return { battle_id: b.battleId, seq, deadline: null, p1: pair.p1.kind === "move" ? pair.p1.slot : null, p2: pair.p2.kind === "move" ? pair.p2.slot : null, pair: JSON.stringify(pair) };
+    }
+    return seq === b.roundSeq && b.relay.current ? { battle_id: b.battleId, seq, ...b.relay.current, pair: null } : null;
+  }
+  journal(b: Battle): Pair[] { return b.relay.pairs.map((tuple, index) => unpackPair(b, tuple, index)); }
 }
