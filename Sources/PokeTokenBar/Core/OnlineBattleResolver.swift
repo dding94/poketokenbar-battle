@@ -34,19 +34,33 @@ final class OnlineBattleResolver {
     private var engineID: String?
     private var invalidated = false
 
-    init(battle: OnlineBattleView, localTrainerID: String, engine: BattleEngine) throws {
+    /// Live matches continue to require the current engine; archived pins never broaden this entry point.
+    convenience init(battle: OnlineBattleView, localTrainerID: String, engine: BattleEngine) throws {
+        guard battle.config?.engineHash == BattleEngineManifest.sha256,
+              let entry = BattleEngineArchive.entry(for: BattleEngineManifest.sha256) else { throw Failure.invalidConfiguration }
+        try self.init(battle: battle, localTrainerID: localTrainerID, engine: engine, entry: entry)
+    }
+
+    /// Completed-only verification for replay or normal reconciliation. Live matches keep the strict initializer.
+    static func completedResolver(battle: OnlineBattleView, localTrainerID: String, engine: BattleEngine) throws -> OnlineBattleResolver {
+        guard battle.state == .completed, let hash = battle.config?.engineHash,
+              let entry = BattleEngineArchive.entry(for: hash) else { throw Failure.invalidConfiguration }
+        return try OnlineBattleResolver(battle: battle, localTrainerID: localTrainerID, engine: engine, entry: entry)
+    }
+
+    private init(battle: OnlineBattleView, localTrainerID: String, engine: BattleEngine,
+                 entry: BattleEngineArchive.Entry) throws {
         guard let localSide = battle.side(for: localTrainerID), battle.p1.trainerId != battle.p2.trainerId,
               !battle.battleId.isEmpty, let config = battle.config,
               [.ready, .running, .reported, .completed].contains(battle.state),
-              !config.readyToken.isEmpty, config.engineHash == BattleEngineManifest.sha256,
-              config.rulesVersion == BattleSnapshot.rules, config.policyVersion == BattleSnapshot.policy,
-              config.relayVersion == "relay-v1", config.seed.count == 4, config.seed.allSatisfy({ $0 <= 65535 }) else {
+              !config.readyToken.isEmpty, entry.accepts(config), engine.verifiedHash == entry.hash,
+              config.seed.count == 4, config.seed.allSatisfy({ $0 <= 65535 }) else {
             throw Failure.invalidConfiguration
         }
         self.initial = battle; self.config = config; self.localSide = localSide; self.engine = engine
         struct Version: Decodable { let engine: String; let adapter: String; let rules: String }
         let version: Version = try BattleJSON.decode(engine.call(.version))
-        guard version.engine == "@pkmn/sim@0.10.12", version.adapter == "1", version.rules == config.rulesVersion else {
+        guard version.engine == entry.engineVersion, version.adapter == entry.adapterVersion, version.rules == entry.rulesVersion else {
             throw Failure.invalidConfiguration
         }
         for (name, player, supplied) in [("p1", config.p1, battle.p1.snapshot), ("p2", config.p2, battle.p2.snapshot)] {

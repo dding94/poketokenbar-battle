@@ -7,6 +7,8 @@ import JavaScriptCore
 final class BattleEngine {
     enum Failure: Error, Equatable { case missingBundle, checksumMismatch, invalidBundle, engine(String) }
     enum Method: String { case version, describeSet, describeMoves, typeChart, createBattle, request, choose, autoChoice, state, drainLog, drainEvents, result, replay, destroy }
+    /// SHA-256 of the bytes actually evaluated, including explicitly injected engines.
+    let verifiedHash: String
     private let context: JSContext
     private let api: JSValue
 
@@ -23,6 +25,7 @@ final class BattleEngine {
               let api = context.objectForKeyedSubscript("PTBEngine"), !api.isUndefined else {
             throw Failure.invalidBundle
         }
+        self.verifiedHash = actual
         self.context = context
         self.api = api
     }
