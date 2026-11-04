@@ -70,6 +70,16 @@ final class OnlineBattleConnectionTests: XCTestCase {
         let snapshot = await connection.snapshot()
         await connection.receive(value, generation: snapshot.generation)
     }
+    func testStandingsNotificationKeepsSocketConnectedWithoutRefreshingBattleList() async throws {
+        let (connection, _, _, events) = try await setup()
+        await send(.text(hello), to: connection)
+        await send(.text(#"{"v":1,"type":"standings_changed"}"#), to: connection)
+        let state = await connection.snapshot()
+        XCTAssertEqual(state.state, .connected)
+        let count = await events.refreshCount
+        XCTAssertEqual(count, 1)
+        await connection.stop()
+    }
     func testUnauthorizedUpgradeTakesPrecedenceOverAbnormalTransportClose() {
         XCTAssertEqual(OnlineBattleSocketEvent.receiveFailure(httpStatus: 401, closeCode: 1006), .failed(401))
         XCTAssertEqual(OnlineBattleSocketEvent.receiveFailure(httpStatus: nil, closeCode: 4003), .closed(4003))

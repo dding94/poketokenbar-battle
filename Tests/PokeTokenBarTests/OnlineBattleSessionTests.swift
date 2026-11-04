@@ -141,6 +141,55 @@ final class OnlineBattleSessionTests: XCTestCase {
         let session = OnlineBattleSession(settings: .init(profileID: UUID().uuidString, serverURL: "https://battle.example.invalid"), credentials: credential, transport: http, effects: effects, engineFactory: { try BattleEngine(url: self.engineURL) }, connectionFactory: { callback in observer?.callback = callback; return connection }, rosterProvider: { rosterOverride ?? self.roster(room) }, clock: clock, automaticTicks: false, enabled: enabled, accessAllowed: { access?.allowed ?? true })
         return (session, http, credential, effects)
     }
+    func testStandingsOpenIsReadOnlyAndFailureStaysInsideOverlay() async throws {
+        let (session, http, _, effects) = try await setup()
+        await session.bootstrap()
+        await session.perform(.setPopoverVisible(true))
+        await http.route("/v1/standings", Data(#"{"groupId":"group","championTrainerId":null,"rows":[]}"#.utf8))
+        let reads = await http.count("/v1/battles")
+        await session.perform(.showStandings)
+        XCTAssertTrue(session.presentation.showsStandings)
+        XCTAssertEqual(session.presentation.standings?.groupId, "group")
+        XCTAssertEqual(effects.effectCalls, 0)
+        let after = await http.count("/v1/battles"); XCTAssertEqual(after, reads)
+        await http.route("/v1/standings", Data(#"{"error":{"code":"not_found"}}"#.utf8), status: 404)
+        await session.perform(.refreshStandings)
+        XCTAssertNotNil(session.presentation.standingsError)
+        XCTAssertNil(session.presentation.notice)
+        XCTAssertNotNil(session.presentation.account)
+        await session.perform(.backToLobby)
+        XCTAssertFalse(session.presentation.showsStandings)
+    }
+
+    func testRematchPreparationLocksOpponentAndModeWithoutSubmitting() async throws {
+        let room = try battle()
+        let (session, http, _, effects) = try await setup([room])
+        try await activeOpponent(http)
+        await session.bootstrap()
+        await session.perform(.openReplay(room.battleId))
+        let calls = effects.effectCalls
+        await session.perform(.prepareRematch(room.battleId))
+        XCTAssertEqual(session.presentation.rematchSourceID, room.battleId)
+        XCTAssertEqual(session.presentation.rematchOpponent?.trainerId, "trainer-two")
+        XCTAssertEqual(session.presentation.rematchMode, room.mode)
+        XCTAssertFalse(session.presentation.showsHistory)
+        await session.perform(.selectOpponent("someone-else"))
+        await session.perform(.setMode(room.mode == .manual ? .auto : .manual))
+        XCTAssertEqual(session.presentation.selectedOpponentID, "trainer-two")
+        XCTAssertEqual(session.presentation.mode, room.mode)
+        let posts = await http.count("/v1/battles/\(room.battleId)/rematch")
+        XCTAssertEqual(posts, 0); XCTAssertEqual(effects.effectCalls, calls)
+        await session.perform(.cancelRematch)
+        XCTAssertNil(session.presentation.rematchSourceID)
+        XCTAssertTrue(session.presentation.showsHistory)
+        XCTAssertEqual(session.presentation.selectedHistoryBattle?.battleId, room.battleId)
+    }
+
+    private func activeOpponent(_ http: SessionHTTP, status: OnlineBattleTrainer.Status = .active) async throws {
+        let member = OnlineBattleMember(trainerId: "trainer-two", displayEmail: "opponent@example.invalid", role: .member, status: status, joinedAt: 0, online: false)
+        await http.route("/v1/group", try JSONEncoder().encode(OnlineBattleGroupMembers(group: account.group, members: [member])))
+    }
+
     func testHistoryRevocationDoesNotRepublishCachedRowsAfterLateFinalRead() async throws {
         let room = try battle(), observer = SessionObserver(), connection = SessionConnection()
         let (session, http, _, effects) = try await setup([room], connection: connection, observer: observer)
