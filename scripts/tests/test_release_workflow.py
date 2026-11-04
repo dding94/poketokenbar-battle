@@ -41,9 +41,20 @@ if name=='git':
 elif name=='security': print('  1) '+os.environ.get('ACTUAL_LEAF',os.environ['PTB_EXPECTED_LEAF'])+' "PokeTokenBar Battle Local"')
 elif name=='lipo':
     if os.environ.get('BAD_ARCH') and args[-1]=='x86_64': sys.exit(1)
-elif name=='otool': print('cmd LC_BUILD_VERSION\n minos '+os.environ.get('MINOS','15.0'))
+elif name=='otool':
+    print(os.environ.get('OTOOL_OUTPUT', 'Load command 0\n      cmd LC_BUILD_VERSION\n  cmdsize 32\n platform 1\n    minos '+os.environ.get('MINOS','15.0')+'\n      sdk 27.0\n   ntools 1\n     tool 3\n  version 27106.1\nLoad command 1\n      cmd LC_LOAD_DYLIB\n  cmdsize 56\n current version 1234.5.6'))
 elif name=='codesign':
-    if '--extract-certificates' in args: pathlib.Path(args[args.index('--extract-certificates')+1]+'0').write_bytes(b'wrong certificate' if os.environ.get('BAD_CERT') else b'public certificate fixture')
+    if '--extract-certificates' in args:
+        # codesign's optional prefix must be attached with '='. A split prefix
+        # is interpreted as another target, not an option argument.
+        print('split certificate prefix interpreted as target', file=sys.stderr)
+        sys.exit(95)
+    extraction = [arg for arg in args if arg.startswith('--extract-certificates=')]
+    if extraction:
+        if len(extraction) != 1 or len(args) != 3 or args[0] != '-d' or args[1] != extraction[0]: sys.exit(96)
+        prefix = extraction[0].split('=', 1)[1]
+        if not prefix or not pathlib.Path(args[2]).is_dir(): sys.exit(97)
+        pathlib.Path(prefix+'0').write_bytes(b'wrong certificate' if os.environ.get('BAD_CERT') else b'public certificate fixture')
     elif '--entitlements' in args: print(plistlib.dumps({'com.apple.security.cs.allow-jit':not bool(os.environ.get('BAD_JIT'))}).decode())
     elif '--verify' in args and os.environ.get('BAD_SIGN'): sys.exit(1)
 elif name=='ditto': pathlib.Path(args[-1]).write_bytes(b'fixture zip bytes')
@@ -242,6 +253,53 @@ bash scripts/package-battle-engines.sh "build/PokeTokenBar Battle.app/Contents/R
                 self.assertIn(expected,result.stderr)
                 self.assertIn('build:skip-install=1',self.calls())
                 self.assertFalse((self.repo/'build/release/poke-token-bar-battle.rb').exists())
+
+    def test_build_version_ignores_nested_tool_version(self):
+        self.fake_build()
+        result = self.run_release('--prepare-build', '3.0.0')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertTrue((self.repo/'build/release/PokeTokenBarBattle.zip').exists())
+
+    def test_certificate_extraction_attaches_optional_prefix_to_option(self):
+        self.fake_build()
+        result = self.run_release('--prepare-build', '3.0.0')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertRegex(self.calls(), r'(?m)^codesign -d --extract-certificates=.+/cert build/PokeTokenBar Battle.app$')
+        self.assertNotIn('codesign -d --extract-certificates ', self.calls())
+        self.assertTrue((self.repo/'build/release/PokeTokenBarBattle.zip').exists())
+
+    def test_legacy_deployment_command_uses_version_field(self):
+        self.fake_build()
+        result = self.run_release('--prepare-build', '3.0.0', OTOOL_OUTPUT=(
+            'Load command 0\n      cmd LC_VERSION_MIN_MACOSX\n  cmdsize 16\n'
+            '  version 15.0\n      sdk 15.0\nLoad command 1\n'
+            '      cmd LC_LOAD_DYLIB\n current version 1234.5.6\n'))
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_malformed_or_duplicate_deployment_commands_reject_packaging(self):
+        build = 'cmd LC_BUILD_VERSION\n minos 15.0\n ntools 1\n tool 3\n version 27106.1\n'
+        legacy = 'cmd LC_VERSION_MIN_MACOSX\n version 15.0\n sdk 15.0\n'
+        invalid = {
+            'missing deployment command': 'cmd LC_LOAD_DYLIB\n version 15.0\n',
+            'missing build minos': 'cmd LC_BUILD_VERSION\n version 15.0\n',
+            'missing legacy version': 'cmd LC_VERSION_MIN_MACOSX\n minos 15.0\n',
+            'malformed build minos': 'cmd LC_BUILD_VERSION\n minos 15.0 garbage\n',
+            'malformed legacy version': 'cmd LC_VERSION_MIN_MACOSX\n version 15.0 garbage\n',
+            'wrong build minimum': build.replace('minos 15.0', 'minos 14.0'),
+            'wrong legacy minimum': legacy.replace('version 15.0', 'version 14.0'),
+            'duplicate build minimum': build + ' minos 15.0\n',
+            'duplicate legacy minimum': legacy + ' version 15.0\n',
+            'mixed deployment commands': build + legacy,
+            'duplicate legacy commands': legacy + legacy,
+            'extra malformed command': legacy + 'cmd LC_BUILD_VERSION\n version 27106.1\n',
+        }
+        for label, output in invalid.items():
+            with self.subTest(label=label):
+                self.fake_build()
+                result = self.run_release('--prepare-build', '3.0.0', OTOOL_OUTPUT=output)
+                self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertIn('deployment target', result.stderr)
+                self.assertFalse((self.repo/'build/release/PokeTokenBarBattle.zip').exists())
 
     def test_failed_rebuild_removes_previous_preview(self):
         self.fake_build()

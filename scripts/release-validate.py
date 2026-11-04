@@ -74,10 +74,16 @@ def bundle_check(root, app, target_version, leaf):
     for arch in ('arm64', 'x86_64'):
         run('lipo', str(binary), '-verify_arch', arch)
         load = run('otool', '-arch', arch, '-l', str(binary)).decode()
-        # Only parse the actual deployment load command, not dylib/current version fields.
-        blocks = re.split(r'(?=\s*cmd LC_)', load)
-        minima = [m for block in blocks if re.search(r'cmd LC_(?:BUILD_VERSION|VERSION_MIN_MACOSX)\b', block)
-                  for m in re.findall(r'^\s*(?:minos|version)\s+(\d+\.\d+(?:\.\d+)?)\s*$', block, re.M)]
+        # Each deployment command has its own minimum field. BUILD_VERSION also
+        # contains nested tool "version" fields, which are not deployment targets.
+        blocks = re.split(r'^\s*cmd\s+', load, flags=re.M)
+        deployment = [(command, body) for block in blocks
+                      for command, _, body in [block.partition('\n')]
+                      if command.strip() in ('LC_BUILD_VERSION', 'LC_VERSION_MIN_MACOSX')]
+        require(len(deployment) == 1, f'{arch} deployment target must have exactly one macOS load command')
+        command, body = deployment[0]
+        field = 'minos' if command.strip() == 'LC_BUILD_VERSION' else 'version'
+        minima = [value.strip() for value in re.findall(rf'^\s*{field}\b([^\n]*)$', body, re.M)]
         require(len(minima) == 1 and minima[0] in ('15.0','15.0.0'), f'{arch} deployment target must be macOS 15.0')
     run('codesign', '--verify', '--deep', '--strict', str(app))
     entitlement_output = run('codesign', '-d', '--entitlements', ':-', str(app))
@@ -87,7 +93,7 @@ def bundle_check(root, app, target_version, leaf):
     # codesign extraction exports public certificate DER only; no private key is read.
     with tempfile.TemporaryDirectory(prefix='ptb-public-certificate-') as directory:
         prefix = str(Path(directory)/'cert')
-        run('codesign', '-d', '--extract-certificates', prefix, str(app))
+        run('codesign', '-d', '--extract-certificates=' + prefix, str(app))
         certificate = Path(prefix+'0')
         require(certificate.is_file(), 'Ad-hoc/unsigned release bundle has no certificate leaf')
         require(hashlib.sha1(certificate.read_bytes()).hexdigest().upper() == leaf.upper(), 'Built certificate leaf mismatch')
