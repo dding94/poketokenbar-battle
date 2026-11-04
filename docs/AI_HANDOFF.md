@@ -1,19 +1,22 @@
 # 다음 AI를 위한 작업 인계
 
-최종 갱신: 2026-11-04. **PR 11 경기 기록·다시보기 구현·독립 리뷰·최종 CI·공용 번들 검증 완료. 다음은 PR 12. PR 00~06 및 PR 07 구현·자동 검증은 완료했다. 실제 두 맥 E2E는 사용자 요청으로 미실행인 채 PR 11로 진행했으며 통과로 보고하지 않는다. 아래 초기 stub·배포 전 표현은 당시 기록이다.**
+최종 갱신: 2026-11-04. **PR 12 연승·챔피언·재대결·그룹 전적판 구현·독립 리뷰·최종 CI·공용 번들 검증 완료. 다음은 PR 13 전 무료 한도 보완·인수 준비다. PR 11~12 앱은 제작만 했고 설치본·개발 Worker는 PR 07 닉네임 버전 그대로다. 실제 두 맥 E2E는 사용자 요청으로 미실행이며 통과로 보고하지 않는다. 아래 초기 stub·배포 전 표현은 당시 기록이다.**
 
-### 진행 중: PR 12 (2026-11-04)
+### 마지막 완료: PR 12 (2026-11-04)
 
-사용자가 PR 12 진행을 요청했다. 시작은 origin과 같은 `8b1dc73`, 작업 트리 깨끗함, 포크 origin/upstream 참조 전용을 확인했다. 챔피언은 활동 멤버의 양수 현재 연승 최댓값·동률 선착순·모두 0이면 없음, 승률은 확정 5판부터 승/(승+패+무)로 확정했다. 부록 G를 먼저 커밋하고 서버·앱 연결·UI를 별도 worktree로 구현했다. 현재 구현·독립 리뷰·로컬 검증 완료, 원격 CI·공용 번들 검증은 진행 중이다. 설치본·개발 Worker는 바꾸지 않았다.
+사용자가 PR 12 진행을 요청했다. 시작은 origin과 같은 `8b1dc73`, 작업 트리 깨끗함, 포크 origin/upstream 참조 전용을 확인했다. 챔피언은 활동 멤버의 양수 현재 연승 최댓값·동률 선착순·모두 0이면 없음, 승률은 확정 5판부터 승/(승+패+무)로 확정했다. 부록 G를 먼저 커밋하고 서버·앱 연결·UI를 별도 worktree로 구현했다. 구현·독립 리뷰·로컬/원격 CI·공용 번들 검증을 완료했다. 설치본·개발 Worker는 바꾸지 않았다.
 
+- 최종 [CI 41774130216](https://github.com/dding94/poketokenbar-battle/actions/runs/41774130216), 소스 `b13abf6`, 전체 성공. 앱 rest 2,137건 실행·16 skip·실패 0, rendering 6건·실패/skip 0: **총 2,143건 실행·2,127건 통과·16 skip·실패 0**. test-union은 2,143건을 정확히 한 번 실행한 것을 확인했다. skip은 실제 계정/로컬 로그/선택적 성능·외부 자산·이미지 생성 등 기존 opt-in 검사이며 통과로 세지 않는다. Core 라인 94.34%, 포크 가드·엔진 포장·secret-scan 성공. 서버 34파일 326건 통과·실패/skip 0. macOS 15·26 각각 Swift 경계 369건, Node 계약 49건 통과·실패/skip 0, Node/JSC 2,200판 불일치/재생/상태 실패 0(200턴 무승부 200판). 경계 테스트는 전체 앱과 중복이므로 합산하지 않는다. push·`gh run watch --exit-status`·최종 상태/로그 조회 모두 종료 0. 초기 제한 환경 API 연결 실패와 완료 전 로그 요청은 종료 1이었고 최종 조회로 확인했다.
 - RED: 서버 11건 중 10건 단언 실패(종료 1, typecheck 0), UI 2건·단언 실패 3, 앱 연결 3건·단언 실패 11. 리뷰/경합 회귀는 각각 2건·단언 실패 2, 2건·단언 실패 8(모두 종료 1). 컴파일 실패나 실행 0건은 RED로 세지 않았다.
 - 서버 worktree `cd server && npm ci`, `npm run typecheck`, `npm test`: 각 종료 0, 최종 34파일 **326건 통과·실패/skip 0**. `npm run measure:battles`: 종료 0, 9건 통과·실패/skip 0. 비용은 BATTLE_PLAN §7의 로컬 추정으로 기록했다. 이관 순서 MAX→MIN·동률 ASC→DESC·확정 순서 +1→+0 변형은 각각 1건 실패(종료 1) 후 원복했다.
 - 최종 통합 로컬: `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer PTB_STATE_DIR=/private/tmp/ptb-pr12-root-state CLANG_MODULE_CACHE_PATH=/private/tmp/ptb-pr12-root-modules PTB_SNAPSHOT_SCREENSHOT_DIR=<repo>/build/pr12/screenshots swift test --disable-sandbox --scratch-path /private/tmp/ptb-pr07-clean-build --jobs 2 --enable-code-coverage --filter 'OnlineBattle|BattleEngineTests|BattleEngineArchiveTests|SaveTransferTests|PracticeStakesStoreTests|SaveSnapshot|PracticeLaunchTests|LocalizedUILiteralTests'`: **종료 0, 289건 통과·실패/skip 0**. 같은 필터의 `scripts/check-test-filter.sh` 종료 0. 로컬 OCR 미실행. 합성 SwiftUI 전적판/오류/재대결 준비 전후 이미지를 build/pr12/screenshots에 만들고 활성 신청 버튼까지 시각 확인했다. 실제 앱·두 맥 시험 증거가 아니다.
 - 앱 가드 변형: 닫힌 팝오버 차단 제거, 재대결 source 일치 제거, 진행 중 일반 읽기 중 전적 갱신 제거 각각 회귀 1건·단언 실패 1·종료 1 후 원복. `llvm-cov show --show-regions`에서 새 분기를 직접 확인하고 401 키 폐기와 p2 관점 재대결 등 실제 미실행 분기를 보강했다. weak self 소멸, 선행 가드 중복, API 취소 검사 후 성공 경로의 늦은 응답 가드, 재대결 준비의 roster 읽기 실패 등 일부 방어 경로는 로컬 미실행이다.
 - 독립 리뷰: 서버 원자 이관/순서/그룹 경계와 UI 검토, 앱의 그룹 알림 합치기 중 전적판 갱신 누락·POST 오류보다 알림이 먼저 오는 재대결 잠금 경합을 수정했다. 응답 유실 뒤 체력 변경 시 기존 신청 취소도 회귀로 고정했다. `07acd81`까지 리뷰 후 남은 P1/P2 지적 없음(리뷰어 별도 테스트 미실행). 원인·부류 스윕은 defect-log. 최종 통합 소스 `6a00472`.
+- 공용 앱 번들: `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer CLANG_MODULE_CACHE_PATH=/private/tmp/ptb-pr12-bundle-modules PTB_SKIP_INSTALL=1 ./scripts/build-app.sh` 종료 0. fork bundle ID/실행 파일·LaunchAgent의 포크 설치 경로·arm64/x86_64 각각 minOS 15.0·JIT entitlement·strict codesign 확인(검사 종료 0). 첫 entitlement 검사 도우미는 출력 스트림을 잘못 골라 plist 파싱 종료 1이었고 실제 XML 재조회로 성공했다. ad-hoc 개발 서명이며 설치/실행하지 않았다. `build/PokeTokenBar-Battle-PR12.zip` SHA256 `4aad040c11e12321f0c089b1d7fdbfd36730e0219fd3761b3b0937e7703b65a3`, 실행 파일 SHA256 `9d2c828def436bba88ead0e79159e845578ff92c859c7853b5458dace57c774a`.
 
 
-### 마지막 완료: PR 11 (2026-11-04)
+
+### 이전 완료: PR 11 (2026-11-04)
 
 사용자가 두 맥 직접 조작·자동 경기 시험을 진행할 시간이 없어 다음 구현으로 넘어가도록 요청했다. PR 07의 구현·자동 검증 근거는 유지하고, 실제 두 맥 E2E는 **사용자 요청으로 미실행**으로 남긴다. 성공한 것으로 간주하거나 체크하지 않는다. 이 미검증 항목을 다음 구현의 차단 조건에서 해제하고 PR 11(배틀 화면·기록·재생)을 진행한다. PR 13 인수 검증 항목도 자동 완료하지 않는다.
 
@@ -367,10 +370,10 @@ PR 11 완료 당시 다음은 PR 12 연승·챔피언·재대결·그룹 전적�
 ## 아직 없는 것 / 검증하지 않은 것
 
 - 운영 환경 배포·릴리스는 하지 않았다. 개발 Worker는 PR 06까지 배포했고 비밀값은 사용자가 관리한다. 실제 주소·계정 식별값은 공개 문서에 넣지 않는다.
-- PR 07 앱 설치는 완료했고 실제 두 맥 정식전은 사용자 요청으로 미실행이다(2026-11-04). 온라인 중계·락스텝·앱 결과 효과는 구현했으며 자동 검증 상태는 문서 상단을 따른다. 경기 기록 화면(PR 11)은 구현했고 현재 검증 상태는 문서 상단을 따른다. 그룹 전적판/챔피언/재대결 UI(PR 12)는 다음 범위다.
+- PR 07 앱 설치는 완료했고 실제 두 맥 정식전은 사용자 요청으로 미실행이다(2026-11-04). 온라인 중계·락스텝·앱 결과 효과는 구현했으며 자동 검증 상태는 문서 상단을 따른다. 경기 기록 화면(PR 11)은 구현했고 현재 검증 상태는 문서 상단을 따른다. 그룹 전적판/챔피언/재대결 UI(PR 12)는 구현했으며 최종 검증 상태는 문서 상단을 따른다.
 - CI의 기존 skip 16건. macOS 14는 2026-10-30부터 지원하지 않는다(최소 15).
 - 앱 안 고지의 실제 화면 확인(고지 코드·문자열 테스트는 완료). 저장소는 2026-10-29 public 전환.
-- 실제 GitHub 기능 PR은 아직 만들지 않았다. PR 00~06은 완료된 작업 단위이며 PR 07은 실기 검증이 남아 있다. PR 08~10은 폐기했고 PR 11 구현 뒤 PR 12~13이 다음 순서다.
+- 실제 GitHub 기능 PR은 아직 만들지 않았다. PR 00~06은 완료된 작업 단위이며 PR 07은 실기 검증이 남아 있다. PR 08~10은 폐기했고 PR 11~12 뒤 PR 13 인수·무료 한도 보완·릴리스가 남는다.
 
 REA 설치본 버전 확인은 수행했지만, 바이너리와 소스의 재현 빌드 일치를 증명하지 않는다. REA Evidence ID는 이전 조사 세션의 참조이며 새 AI 세션에서 조회 가능하다고 가정하지 않는다.
 
@@ -463,7 +466,8 @@ PR 05 실측의 재접속 표본 0·전수 CPU·계정 DO 오류 원인·회사 
 ```text
 이 저장소의 AGENTS.md와 docs/AI_HANDOFF.md, docs/BATTLE_PLAN.md를 읽어줘.
 feat/local-practice-battle 브랜치의 현재 상태를 확인하고,
-PR 07 두 맥 시험은 사용자 요청으로 미실행으로 남겨 두고, 완료된 PR 11 검증 기록을 확인한 뒤 PR 12를 진행해줘.
+PR 11~12 검증 기록과 미배포/미설치 상태를 확인하고 PR 13 전 무료 한도 보완과 인수 준비를 진행해줘.
+실제 두 맥 시험은 사용자 요청으로 미실행이며, 배포·설치·실기 시험은 구체적인 준비 뒤 별도 승인을 받아줘.
 월 0원 조건과 로그인 화면 없는 초대코드 + 닉네임 방식을 유지해줘.
 ```
 
