@@ -949,6 +949,7 @@ API(`/v1`, JSON 본문, 응답은 `cache-control: no-store`):
 | `POST /v1/join` | 초대코드 | `{inviteCode, displayEmail}` → 멤버 계정, 그룹, `accessKey`, `recoveryCode` |
 | `GET /v1/me` | 접속키 | 내 계정과 그룹 |
 | `GET /v1/group` | 접속키 | 그룹 이름, 방장, 멤버 목록. 떠난 멤버는 `status:"left"`, `displayEmail:null`(앱이 '떠난 트레이너'로 표시) |
+| `GET /v1/standings` | 접속키 | 현재 그룹의 활동 멤버 전적·연승·챔피언. 응답·정렬은 부록 G |
 | `GET /v1/audit` | 접속키 | 그룹 기록(최신순 최대 200개): `invite_created`·`invite_revoked`·`reconnect_code_issued`·`reconnect_code_used`·`operator_host_reconnect`·`member_left`·`member_removed`·`host_transferred` |
 | `POST /v1/invites` | 방장 | `{ttlSeconds?, maxUses?}` → `inviteCode`. 원문은 이때만 보인다 |
 | `GET /v1/invites` | 방장 | 초대 목록(원문 없음): 만료·사용 수·한도·회수 여부 |
@@ -1033,6 +1034,7 @@ API(`/v1`, JSON 본문, 응답은 `cache-control: no-store`):
 | `hello` | 연결 직후 | `{trainerId, groupId, online:[같은 그룹의 접속 중 계정]}` |
 | `presence` | 같은 그룹 동료의 연결 수가 0→1 또는 1→0이 됨 | `{trainerId, online}` |
 | `group_changed` | 가입·탈퇴·제거·복귀(재연결)·방장 넘기기가 확정됨 | `{kind}`. 앱은 `GET /v1/group`을 다시 읽는다 |
+| `standings_changed` | 경기 결과·전적 확정 트랜잭션 뒤 | 추가 필드 없음. 같은 그룹에만 알리며 전적판이 보일 때 조회를 합쳐 갱신한다(부록 G) |
 
 - 접속 상태는 지금 열린 WebSocket(`ctx.getWebSockets(태그)`, 닫히는 중인 연결은 빼고)만으로 정하며 저장하지 않는다(행 쓰기 없음). `GET /v1/group`의 멤버마다 `online`을 더한다. 배포로 모든 연결이 끊기는 경우 접속 상태도 비었다가 앱들이 다시 붙으며 채워진다. 2026-11-02 같은 코드 재배포에서는 단절이 관측되지 않았다.
 - 메시지는 같은 그룹에만 간다. 다른 그룹, 떠난 계정, 닫힌 연결에는 보내지 않는다.
@@ -1240,7 +1242,7 @@ API(`/v1`, JSON 본문, 응답은 `cache-control: no-store`):
 
 ### G.2 알림·앱 상태
 
-- 서버→앱 WebSocket에 `{type:"standings_changed"}`를 추가한다. 확정 뒤 같은 그룹의 연결에만 알리고, 클라이언트 입력은 계속 ping뿐이다. 재대결/전적판을 위해 기존 배틀 정보를 제3자에게 공개하지 않는다.
+- 서버→앱 WebSocket에 `{v:1,type:"standings_changed"}`를 추가한다. 확정 뒤 같은 그룹의 연결에만 알리고, 클라이언트 입력은 계속 ping뿐이다. 재대결/전적판을 위해 기존 배틀 정보를 제3자에게 공개하지 않는다.
 - 전적판은 팝오버 안의 별도 표시 상태다. 처음 열 때와 사용자가 새로고침할 때 HTTP로 읽는다. 전적판이 보이는 동안의 standings_changed/그룹 갱신/재접속은 요청을 합쳐 갱신하고, 닫혀 있을 때는 불필요한 조회를 하지 않는다. 기존 연결의 폴링 대체 간격을 늘리지 않는다.
 - 키 차단·폐기·서버/계정 교체는 전적판과 진행 중 조회를 무효화한다. 늦은 이전 계정 응답이 화면을 되살리지 못하게 한다. 조회 실패/아직 API를 지원하지 않는 서버는 전적판 안에 오류·재시도를 표시하고 진행 중 배틀이나 가입을 막지 않는다. 전적판 열기/조회는 결과 효과를 적용하지 않는다.
 
