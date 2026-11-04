@@ -141,6 +141,27 @@ final class OnlineBattleSessionTests: XCTestCase {
         let session = OnlineBattleSession(settings: .init(profileID: UUID().uuidString, serverURL: "https://battle.example.invalid"), credentials: credential, transport: http, effects: effects, engineFactory: { try BattleEngine(url: self.engineURL) }, connectionFactory: { callback in observer?.callback = callback; return connection }, rosterProvider: { rosterOverride ?? self.roster(room) }, clock: clock, automaticTicks: false, enabled: enabled, accessAllowed: { access?.allowed ?? true })
         return (session, http, credential, effects)
     }
+    func testHistoryRevocationDoesNotRepublishCachedRowsAfterLateFinalRead() async throws {
+        let room = try battle(), observer = SessionObserver(), connection = SessionConnection()
+        let (session, http, _, effects) = try await setup([room], connection: connection, observer: observer)
+        await session.bootstrap()
+        await session.perform(.showHistory)
+        await session.perform(.openReplay(room.battleId))
+        XCTAssertNotNil(session.presentation.replay)
+        await http.suspendNext("/v1/battles")
+        let pending = Task { await session.refresh() }
+        await http.waitUntilBlocked()
+        await connection.setState(.revoked)
+        await observer.callback?(.changed(await connection.snapshot()))
+        await http.resume(.init(status: 200, body: try JSONEncoder().encode(OnlineBattlePage(battles: [room], before: nil))))
+        await pending.value
+        XCTAssertNil(session.presentation.account)
+        XCTAssertNil(session.presentation.replay)
+        XCTAssertTrue(session.presentation.battles.isEmpty)
+        XCTAssertFalse(session.presentation.showsHistory)
+        XCTAssertEqual(effects.applications, 1)
+    }
+
     func testHistoryKeepsUnavailableUnpaidSummaryWithoutUnlockingNewChallenges() async throws {
         let valid = try battle()
         var config = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(valid.config)) as? [String: Any])
