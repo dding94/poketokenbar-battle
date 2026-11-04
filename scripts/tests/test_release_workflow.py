@@ -1,5 +1,6 @@
 """Release boundary regressions. Commands run only in disposable fixture repositories."""
 import hashlib
+import json
 import os
 import plistlib
 import shutil
@@ -32,8 +33,8 @@ if name=='git':
     elif args[:1]==['describe']: print('v2.5.6')
     elif args[:1]==['diff']: print('Sources/PokeTokenBar/UI/New.swift' if (os.environ.get('DOC_FAIL') or os.environ.get('DOC_WARNING')) and 'Sources/PokeTokenBar/UI/' in args else '')
     elif args[:1]==['log']: print('feat: battle screen' if os.environ.get('DOC_FAIL') else '')
-    elif args[:1]==['rev-parse']: print(os.environ.get('BRANCH','feat/release-fixture'))
-    elif args[:1]==['status']: pass
+    elif args[:1]==['rev-parse']: print(os.environ.get('BRANCH','feat/release-fixture') if '--abbrev-ref' in args else '1'*40)
+    elif args[:1]==['status']: print(' M source.swift' if os.environ.get('DIRTY') else '')
     elif args[:1] and args[0] in ('add','commit','push') and os.environ.get('ALLOW_PUBLICATION_STUB'): pass
     else: sys.exit(90)
 elif name=='security': print('  1) '+os.environ.get('ACTUAL_LEAF',os.environ['PTB_EXPECTED_LEAF'])+' "PokeTokenBar Battle Local"')
@@ -46,7 +47,13 @@ elif name=='codesign':
     elif '--verify' in args and os.environ.get('BAD_SIGN'): sys.exit(1)
 elif name=='ditto': pathlib.Path(args[-1]).write_bytes(b'fixture zip bytes')
 elif name=='gh':
-    if args[:2]==['api','repos/dding94/homebrew-tap/contents/Casks/poke-token-bar-battle.rb']:
+    if args[:1]==['api'] and '/actions/' in args[1]:
+        if os.environ.get('API_UNAVAILABLE'): sys.exit(93)
+        if '/jobs/' in args[1] and args[1].endswith('/logs'): key='CI_LOG_FILE'
+        elif '/jobs?' in args[1]: key='CI_JOBS_FILE'
+        else: key='CI_RUN_FILE'
+        print(pathlib.Path(os.environ[key]).read_text())
+    elif args[:2]==['api','repos/dding94/homebrew-tap/contents/Casks/poke-token-bar-battle.rb']:
         path=os.environ.get('FAKE_TAP')
         print(json.dumps({'sha':'existing-file-sha','content':base64.b64encode(pathlib.Path(path).read_bytes()).decode()}) if path else '{}')
     elif args[:1]==['release'] or '-X' in args:
@@ -64,7 +71,7 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.repo = Path(self.temp.name)
         for directory in ('scripts', 'Sources/PokeTokenBar/Core', 'engine/dist', 'engine/archive'):
             (self.repo / directory).mkdir(parents=True, exist_ok=True)
-        for name in ('release.sh', 'release-metadata.py', 'release-validate.py', 'package-battle-engines.sh'):
+        for name in ('release.sh', 'release-metadata.py', 'release-validate.py', 'release-ci.py', 'package-battle-engines.sh'):
             source = ROOT / 'scripts' / name
             if source.exists(): shutil.copy(source, self.repo / 'scripts' / name)
         for name in ('AppIdentity.swift','UpdateChecker.swift','BattleEngineManifest.swift','BattleEngineArchive.swift'):
@@ -83,6 +90,36 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.env.update(PATH=str(self.bin)+os.pathsep+self.env['PATH'], CALLS=str(self.repo/'calls'),
                         PTB_EXPECTED_LEAF=LEAF, PTB_NOTES_FILE=str(self.repo/'notes.md'),
                         PTB_CONTRIBUTORS_FILE=str(self.repo/'contributors.txt'))
+        self.ci_run={'id':12345,'head_sha':'1'*40,'name':'CI','path':'.github/workflows/ci.yml',
+                     'status':'completed','conclusion':'success','run_attempt':1,
+                     'repository':{'full_name':'dding94/poketokenbar-battle'},
+                     'head_repository':{'full_name':'dding94/poketokenbar-battle'}}
+        required={
+            'changes':[],
+            'build-test (rendering)':['Isolate test state and render output','Rendering tests','List every test','Prove the fork identity guard rejects an upstream value'],
+            'build-test (rest)':['Isolate test state and render output','Install isolated native acceptance server dependencies','Test + coverage gate'],
+            'test-union':['Every test ran exactly once'],
+            'secret-scan':['Scan for committed secrets'],
+            'server':['Install pinned dependencies','Typecheck','Worker and League tests in workerd'],
+            'determinism (macos-15)':['Isolate test state','Swift JavaScriptCore boundary','Install pinned dependencies','Engine contracts and deterministic corpus'],
+            'determinism (macos-26)':['Isolate test state','Swift JavaScriptCore boundary','Install pinned dependencies','Engine contracts and deterministic corpus']}
+        self.ci_jobs={'total_count':len(required),'jobs':[
+            {'id':100+index,'name':name,'status':'completed','conclusion':'success',
+             'run_id':12345,'run_attempt':1,'head_sha':'1'*40,
+             'steps':[{'name':step,'status':'completed','conclusion':'success'} for step in steps]}
+            for index,(name,steps) in enumerate(required.items())]}
+        self.ci_log='\n'.join("Test Case '-[PokeTokenBarTests.OnlineBattleNativeAcceptanceTests "+name+"]' passed (1.0 seconds)." for name in (
+            'testNativeManualAndAutomaticReportsPrivacyReplayAndRematch',
+            'testSessionsRecoverCommittedResponseLossAndApplyDurablyOnce',
+            'testSessionsReleaseVoidWithoutHealthXPWalletOrUsageEffects'))+'\nNATIVE_ACCEPTANCE required=3 passed=3 skipped=0 (single Mac, local Worker)\n'
+        self.write_ci_fixture()
+        self.env['PTB_CI_RUN_ID']='12345'
+
+    def write_ci_fixture(self):
+        for name,value in (('run',self.ci_run),('jobs',self.ci_jobs),('log',self.ci_log)):
+            path=self.repo/('ci-'+name+'.json')
+            path.write_text(value if isinstance(value,str) else json.dumps(value))
+            self.env['CI_'+name.upper()+'_FILE']=str(path)
 
     def run_release(self,*args,**env):
         return subprocess.run(['bash',str(self.repo/'scripts/release.sh'),*args],env=self.env|env,
@@ -114,7 +151,7 @@ bash scripts/package-battle-engines.sh "build/PokeTokenBar Battle.app/Contents/R
 '''
         path=self.repo/'scripts/build-app.sh';path.write_text(header+body);path.chmod(0o755)
         (self.repo/'engine/LICENSE.pokemon-showdown').write_text('fixture license')
-        gate=self.repo/'scripts/test-gate.sh';gate.write_text('#!/bin/sh\nexit 0\n');gate.chmod(0o755)
+        gate=self.repo/'scripts/test-gate.sh';gate.write_text('#!/bin/sh\nprintf \"local-test-gate state=%s\\n\" \"${PTB_STATE_DIR:-UNISOLATED}\" >> \"$CALLS\"\nexit 0\n');gate.chmod(0o755)
 
     def test_check_only_propagates_hard_asset_failure(self):
         result=self.run_release('--check-only',DOC_FAIL='1')
@@ -164,7 +201,7 @@ bash scripts/package-battle-engines.sh "build/PokeTokenBar Battle.app/Contents/R
         self.assertIn('depends_on macos: ">= :sequoia"',cask)
         self.assertIn('app "PokeTokenBar Battle.app"',cask)
         self.assertIn('build:skip-install=1 version=3.0.0',self.calls())
-        self.assertNotRegex(self.calls(),r'(?m)^gh |^pkill |^git (add|commit|push|tag) ')
+        self.assertNotRegex(self.calls(),r'(?m)^gh release |^gh api -X |^pkill |^git (add|commit|push|tag) ')
 
     def test_leaf_mismatch_stops_without_prompt_or_build(self):
         self.fake_build()
@@ -244,6 +281,57 @@ bash scripts/package-battle-engines.sh "build/PokeTokenBar Battle.app/Contents/R
         self.assertIn('version "3.0.0"',published)
         self.assertIn(hashlib.sha256(b'fixture zip bytes').hexdigest(),published)
         self.assertNotIn('pkill ',self.calls())
+
+    def test_prepare_build_never_runs_local_test_gate_or_ocr(self):
+        self.fake_build()
+        result=self.run_release('--prepare-build','3.0.0',PTB_CI_RUN_ID='12345')
+        self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+        self.assertNotIn('local-test-gate',self.calls())
+        self.assertIn('gh api',self.calls())
+
+    def test_prepare_build_requires_verified_ci_before_build_or_signing(self):
+        self.fake_build()
+        self.env.pop('PTB_CI_RUN_ID')
+        result=self.run_release('--prepare-build','3.0.0')
+        self.assertNotEqual(result.returncode,0,result.stdout+result.stderr)
+        self.assertIn('PTB_CI_RUN_ID',result.stderr)
+        self.assertNotIn('build:',self.calls())
+        self.assertNotIn('local-test-gate',self.calls())
+        self.assertNotIn('security ',self.calls())
+
+    def test_ci_gate_rejects_stale_sha_missing_jobs_skips_and_missing_native_passes(self):
+        self.fake_build()
+        for mutation in ('sha','workflow','repository','failed-run','partial-jobs','skipped-job','skipped-step','native-skip','native-missing','attempt'):
+            with self.subTest(mutation=mutation):
+                run=json.loads(json.dumps(self.ci_run));jobs=json.loads(json.dumps(self.ci_jobs));log=self.ci_log
+                if mutation=='sha': run['head_sha']='2'*40
+                elif mutation=='workflow': run['path']='.github/workflows/other.yml'
+                elif mutation=='repository': run['repository']['full_name']='other/project'
+                elif mutation=='failed-run': run['conclusion']='failure'
+                elif mutation=='partial-jobs': jobs['jobs']=jobs['jobs'][:-1];jobs['total_count']-=1
+                elif mutation=='skipped-job': jobs['jobs'][2]['conclusion']='skipped'
+                elif mutation=='skipped-step': jobs['jobs'][2]['steps'][-1]['conclusion']='skipped'
+                elif mutation=='native-skip': log=log.replace('passed=3 skipped=0','passed=2 skipped=1')
+                elif mutation=='native-missing': log=log.replace('testSessionsRecoverCommittedResponseLossAndApplyDurablyOnce','otherTest')
+                elif mutation=='attempt': jobs['jobs'][2]['run_attempt']=2
+                for name,value in (('run',run),('jobs',jobs),('log',log)):
+                    (self.repo/('ci-'+name+'.json')).write_text(value if isinstance(value,str) else json.dumps(value))
+                result=self.run_release('--prepare-build','3.0.0')
+                self.assertNotEqual(result.returncode,0,result.stdout+result.stderr)
+                self.assertIn('Release CI:',result.stderr)
+                self.assertNotIn('build:',self.calls())
+                self.assertNotIn('security ',self.calls())
+                self.assertNotIn('local-test-gate',self.calls())
+
+    def test_ci_gate_rejects_dirty_source_or_api_unavailability(self):
+        self.fake_build()
+        for injection in ({'DIRTY':'1'},{'API_UNAVAILABLE':'1'}):
+            with self.subTest(injection=injection):
+                result=self.run_release('--prepare-build','3.0.0',**injection)
+                self.assertNotEqual(result.returncode,0,result.stdout+result.stderr)
+                self.assertIn('Release CI:',result.stderr)
+                self.assertNotIn('build:',self.calls())
+                self.assertNotIn('local-test-gate',self.calls())
 
     def test_publish_readiness_guard_stops_before_any_command(self):
         result=self.run_release('3.0.0')
