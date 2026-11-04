@@ -141,6 +141,32 @@ final class OnlineBattleSessionTests: XCTestCase {
         let session = OnlineBattleSession(settings: .init(profileID: UUID().uuidString, serverURL: "https://battle.example.invalid"), credentials: credential, transport: http, effects: effects, engineFactory: { try BattleEngine(url: self.engineURL) }, connectionFactory: { callback in observer?.callback = callback; return connection }, rosterProvider: { rosterOverride ?? self.roster(room) }, clock: clock, automaticTicks: false, enabled: enabled, accessAllowed: { access?.allowed ?? true })
         return (session, http, credential, effects)
     }
+    func testHistoryKeepsUnavailableUnpaidSummaryWithoutUnlockingNewChallenges() async throws {
+        let valid = try battle()
+        var config = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(valid.config)) as? [String: Any])
+        config["engineHash"] = String(repeating: "a", count: 64)
+        let unavailable = try changed(valid, ["config": config])
+        let later = try battle(1)
+        let (session, http, _, effects) = try await setup([unavailable, later])
+        await session.bootstrap()
+        XCTAssertEqual(effects.applications, 0)
+        XCTAssertNotNil(session.presentation.notice)
+        XCTAssertEqual(Set(session.presentation.battles.map(\.battleId)), Set([unavailable.battleId, later.battleId]))
+        await session.perform(.showHistory)
+        await session.perform(.openReplay(unavailable.battleId))
+        XCTAssertEqual(session.presentation.selectedHistoryBattle?.battleId, unavailable.battleId)
+        XCTAssertNil(session.presentation.replay)
+        XCTAssertNotNil(session.presentation.historyError)
+        await session.perform(.openReplay(later.battleId))
+        XCTAssertNotNil(session.presentation.replay)
+        XCTAssertEqual(effects.effectCalls, 0)
+        await session.perform(.backToLobby)
+        await session.perform(.challenge)
+        let creations = await http.bodies("/v1/battles")
+        XCTAssertTrue(creations.isEmpty)
+        XCTAssertEqual(effects.effectCalls, 0)
+    }
+
     func testHistoryReplayNavigationMakesNoRequestsOrEffectCalls() async throws {
         let room = try battle()
         let (session, http, _, effects) = try await setup([room])
