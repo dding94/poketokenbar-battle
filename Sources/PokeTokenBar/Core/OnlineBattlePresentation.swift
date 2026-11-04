@@ -49,21 +49,27 @@ final class OnlineBattlePresentation {
 
     var selectedEntry: PracticeCandidate? { roster.first { $0.id == selectedEntryID } }
     var selectedOpponent: OnlineBattleMember? { members.first { $0.trainerId == selectedOpponentID } }
+    var activeBattles: [OnlineBattleView] { battles.filter { $0.state.isActive } }
+    var historyBattles: [OnlineBattleView] {
+        battles.filter { !$0.state.isActive }.sorted {
+            $0.createdAt == $1.createdAt ? $0.battleId > $1.battleId : $0.createdAt > $1.createdAt
+        }
+    }
     func entryIsEligible(_ entry: PracticeCandidate) -> Bool {
         entry.snapshot != nil && entry.blockedReason == nil && (entryHP[entry.id] ?? 0) > 0 && !blockedEntryIDs.contains(entry.id)
     }
     var canChallenge: Bool {
-        guard phase == .lobby, !isBusy, let account, let selectedEntry, entryIsEligible(selectedEntry),
+        guard !showsHistory, phase == .lobby, !isBusy, let account, let selectedEntry, entryIsEligible(selectedEntry),
               let opponent = selectedOpponent else { return false }
         return opponent.status == .active && opponent.trainerId != account.trainer.trainerId
     }
     var canAccept: Bool {
-        guard !isBusy, room?.state == .pending, localSide == .p2,
+        guard !showsHistory, !isBusy, room?.state == .pending, localSide == .p2,
               let selectedEntry else { return false }
         return entryIsEligible(selectedEntry)
     }
-    var canConfirm: Bool { !isBusy && room?.state == .accepted && localSide == .p1 && room?.confirmed == false }
-    var canPrepare: Bool { !isBusy && canStart && room?.confirmed == true && [.accepted, .ready].contains(room?.state) }
+    var canConfirm: Bool { !showsHistory && !isBusy && room?.state == .accepted && localSide == .p1 && room?.confirmed == false }
+    var canPrepare: Bool { !showsHistory && !isBusy && canStart && room?.confirmed == true && [.accepted, .ready].contains(room?.state) }
     func canChooseMove(_ slot: Int) -> Bool {
         !showsHistory && phase == .arena && room?.state == .running && room?.mode == .manual && !isBusy && !choiceSubmitted &&
         request?.kind == "move" && request?.moves.contains { $0.slot == slot && !$0.disabled && $0.pp > 0 } == true
@@ -98,6 +104,7 @@ final class OnlineBattlePresentation {
             guard let account, members.contains(where: { $0.trainerId == id && $0.status == .active && id != account.trainer.trainerId }) else { return }
             selectedOpponentID = id
         case .setMode(let mode):
+            guard !showsHistory else { return }
             self.mode = mode
         case .challenge: guard canChallenge else { return }
         case .accept: guard canAccept else { return }
@@ -106,8 +113,8 @@ final class OnlineBattlePresentation {
         case .chooseMove(let slot):
             guard canChooseMove(slot) else { return }
             choiceSubmitted = true
-        case .decline: guard !isBusy, localSide == .p2, room?.state == .pending else { return }
-        case .cancel: guard !isBusy, [.pending, .accepted, .ready].contains(room?.state) else { return }
+        case .decline: guard !showsHistory, !isBusy, localSide == .p2, room?.state == .pending else { return }
+        case .cancel: guard !showsHistory, !isBusy, [.pending, .accepted, .ready].contains(room?.state) else { return }
         case .retryCredentialSave: guard !isBusy, canRetryCredentialSave else { return }
         case .configureServer(let address): guard !isBusy, (try? OnlineBattleOrigin(address)) != nil else { return }
         case .join(let code, let email): guard !isBusy, !code.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }

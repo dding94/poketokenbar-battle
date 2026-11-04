@@ -48,6 +48,35 @@ extension L {
     var onlineChallenge: String { online("정식전 신청", "Send challenge") }
     var onlineBattles: String { online("진행 중인 경기", "Battles") }
     var onlineNoBattles: String { online("아직 진행 중인 경기가 없어요.", "No battles yet.") }
+    var onlineHistory: String { online("지난 경기", "Battle history") }
+    var onlineNoHistory: String { online("아직 지난 경기가 없어요.", "No past battles yet.") }
+    var onlineBackToHistory: String { online("기록 목록", "Back to history") }
+    var onlineReplay: String { online("다시보기", "Replay") }
+    var onlineReplayUnavailable: String { online("이 경기는 다시 볼 자료가 없어요.", "This battle has no replay data.") }
+    var onlineReplayLoading: String { online("다시보기를 확인하고 있어요…", "Checking replay…") }
+    var onlineReplayFirst: String { online("처음", "First") }
+    var onlineReplayPrevious: String { online("이전", "Previous") }
+    var onlineReplayNext: String { online("다음", "Next") }
+    var onlineReplayLast: String { online("마지막", "Last") }
+    var onlineBattleLog: String { online("배틀 기록", "Battle log") }
+    var onlineNoLog: String { online("아직 표시할 기록이 없어요.", "No events to show yet.") }
+    func onlineReplayStep(_ current: Int, total: Int) -> String { online("장면 \(current)/\(total)", "Scene \(current)/\(total)") }
+    func onlineHistoryOutcome(_ battle: OnlineBattleView, localTrainerID: String?) -> String {
+        switch battle.state {
+        case .void: return online("경기 무효 · 기록과 보상 변경 없음", "Void · no record or reward changes")
+        case .cancelled: return online("신청 취소", "Challenge cancelled")
+        case .declined: return online("신청 거절", "Challenge declined")
+        case .expired: return online("신청 만료", "Challenge expired")
+        case .completed:
+            guard let result = battle.result, let localTrainerID,
+                  let localSide = battle.side(for: localTrainerID) else { return onlineState(battle.state) }
+            switch result.winner {
+            case .draw: return online("무승부", "Draw")
+            case .p1, .p2: return result.winner.rawValue == localSide.rawValue ? online("승리", "Win") : online("패배", "Loss")
+            }
+        default: return onlineState(battle.state)
+        }
+    }
     var onlineAccept: String { online("수락", "Accept") }
     var onlineConfirm: String { online("최종 확인", "Confirm challenge") }
     var onlinePrepare: String { online("전투 준비", "Ready for battle") }

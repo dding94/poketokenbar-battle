@@ -6,6 +6,7 @@ import XCTest
 /// Synthetic data only. No network, Keychain, real saves or OCR; optional PNGs are native SwiftUI renders.
 @MainActor
 final class OnlineBattleScreenRenderingTests: XCTestCase {
+    private struct Golden: Decodable { let battle: OnlineBattleView }
     private var window: NSWindow?
     override func tearDown() async throws { window?.close(); window = nil }
 
@@ -135,5 +136,31 @@ final class OnlineBattleScreenRenderingTests: XCTestCase {
         Self.arena(model)
         let whileLive = try await capture(host, named: "online-synthetic-history-while-live.png")
         XCTAssertEqual(history, whileLive, "A live update must not replace the selected archive screen")
+    }
+    func testVerifiedP2ReplayRendersReadOnlyScenesInsidePopover() async throws {
+        let url = try XCTUnwrap(Bundle.module.url(forResource: "golden", withExtension: "json", subdirectory: "OnlineBattle"))
+        let battle = try XCTUnwrap(JSONDecoder().decode([Golden].self, from: Data(contentsOf: url)).first?.battle)
+        let sourceRoot = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let replay = try OnlineBattleReplay(battle: battle, localTrainerID: "trainer-two", engineFactory: { _ in
+            try BattleEngine(url: sourceRoot.appendingPathComponent("engine/dist/battle-engine.js"))
+        })
+        let model = Self.model()
+        model.account = .init(trainer: .init(trainerId: "trainer-two", displayEmail: "me@example.invalid", role: .member, status: .active),
+                              group: .init(groupId: "synthetic-group", name: "동료들의 배틀", hostTrainerId: "trainer-one"))
+        model.members = [.init(trainerId: "trainer-one", displayEmail: "friend@example.invalid", role: .host, status: .active,
+                               joinedAt: 0, online: true)]
+        model.battles = [battle]
+        model.showsHistory = true
+        model.selectedHistoryBattle = battle
+        model.replay = replay
+        let host = await host(model)
+        let first = try await capture(host, named: "online-synthetic-replay-first.png")
+        model.send(.seekReplay(1))
+        try await Task.sleep(for: .milliseconds(650)) // Wait for the shared HP card's 0.5 s animation.
+        let next = try await capture(host, named: "online-synthetic-replay-next.png")
+        XCTAssertNotEqual(first, next)
+        Self.arena(model)
+        let whileLive = try await capture(host, named: "online-synthetic-replay-while-live.png")
+        XCTAssertEqual(next, whileLive)
     }
 }

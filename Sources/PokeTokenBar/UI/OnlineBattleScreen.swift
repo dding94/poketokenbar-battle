@@ -36,7 +36,7 @@ struct OnlineBattleScreen: View {
     var speciesNameStore: PokemonNameDisplayStore = .shared
     let onClose: () -> Void
 
-    var showsGroupBack: Bool { [.room, .arena, .verifying].contains(model.phase) }
+    var showsGroupBack: Bool { !model.showsHistory && [.room, .arena, .verifying].contains(model.phase) }
     func returnToGroup() { model.send(.backToLobby) }
 
     var body: some View {
@@ -89,6 +89,10 @@ struct OnlineBattleScreen: View {
     }
 
     @ViewBuilder private var stage: some View {
+        if model.showsHistory {
+            OnlineBattleHistory(model: model, l: l, artwork: artwork,
+                                speciesNameProvider: speciesNameProvider, speciesNameStore: speciesNameStore)
+        } else {
         switch model.phase {
         case .setup: OnlineBattleSetupForm(model: model, l: l)
         case .lobby: OnlineBattleLobby(model: model, l: l, artwork: artwork)
@@ -117,6 +121,7 @@ struct OnlineBattleScreen: View {
                     .buttonStyle(.borderedProminent).disabled(model.isBusy)
             }
             .frame(maxWidth: .infinity, alignment: .leading).practiceCard()
+        }
         }
     }
 

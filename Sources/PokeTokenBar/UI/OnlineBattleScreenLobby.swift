@@ -44,8 +44,8 @@ struct OnlineBattleLobby: View {
             }
             VStack(alignment: .leading, spacing: 8) {
                 Text(l.onlineBattles).font(.subheadline.bold())
-                if model.battles.isEmpty { Text(l.onlineNoBattles).font(.caption).foregroundStyle(.secondary) }
-                ForEach(model.battles, id: \.battleId) { battle in
+                if model.activeBattles.isEmpty { Text(l.onlineNoBattles).font(.caption).foregroundStyle(.secondary) }
+                ForEach(model.activeBattles, id: \.battleId) { battle in
                     Button { model.send(.openBattle(battle.battleId)) } label: {
                         HStack {
                             VStack(alignment: .leading, spacing: 3) {
@@ -58,6 +58,16 @@ struct OnlineBattleLobby: View {
                     }.buttonStyle(.plain).disabled(model.isBusy)
                 }
             }.practiceCard()
+            Button { model.send(.showHistory) } label: {
+                HStack {
+                    Label(l.onlineHistory, systemImage: "clock.arrow.circlepath")
+                    Spacer(minLength: 4)
+                    Image(systemName: "chevron.right").font(.caption)
+                }
+            }
+            .buttonStyle(.plain).disabled(model.isBusy)
+            .accessibilityIdentifier("online.history.open")
+            .practiceCard()
         }
     }
     private func opponentName(_ battle: OnlineBattleView) -> String {

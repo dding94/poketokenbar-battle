@@ -23,8 +23,14 @@ struct OnlineBattleArena: View {
                 // p1 is always the challenger; account identity determines which side is mine.
                 let own = model.localSide == .p1 ? view.p1 : view.p2
                 let foe = model.localSide == .p1 ? view.p2 : view.p1
-                sideCard(foe, own: false)
-                sideCard(own, own: true)
+                OnlineBattleCombatantCard(side: foe, own: false, l: l, artwork: artwork,
+                                          moveSlugs: model.moveSlugs[model.localSide == .p1 ? .p2 : .p1] ?? [:],
+                                          abilitySlugs: model.abilitySlugs[model.localSide == .p1 ? .p2 : .p1] ?? [:],
+                                          speciesNameProvider: speciesNameProvider, speciesNameStore: speciesNameStore)
+                OnlineBattleCombatantCard(side: own, own: true, l: l, artwork: artwork,
+                                          moveSlugs: model.moveSlugs[model.localSide] ?? [:],
+                                          abilitySlugs: model.abilitySlugs[model.localSide] ?? [:],
+                                          speciesNameProvider: speciesNameProvider, speciesNameStore: speciesNameStore)
                 if model.room?.mode == .auto {
                     Label(l.onlineAutomatic, systemImage: "play.fill").font(.caption).foregroundStyle(.secondary)
                 } else if model.choiceSubmitted {
@@ -44,6 +50,7 @@ struct OnlineBattleArena: View {
                 }
                 Text(l.onlineTurnHint).font(.caption2).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+                OnlineBattleLogCard(logs: model.liveLogs, l: l)
             } else {
                 ProgressView().frame(maxWidth: .infinity)
             }
@@ -66,52 +73,4 @@ struct OnlineBattleArena: View {
               pp: move.pp, maxpp: move.maxpp, disabled: move.disabled)
     }
 
-    private func sideCard(_ side: BattleView.Pokemon, own: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 7) {
-            HStack(spacing: 8) {
-                Group {
-                    if artwork { SpriteView(speciesID: side.speciesNum, size: 40) }
-                    else { PracticeSpriteTile(set: nil, size: 40, artwork: false) }
-                }.frame(width: 40, height: 40)
-                VStack(alignment: .leading, spacing: 5) {
-                    Text(own ? l.practiceYou : l.practiceFoe).font(.caption2).foregroundStyle(.secondary)
-                    OnlineBattleSpeciesNameLevel(speciesNum: side.speciesNum, publicName: side.species, level: side.level, language: l.lang,
-                                               provider: speciesNameProvider, displayStore: speciesNameStore, loadsNames: artwork)
-                    PracticeTypeBadges(types: side.types, l: l, artwork: artwork)
-                }
-                Spacer(minLength: 0)
-            }
-            HStack(spacing: 8) {
-                PracticeHPBar(hp: side.hp, maxHP: side.maxhp)
-                Text(own ? "\(side.hp)/\(side.maxhp)" : l.onlineHP(side.hp))
-                    .font(.caption).monospacedDigit().frame(minWidth: 50, alignment: .trailing)
-            }
-            if !side.status.isEmpty {
-                Text(l.practiceStatusName(side.status)).font(.caption2).foregroundStyle(.orange)
-            }
-            // The resolver view is the sole source of revealed metadata. Never read frozen opponent config.
-            HStack(alignment: .top, spacing: 4) {
-                Text(l.practiceAbility).foregroundStyle(.secondary)
-                if let ability = side.ability {
-                    PracticeMetadataName(kind: .ability, id: metadataSlug(.ability, ability, own: own), snapshot: nil,
-                                         l: l, artwork: artwork)
-                } else { Text("?") }
-            }.font(.caption2)
-            WrappingHStack(spacing: 4, lineSpacing: 4) {
-                ForEach(Array(side.moves.prefix(4)), id: \.self) { move in
-                    PracticeChip {
-                        if move == "recharge" { Text(l.practiceRecharge) }
-                        else if move == "struggle" { Text(l.practiceStruggle) }
-                        else {
-                            PracticeMetadataName(kind: .move, id: metadataSlug(.move, move, own: own), snapshot: nil,
-                                                 l: l, artwork: artwork)
-                        }
-                    }
-                }
-                ForEach(0..<max(0, own ? 0 : 4 - side.moves.count), id: \.self) { _ in
-                    PracticeChip(dimmed: true) { Text("?") }
-                }
-            }
-        }.practiceCard(padding: 8)
-    }
 }

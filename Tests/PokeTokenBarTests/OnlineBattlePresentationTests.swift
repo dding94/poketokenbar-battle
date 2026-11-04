@@ -94,6 +94,61 @@ extension OnlineBattlePresentationTests {
     }
 }
 
+extension OnlineBattlePresentationTests {
+    func testArchiveSortsTerminalMatchesWithoutChallengeExpiryAndKeepsActiveInLobby() {
+        let model = OnlineBattleScreenRenderingTests.model()
+        model.battles = [
+            OnlineBattleScreenRenderingTests.room(state: .completed, id: "older", createdAt: 1),
+            OnlineBattleScreenRenderingTests.room(state: .running, id: "live", createdAt: 3),
+            OnlineBattleScreenRenderingTests.room(state: .void, id: "newer", createdAt: 2),
+            OnlineBattleScreenRenderingTests.room(state: .expired, id: "oldest", createdAt: 0),
+        ]
+        XCTAssertEqual(model.activeBattles.map(\.battleId), ["live"])
+        XCTAssertEqual(model.historyBattles.map(\.battleId), ["newer", "older", "oldest"])
+        XCTAssertEqual(L(.ko).onlineHistoryOutcome(model.historyBattles.last!, localTrainerID: "synthetic-me"), "신청 만료")
+    }
+
+    func testArchiveNavigationRejectsLiveAndUnknownIDsAndBlocksManualChoices() {
+        let model = OnlineBattleScreenRenderingTests.model()
+        model.phase = .lobby
+        model.battles.append(OnlineBattleScreenRenderingTests.room(state: .completed, id: "past"))
+        var actions: [String] = []
+        model.onAction = {
+            switch $0 {
+            case .showHistory: actions.append("show")
+            case .openReplay(let id): actions.append(id)
+            case .closeReplay: actions.append("close")
+            case .chooseMove: actions.append("move")
+            default: break
+            }
+        }
+        model.send(.showHistory)
+        model.send(.openReplay("synthetic-battle"))
+        model.send(.openReplay("unknown"))
+        model.send(.openReplay("past"))
+        XCTAssertEqual(model.selectedHistoryBattle?.battleId, "past")
+        OnlineBattleScreenRenderingTests.arena(model)
+        model.send(.chooseMove(1))
+        XCTAssertFalse(model.canChooseMove(1))
+        model.send(.closeReplay)
+        XCTAssertNil(model.selectedHistoryBattle)
+        XCTAssertNil(model.replay)
+        XCTAssertEqual(actions, ["show", "past", "close"])
+    }
+
+    func testHistorySummaryNeverTreatsVoidAsWinOrChallengeExpiryAsArchiveExpiry() {
+        let l = L(.ko)
+        XCTAssertEqual(l.onlineHistoryOutcome(OnlineBattleScreenRenderingTests.room(state: .void), localTrainerID: "synthetic-me"),
+                       "경기 무효 · 기록과 보상 변경 없음")
+        XCTAssertEqual(l.onlineHistoryOutcome(OnlineBattleScreenRenderingTests.room(state: .cancelled), localTrainerID: "synthetic-me"),
+                       "신청 취소")
+        XCTAssertEqual(l.onlineHistoryOutcome(OnlineBattleScreenRenderingTests.room(state: .declined), localTrainerID: "synthetic-me"),
+                       "신청 거절")
+        XCTAssertEqual(l.onlineHistoryOutcome(OnlineBattleScreenRenderingTests.room(state: .expired), localTrainerID: "synthetic-me"),
+                       "신청 만료")
+    }
+}
+
 
 extension OnlineBattlePresentationTests {
     func testImmediateSecondManualChoiceCannotSendAnotherRequest() {
