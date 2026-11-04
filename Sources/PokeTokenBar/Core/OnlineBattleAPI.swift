@@ -108,6 +108,17 @@ actor OnlineBattleAPI {
     }
     func me() async throws -> OnlineBattleAccount { try await get("me") }
     func group() async throws -> OnlineBattleGroupMembers { try await get("group") }
+    func standings() async throws -> OnlineBattleStandings {
+        let value: OnlineBattleStandings = try await get("standings")
+        guard !value.groupId.isEmpty, Set(value.rows.map(\.trainerId)).count == value.rows.count,
+              value.rows.allSatisfy({ row in
+                  !row.trainerId.isEmpty && [row.wins, row.losses, row.draws, row.streak, row.bestStreak].allSatisfy { $0 >= 0 } &&
+                  row.streak <= row.bestStreak && row.bestStreak <= row.wins &&
+                  row.winRate.map { $0.isFinite && (0...1).contains($0) } != false
+              }), value.championTrainerId.map({ id in value.rows.contains { $0.trainerId == id && $0.streak > 0 } }) != false
+        else { throw OnlineBattleFailure.invalidResponse }
+        return value
+    }
     func audit() async throws -> OnlineBattleAudit { try await get("audit") }
     func invites() async throws -> OnlineBattleInvites { try await get("invites") }
     func createInvite(ttlSeconds: Int? = nil, maxUses: Int? = nil) async throws -> OnlineBattleIssuedInvite {

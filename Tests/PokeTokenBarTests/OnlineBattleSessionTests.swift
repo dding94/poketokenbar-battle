@@ -117,10 +117,10 @@ final class OnlineBattleSessionTests: XCTestCase {
     private let account = OnlineBattleAccount(trainer: .init(trainerId: "trainer-one", displayEmail: "synthetic@example.invalid", role: .member, status: .active), group: .init(groupId: "group", name: "Test", hostTrainerId: "trainer-two"))
     private var engineURL: URL { URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("engine/dist/battle-engine.js") }
     private struct Fixture: Decodable { let battle: OnlineBattleView }
-    private func battle(_ index: Int = 0) throws -> OnlineBattleView {
+    private func battle(_ index: Int = 0, idOverride: String? = nil) throws -> OnlineBattleView {
         let fixture = try JSONDecoder().decode([Fixture].self, from: Data(contentsOf: XCTUnwrap(Bundle.module.url(forResource: "golden", withExtension: "json", subdirectory: "OnlineBattle"))))[index].battle
         // Resolver fixtures intentionally have arbitrary IDs; HTTP requires the server's bt_ namespace.
-        let id = "bt_" + fixture.battleId.replacingOccurrences(of: "-", with: "_")
+        let id = idOverride ?? "bt_" + fixture.battleId.replacingOccurrences(of: "-", with: "_")
         let bytes = try OnlineBattleResolver.journalBytes(battleID: id, readyToken: fixture.config!.readyToken, journal: fixture.journal)
         let hash = SHA256.hash(data: Data(bytes.utf8)).map { String(format: "%02x", $0) }.joined()
         var result = try JSONSerialization.jsonObject(with: JSONEncoder().encode(fixture.result)) as! [String: Any]
@@ -185,9 +185,211 @@ final class OnlineBattleSessionTests: XCTestCase {
         XCTAssertEqual(session.presentation.selectedHistoryBattle?.battleId, room.battleId)
     }
 
+    private func rematchPending(_ source: OnlineBattleView) throws -> OnlineBattleView {
+        var player = try JSONSerialization.jsonObject(with: JSONEncoder().encode(source.p1)) as! [String: Any]
+        var snapshot = player["snapshot"] as! [String: Any]
+        let maxHP = source.p1.snapshot!.publicInfo.stats["hp"]!
+        snapshot["hp"] = max(1, Int((Double(source.result!.finalHp.p1) / Double(maxHP) * Double(maxHP)).rounded(.down)))
+        player["snapshot"] = snapshot
+        return try changed(source, ["battleId": "bt_rematch", "state": "PENDING", "rematchOf": source.battleId,
+                                    "p1": player, "confirmed": false, "config": NSNull(), "result": NSNull(), "roundSeq": 0, "journal": []])
+    }
+
     private func activeOpponent(_ http: SessionHTTP, status: OnlineBattleTrainer.Status = .active) async throws {
         let member = OnlineBattleMember(trainerId: "trainer-two", displayEmail: "opponent@example.invalid", role: .member, status: status, joinedAt: 0, online: false)
         await http.route("/v1/group", try JSONEncoder().encode(OnlineBattleGroupMembers(group: account.group, members: [member])))
+    }
+
+    func testStandingsNotificationsCoalesceAndNeverReadWhileClosed() async throws {
+        let observer = SessionObserver()
+        let (session, http, _, _) = try await setup(observer: observer)
+        await session.bootstrap()
+        let payload = Data(#"{"groupId":"group","championTrainerId":null,"rows":[]}"#.utf8)
+        await http.route("/v1/standings", payload)
+        await observer.callback?(.standingsRefreshRequested)
+        var count = await http.count("/v1/standings"); XCTAssertEqual(count, 0)
+        await session.perform(.setPopoverVisible(true))
+        await http.suspendNext("/v1/standings")
+        let opening = Task { await session.perform(.showStandings) }
+        await http.waitUntilBlocked()
+        let battleReads = await http.count("/v1/battles")
+        for _ in 0..<20 { await observer.callback?(.standingsRefreshRequested) }
+        await http.resume(.init(status: 200, body: payload)); await opening.value
+        count = await http.count("/v1/standings"); XCTAssertEqual(count, 2)
+        let after = await http.count("/v1/battles"); XCTAssertEqual(after, battleReads)
+        await session.perform(.setPopoverVisible(false))
+        await observer.callback?(.standingsRefreshRequested)
+        await session.perform(.refreshStandings)
+        await session.refresh()
+        count = await http.count("/v1/standings"); XCTAssertEqual(count, 2)
+        await session.perform(.setPopoverVisible(true))
+        await session.perform(.refreshStandings)
+        count = await http.count("/v1/standings"); XCTAssertGreaterThanOrEqual(count, 3)
+        await session.perform(.backToLobby)
+        let closedCount = await http.count("/v1/standings")
+        await observer.callback?(.standingsRefreshRequested)
+        await session.refresh()
+        count = await http.count("/v1/standings"); XCTAssertEqual(count, closedCount)
+    }
+
+    func testStandingsLateResponseCannotSurviveCloseDisableOrRevocation() async throws {
+        for reset in 0..<4 {
+            let observer = SessionObserver(), connection = SessionConnection()
+            let (session, http, _, _) = try await setup(connection: connection, observer: observer)
+            await session.bootstrap(); await session.perform(.setPopoverVisible(true))
+            await http.suspendNext("/v1/standings")
+            let opening = Task { await session.perform(.showStandings) }
+            await http.waitUntilBlocked()
+            switch reset {
+            case 0: await session.perform(.backToLobby)
+            case 1: await session.setEnabled(false)
+            case 2:
+                await connection.setState(.revoked)
+                await observer.callback?(.changed(await connection.snapshot()))
+            default: await session.perform(.setPopoverVisible(false))
+            }
+            await http.resume(.init(status: 200, body: Data(#"{"groupId":"group","championTrainerId":null,"rows":[]}"#.utf8)))
+            await opening.value
+            XCTAssertNil(session.presentation.standings)
+            XCTAssertFalse(session.presentation.standingsLoading)
+            XCTAssertNil(session.presentation.standingsError)
+            if reset != 3 { XCTAssertFalse(session.presentation.showsStandings) }
+        }
+    }
+
+    func testStandingsRejectsMalformedRowsAndForeignGroupLocally() async throws {
+        let (session, http, _, _) = try await setup()
+        await session.bootstrap(); await session.perform(.setPopoverVisible(true))
+        let row: [String: Any] = ["trainerId": "other", "displayName": "Synthetic", "wins": 5, "losses": 0, "draws": 0, "streak": 2, "bestStreak": 3, "winRate": 1.0]
+        var invalidRows = [[row, row]]
+        for (field, value): (String, Any) in [("wins", -1), ("winRate", 1.5), ("streak", 4), ("bestStreak", 6)] {
+            var invalid = row; invalid[field] = value; invalidRows.append([invalid])
+        }
+        var payloads: [[String: Any]] = invalidRows.map { ["groupId": "group", "championTrainerId": NSNull(), "rows": $0] }
+        payloads.append(["groupId": "another-group", "championTrainerId": NSNull(), "rows": [row]])
+        payloads.append(["groupId": "group", "championTrainerId": "missing", "rows": [row]])
+        for payload in payloads {
+            await http.route("/v1/standings", try JSONSerialization.data(withJSONObject: payload))
+            await session.perform(.showStandings)
+            XCTAssertNil(session.presentation.standings)
+            XCTAssertNotNil(session.presentation.standingsError)
+            XCTAssertNil(session.presentation.notice)
+            XCTAssertEqual(session.presentation.phase, .lobby)
+        }
+    }
+
+    func testRematchRetryKeepsIntentAndRequiresFreshConsentForNewPendingRoom() async throws {
+        let source = try battle()
+        let pending = try rematchPending(source)
+        let (session, http, _, effects) = try await setup([source])
+        try await activeOpponent(http)
+        await session.bootstrap(); await session.perform(.prepareRematch(source.battleId))
+        session.presentation.selectedEntryID = "instance-one"
+        let path = "/v1/battles/\(source.battleId)/rematch"
+        await http.queue(path, [.init(status: 503, body: Data()), try response(pending)])
+        await session.perform(.submitRematch)
+        XCTAssertNotNil(session.presentation.rematchSourceID)
+        await session.perform(.selectEntry("instance-one"))
+        await session.perform(.submitRematch)
+        let bodies = await http.bodies(path)
+        XCTAssertEqual(bodies.count, 2)
+        if bodies.count == 2 { XCTAssertEqual(try JSONSerialization.jsonObject(with: bodies[0]) as? NSDictionary, try JSONSerialization.jsonObject(with: bodies[1]) as? NSDictionary) }
+        XCTAssertEqual(session.presentation.room?.state, .pending)
+        XCTAssertEqual(session.presentation.room?.confirmed, false)
+        XCTAssertNil(session.presentation.rematchSourceID)
+        XCTAssertEqual(effects.state.onlineBattleHolds.first?.key.battleID, "bt_rematch")
+        let starts = await http.count("/v1/battles/bt_rematch/start"); XCTAssertEqual(starts, 0)
+    }
+
+    func testRematchFindsLostResponseBySourceAndDoesNotCreateDuplicate() async throws {
+        let source = try battle()
+        let pending = try rematchPending(source)
+        let (session, http, _, effects) = try await setup([source])
+        try await activeOpponent(http)
+        await session.bootstrap(); await session.perform(.prepareRematch(source.battleId))
+        session.presentation.selectedEntryID = "instance-one"
+        await session.perform(.submitRematch) // Lost response; the server created the room.
+        await http.route("/v1/battles", try JSONEncoder().encode(OnlineBattlePage(battles: [source, pending], before: nil)))
+        await session.perform(.submitRematch)
+        let posts = await http.count("/v1/battles/\(source.battleId)/rematch"); XCTAssertEqual(posts, 1)
+        XCTAssertEqual(session.presentation.room?.battleId, pending.battleId)
+        XCTAssertNil(session.presentation.rematchSourceID)
+        XCTAssertEqual(effects.state.onlineBattleHolds.count, 1)
+    }
+
+    func testRematchChangedSnapshotAndSourceGetNewIntent() async throws {
+        let source = try battle(), other = try battle(idOverride: "bt_other")
+        let (session, http, _, effects) = try await setup([source, other])
+        try await activeOpponent(http)
+        await session.bootstrap(); await session.perform(.openReplay(source.battleId)); await session.perform(.prepareRematch(source.battleId))
+        session.presentation.selectedEntryID = "instance-one"
+        await session.perform(.submitRematch)
+        effects.setHealthShare(0.5, of: "instance-one")
+        await session.perform(.submitRematch)
+        let bodies = await http.bodies("/v1/battles/\(source.battleId)/rematch")
+        XCTAssertEqual(bodies.count, 2)
+        if bodies.count == 2 {
+            let first = try JSONSerialization.jsonObject(with: bodies[0]) as! [String: Any]
+            let second = try JSONSerialization.jsonObject(with: bodies[1]) as! [String: Any]
+            XCTAssertNotEqual(first["requestId"] as? String, second["requestId"] as? String)
+            XCTAssertNotEqual((first["snapshot"] as? NSDictionary)?["hp"] as? Int, (second["snapshot"] as? NSDictionary)?["hp"] as? Int)
+        }
+        await session.perform(.cancelRematch)
+        await session.perform(.openReplay(other.battleId))
+        await session.perform(.prepareRematch(other.battleId))
+        XCTAssertEqual(session.presentation.rematchSourceID, other.battleId)
+        await session.perform(.submitRematch)
+        let otherBodies = await http.bodies("/v1/battles/\(other.battleId)/rematch")
+        XCTAssertEqual(otherBodies.count, 1)
+        if let previous = bodies.last, let current = otherBodies.first {
+            let old = try JSONSerialization.jsonObject(with: previous) as! [String: Any]
+            let new = try JSONSerialization.jsonObject(with: current) as! [String: Any]
+            XCTAssertNotEqual(old["requestId"] as? String, new["requestId"] as? String)
+        }
+    }
+
+    func testRematchRejectsDepartedOpponentFaintedHeldAndNonCompletedSources() async throws {
+        let source = try battle()
+        let (session, http, _, effects) = try await setup([source])
+        try await activeOpponent(http)
+        await session.bootstrap()
+        XCTAssertTrue(session.presentation.canRematch(source))
+        for candidate in session.presentation.roster { effects.setHealthShare(0, of: candidate.id) }
+        await session.perform(.prepareRematch(source.battleId))
+        XCTAssertNil(session.presentation.rematchSourceID)
+        for candidate in session.presentation.roster { effects.setHealthShare(1, of: candidate.id) }
+        try await activeOpponent(http, status: .left); await session.refresh()
+        await session.perform(.prepareRematch(source.battleId))
+        XCTAssertNil(session.presentation.rematchSourceID)
+        try await activeOpponent(http); await session.refresh()
+        for candidate in session.presentation.roster {
+            try effects.holdOnlineBattle(key: .init(scope: .init(originHash: "other", groupID: "other", trainerID: "other"), battleID: candidate.id), instanceID: candidate.id)
+        }
+        await session.perform(.prepareRematch(source.battleId))
+        XCTAssertNil(session.presentation.rematchSourceID)
+        for state in ["VOID", "CANCELLED", "PENDING"] {
+            XCTAssertFalse(session.presentation.canRematch(try changed(source, ["state": state])))
+        }
+        let posts = await http.count("/v1/battles/\(source.battleId)/rematch"); XCTAssertEqual(posts, 0)
+    }
+
+    func testRematchHealthChangeDuringSubmissionCancelsNewConsent() async throws {
+        let source = try battle()
+        let pending = try rematchPending(source)
+        let (session, http, _, effects) = try await setup([source])
+        try await activeOpponent(http)
+        await session.bootstrap(); await session.perform(.prepareRematch(source.battleId))
+        session.presentation.selectedEntryID = "instance-one"
+        let cancelled = try changed(pending, ["state": "CANCELLED"])
+        await http.route("/v1/battles/bt_rematch/cancel", try JSONEncoder().encode(cancelled))
+        await http.suspendNext("/v1/battles/\(source.battleId)/rematch")
+        let submit = Task { await session.perform(.submitRematch) }
+        await http.waitUntilBlocked()
+        effects.setHealthShare(0.5, of: "instance-one")
+        await http.resume(try response(pending)); await submit.value
+        let cancels = await http.count("/v1/battles/bt_rematch/cancel"); XCTAssertEqual(cancels, 1)
+        XCTAssertTrue(effects.state.onlineBattleHolds.isEmpty)
+        XCTAssertNotNil(session.presentation.notice)
     }
 
     func testHistoryRevocationDoesNotRepublishCachedRowsAfterLateFinalRead() async throws {

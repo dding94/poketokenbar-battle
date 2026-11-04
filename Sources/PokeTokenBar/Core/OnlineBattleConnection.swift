@@ -14,6 +14,7 @@ enum OnlineBattleConnectionEvent: Sendable {
     case changed(OnlineBattleConnectionSnapshot)
     /// Notifications trigger authoritative HTTP reads; they never award results.
     case refreshRequested
+    case standingsRefreshRequested
 }
 enum OnlineBattleSocketEvent: Sendable, Equatable {
     case text(String), closed(Int), failed(Int?)
@@ -184,6 +185,8 @@ actor OnlineBattleConnection: OnlineBattleConnecting {
                 await publish()
                 guard epoch == generation else { return }
                 await observer(.refreshRequested)
+            } else if message.type == "standings_changed", state == .connected {
+                await observer(.standingsRefreshRequested)
             } else if ["presence", "group_changed", "battle_changed", "battle_round", "battle_void"].contains(message.type), state == .connected {
                 await observer(.refreshRequested)
             } else { await terminate(.protocolError) }

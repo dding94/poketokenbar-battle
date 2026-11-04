@@ -22,8 +22,17 @@ final class OnlineBattlePresentation {
     var rematchSourceID: String?
     var rematchOpponent: OnlineBattleMember? { selectedOpponent }
     var rematchMode: OnlineBattleMode? { rematchSourceID == nil ? nil : mode }
-    var canSubmitRematch: Bool { false }
-    func canRematch(_ battle: OnlineBattleView) -> Bool { false }
+    var canSubmitRematch: Bool {
+        guard rematchSourceID != nil, !isBusy, let selectedEntry, entryIsEligible(selectedEntry),
+              let account, let opponent = selectedOpponent else { return false }
+        return opponent.status == .active && opponent.trainerId != account.trainer.trainerId
+    }
+    func canRematch(_ battle: OnlineBattleView) -> Bool {
+        guard !isBusy, !showsStandings, battle.state == .completed, let account,
+              let side = battle.side(for: account.trainer.trainerId), roster.contains(where: entryIsEligible) else { return false }
+        let target = side == .p1 ? battle.p2.trainerId : battle.p1.trainerId
+        return members.contains { $0.trainerId == target && $0.status == .active && target != account.trainer.trainerId }
+    }
     var showsHistory = false
     var selectedHistoryBattle: OnlineBattleView?
     var replay: OnlineBattleReplay?
@@ -68,32 +77,39 @@ final class OnlineBattlePresentation {
         entry.snapshot != nil && entry.blockedReason == nil && (entryHP[entry.id] ?? 0) > 0 && !blockedEntryIDs.contains(entry.id)
     }
     var canChallenge: Bool {
-        guard !showsHistory, phase == .lobby, !isBusy, let account, let selectedEntry, entryIsEligible(selectedEntry),
+        guard !showsHistory, !showsStandings, rematchSourceID == nil, phase == .lobby, !isBusy, let account, let selectedEntry, entryIsEligible(selectedEntry),
               let opponent = selectedOpponent else { return false }
         return opponent.status == .active && opponent.trainerId != account.trainer.trainerId
     }
     var canAccept: Bool {
-        guard !showsHistory, !isBusy, room?.state == .pending, localSide == .p2,
+        guard !showsHistory, !showsStandings, rematchSourceID == nil, !isBusy, room?.state == .pending, localSide == .p2,
               let selectedEntry else { return false }
         return entryIsEligible(selectedEntry)
     }
-    var canConfirm: Bool { !showsHistory && !isBusy && room?.state == .accepted && localSide == .p1 && room?.confirmed == false }
-    var canPrepare: Bool { !showsHistory && !isBusy && canStart && room?.confirmed == true && [.accepted, .ready].contains(room?.state) }
+    var canConfirm: Bool { !showsHistory && !showsStandings && rematchSourceID == nil && !isBusy && room?.state == .accepted && localSide == .p1 && room?.confirmed == false }
+    var canPrepare: Bool { !showsHistory && !showsStandings && rematchSourceID == nil && !isBusy && canStart && room?.confirmed == true && [.accepted, .ready].contains(room?.state) }
     func canChooseMove(_ slot: Int) -> Bool {
-        !showsHistory && phase == .arena && room?.state == .running && room?.mode == .manual && !isBusy && !choiceSubmitted &&
+        !showsHistory && !showsStandings && rematchSourceID == nil && phase == .arena && room?.state == .running && room?.mode == .manual && !isBusy && !choiceSubmitted &&
         request?.kind == "move" && request?.moves.contains { $0.slot == slot && !$0.disabled && $0.pp > 0 } == true
     }
     func send(_ action: OnlineBattleUIAction) {
         // These are presentation guards. The session independently validates server state and replay state.
         switch action {
-        case .showStandings, .refreshStandings, .prepareRematch, .submitRematch, .cancelRematch:
-            break
+        case .showStandings:
+            guard phase == .lobby, !isBusy, account != nil, rematchSourceID == nil else { return }
+        case .refreshStandings:
+            guard showsStandings else { return }
+        case .prepareRematch(let id):
+            guard let battle = selectedHistoryBattle?.battleId == id ? selectedHistoryBattle : room,
+                  battle.battleId == id, canRematch(battle) else { return }
+        case .submitRematch: guard canSubmitRematch else { return }
+        case .cancelRematch: guard rematchSourceID != nil else { return }
         case .setPopoverVisible:
             break
         case .backToLobby:
             break
         case .showHistory:
-            guard phase == .lobby, !isBusy else { return }
+            guard phase == .lobby, !isBusy, !showsStandings, rematchSourceID == nil else { return }
             showsHistory = true
         case .openReplay(let id):
             guard showsHistory, !historyBusy,
@@ -112,10 +128,10 @@ final class OnlineBattlePresentation {
             guard let entry = roster.first(where: { $0.id == id }), entryIsEligible(entry) else { return }
             selectedEntryID = id
         case .selectOpponent(let id):
-            guard let account, members.contains(where: { $0.trainerId == id && $0.status == .active && id != account.trainer.trainerId }) else { return }
+            guard rematchSourceID == nil, let account, members.contains(where: { $0.trainerId == id && $0.status == .active && id != account.trainer.trainerId }) else { return }
             selectedOpponentID = id
         case .setMode(let mode):
-            guard !showsHistory else { return }
+            guard !showsHistory, !showsStandings, rematchSourceID == nil else { return }
             self.mode = mode
         case .challenge: guard canChallenge else { return }
         case .accept: guard canAccept else { return }
@@ -124,8 +140,8 @@ final class OnlineBattlePresentation {
         case .chooseMove(let slot):
             guard canChooseMove(slot) else { return }
             choiceSubmitted = true
-        case .decline: guard !showsHistory, !isBusy, localSide == .p2, room?.state == .pending else { return }
-        case .cancel: guard !showsHistory, !isBusy, [.pending, .accepted, .ready].contains(room?.state) else { return }
+        case .decline: guard !showsHistory, !showsStandings, rematchSourceID == nil, !isBusy, localSide == .p2, room?.state == .pending else { return }
+        case .cancel: guard !showsHistory, !showsStandings, rematchSourceID == nil, !isBusy, [.pending, .accepted, .ready].contains(room?.state) else { return }
         case .retryCredentialSave: guard !isBusy, canRetryCredentialSave else { return }
         case .configureServer(let address): guard !isBusy, (try? OnlineBattleOrigin(address)) != nil else { return }
         case .join(let code, let email): guard !isBusy, !code.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
@@ -133,7 +149,7 @@ final class OnlineBattlePresentation {
         case .acknowledgeRecoveryCode:
             guard recoveryCode != nil else { return }
             recoveryCode = nil
-        case .openBattle(let id): guard !showsHistory, !isBusy, battles.contains(where: { $0.battleId == id && $0.state.isActive }) else { return }
+        case .openBattle(let id): guard !showsHistory, !showsStandings, rematchSourceID == nil, !isBusy, battles.contains(where: { $0.battleId == id && $0.state.isActive }) else { return }
         case .refresh, .dismissResult: guard !isBusy else { return }
         }
         onAction(action)

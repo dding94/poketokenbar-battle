@@ -31,6 +31,10 @@ final class OnlineBattleSession {
     private var authenticated = false
     private var generation: UInt64 = 0
     private var pendingGrant: OnlineBattleGrant?
+    private var standingsTask: Task<Void, Never>?
+    private var standingsAgain = false
+    private var standingsRevision: UInt64 = 0
+    private var rematchFromHistory = false
     private var refreshTask: Task<Void, Never>?
     private var ticker: Task<Void, Never>?
     private var actionInFlight = false
@@ -46,6 +50,7 @@ final class OnlineBattleSession {
     private var selectedBattleID: String?
     private var checkedDeadlines: [String: Double] = [:]
     private struct ChallengeIntent {
+        let sourceID: String?
         let requestID: String
         let target: String
         let mode: OnlineBattleMode
@@ -81,7 +86,7 @@ final class OnlineBattleSession {
         for resolver in resolvers.values { resolver.close() }; resolvers = [:]; views = [:]; historyViews = [:]
         selectedBattleID = nil; resultByBattleID = [:]; prefersLobby = false; checkedDeadlines = [:]; nextRecoveryRead = nil
         presentation.account = nil; presentation.members = []; presentation.battles = []
-        clearHistory(); presentation.liveLogs = []
+        resetExtras(); clearHistory(); presentation.liveLogs = []
         presentation.room = nil; presentation.arena = nil; presentation.request = nil
         presentation.recoveryCode = nil; presentation.result = nil; presentation.canRetryCredentialSave = false
         presentation.canStart = false; presentation.isBusy = false; presentation.phase = .setup
@@ -126,7 +131,7 @@ final class OnlineBattleSession {
             settings = next; bootstrapped = false
             presentation.serverAddress = next.serverURL ?? ""
             presentation.account = nil; presentation.members = []; presentation.battles = []
-            clearHistory(); presentation.liveLogs = []
+            resetExtras(); clearHistory(); presentation.liveLogs = []
             presentation.room = nil; presentation.arena = nil; presentation.request = nil
             presentation.result = nil; presentation.recoveryCode = nil; presentation.notice = nil
             presentation.canRetryCredentialSave = false; presentation.canStart = false
@@ -177,6 +182,8 @@ final class OnlineBattleSession {
             }
         case .refreshRequested:
             requestRefresh()
+        case .standingsRefreshRequested:
+            requestStandingsRefresh()
         }
     }
     func join(inviteCode: String, email: String) async {
@@ -201,7 +208,7 @@ final class OnlineBattleSession {
             selectedBattleID = nil; prefersLobby = false; checkedDeadlines = [:]; nextRecoveryRead = nil
             prepared = [:]; acknowledgedStarts = []; submittedReports = []; challengeIntent = nil
             presentation.account = nil; presentation.members = []; presentation.battles = []
-            clearHistory(); presentation.liveLogs = []
+            resetExtras(); clearHistory(); presentation.liveLogs = []
             presentation.room = nil; presentation.arena = nil; presentation.request = nil
             presentation.result = nil; presentation.recoveryCode = nil; presentation.canStart = false
             presentation.phase = .setup
@@ -227,6 +234,7 @@ final class OnlineBattleSession {
     /// One shared read owns reconciliation. Notifications never apply effects directly.
     func refresh() async {
         guard onlineAllowed, authenticated, let api else { return }
+        requestStandingsRefresh()
         if let refreshTask { await refreshTask.value; return }
         let epoch = generation
         let task = Task { [weak self] in
@@ -418,7 +426,8 @@ final class OnlineBattleSession {
     private func selectedSnapshot(allow key: OnlineBattleReceiptKey? = nil, id: String? = nil) throws -> OnlineBattleSnapshot {
         try rebuildRoster()
         guard let selected = id ?? presentation.selectedEntryID,
-              let snapshot = presentation.roster.first(where: { $0.id == selected })?.snapshot,
+              let candidate = presentation.roster.first(where: { $0.id == selected }), candidate.blockedReason == nil,
+              let snapshot = candidate.snapshot, snapshot.engineHash == BattleEngineManifest.sha256,
               let hp = presentation.entryHP[selected], hp > 0 else { throw OnlineBattleFailure.invalidRequest }
         if effects.isHeldForBattle(instanceID: selected) {
             guard let key, effects.companionState()?.state.onlineBattleHolds.contains(where: { $0.key == key && $0.instanceID == selected }) == true else { throw OnlineBattleEffectError.individualHeld }
@@ -475,16 +484,41 @@ final class OnlineBattleSession {
     }
     func perform(_ action: OnlineBattleUIAction) async {
         switch action {
-        case .setPopoverVisible(let open): popoverOpen = open; await connection?.setPopoverOpen(open); return
-        case .selectEntry(let id): presentation.selectedEntryID = id; challengeIntent = nil; return
-        case .selectOpponent(let id): presentation.selectedOpponentID = id; challengeIntent = nil; return
-        case .setMode(let mode): presentation.mode = mode; challengeIntent = nil; return
+        case .setPopoverVisible(let open):
+            popoverOpen = open
+            if open { requestStandingsRefresh() } else { invalidateStandingsRead() }
+            await connection?.setPopoverOpen(open); return
+        case .showStandings:
+            guard onlineAllowed, authenticated, presentation.account != nil, presentation.phase == .lobby,
+                  !actionInFlight, presentation.rematchSourceID == nil else { return }
+            clearHistory(); presentation.showsStandings = true
+            await refreshStandings(); return
+        case .refreshStandings: await refreshStandings(); return
+        case .prepareRematch(let id): prepareRematch(id); return
+        case .cancelRematch:
+            presentation.rematchSourceID = nil
+            presentation.showsHistory = rematchFromHistory
+            rematchFromHistory = false
+            navigationRevision &+= 1
+            return
+        case .selectEntry(let id):
+            if presentation.selectedEntryID != id { challengeIntent = nil }
+            presentation.selectedEntryID = id; return
+        case .selectOpponent(let id):
+            guard presentation.rematchSourceID == nil else { return }
+            if presentation.selectedOpponentID != id { challengeIntent = nil }
+            presentation.selectedOpponentID = id; return
+        case .setMode(let mode):
+            guard presentation.rematchSourceID == nil else { return }
+            if presentation.mode != mode { challengeIntent = nil }
+            presentation.mode = mode; return
         case .acknowledgeRecoveryCode: presentation.recoveryCode = nil; return
-        case .dismissResult, .backToLobby: clearHistory(); prefersLobby = true; navigationRevision &+= 1; selectedBattleID = nil; publish(); return
+        case .dismissResult, .backToLobby: resetExtras(); clearHistory(); prefersLobby = true; navigationRevision &+= 1; selectedBattleID = nil; publish(); return
         case .openBattle(let id): prefersLobby = false; navigationRevision &+= 1; selectedBattleID = id; publish(); return
         case .configureServer(let value): await configureServer(value); return
         case .showHistory:
             guard onlineAllowed, authenticated, presentation.account != nil else { return }
+            guard !presentation.showsStandings, presentation.rematchSourceID == nil else { return }
             clearHistory(); presentation.showsHistory = true; return
         case .openReplay(let id): openReplay(id); return
         case .seekReplay(let index):
@@ -494,7 +528,7 @@ final class OnlineBattleSession {
         case .closeReplay:
             clearHistory(keepOpen: onlineAllowed && authenticated && presentation.showsHistory); return
         case .challenge, .accept, .confirm, .prepareBattle, .decline, .cancel, .chooseMove:
-            guard !presentation.showsHistory else { return }
+            guard !presentation.showsHistory, !presentation.showsStandings, presentation.rematchSourceID == nil else { return }
         default: break
         }
         guard onlineAllowed, !actionInFlight else { return }
@@ -512,6 +546,73 @@ final class OnlineBattleSession {
             catch { publish(); await handle(error, epoch: epoch) }
         }
     }
+    private var standingsVisible: Bool {
+        onlineAllowed && authenticated && popoverOpen && presentation.showsStandings && presentation.account != nil
+    }
+    private func invalidateStandingsRead() {
+        standingsRevision &+= 1
+        standingsTask?.cancel(); standingsTask = nil; standingsAgain = false
+        presentation.standingsLoading = false
+    }
+    private func resetExtras() {
+        invalidateStandingsRead()
+        presentation.showsStandings = false; presentation.standings = nil; presentation.standingsError = nil
+        presentation.rematchSourceID = nil; rematchFromHistory = false
+    }
+    private func requestStandingsRefresh() {
+        guard standingsVisible else { return }
+        if standingsTask != nil { standingsAgain = true; return }
+        startStandingsRead()
+    }
+    private func refreshStandings() async {
+        guard standingsVisible else { return }
+        if standingsTask != nil { standingsAgain = true } else { startStandingsRead() }
+        await standingsTask?.value
+    }
+    private func startStandingsRead() {
+        guard standingsVisible, let api, let account = presentation.account else { return }
+        let epoch = generation, revision = standingsRevision
+        presentation.standingsLoading = true
+        standingsTask = Task { [weak self] in
+            guard let self else { return }
+            repeat {
+                self.standingsAgain = false
+                do {
+                    let value = try await api.standings()
+                    try self.current(epoch)
+                    guard self.standingsVisible, self.standingsRevision == revision else { return }
+                    guard value.groupId == account.group.groupId else { throw OnlineBattleFailure.invalidResponse }
+                    self.presentation.standings = value; self.presentation.standingsError = nil
+                } catch {
+                    guard self.standingsVisible, self.standingsRevision == revision, self.generation == epoch,
+                          !(error is CancellationError), error as? OnlineBattleFailure != .staleGeneration else { return }
+                    if error as? OnlineBattleFailure == .unauthorized { await self.handle(error, epoch: epoch); return }
+                    self.presentation.standingsError = "그룹 전적을 불러오지 못했어요. 서버 지원 여부와 연결을 확인하고 다시 시도해 주세요."
+                }
+            } while self.standingsAgain && self.standingsVisible && self.standingsRevision == revision && self.generation == epoch
+            if self.standingsRevision == revision, self.generation == epoch {
+                self.standingsTask = nil; self.presentation.standingsLoading = false
+            }
+        }
+    }
+    private func prepareRematch(_ id: String) {
+        guard onlineAllowed, authenticated, !actionInFlight,
+              let source = presentation.selectedHistoryBattle?.battleId == id ? presentation.selectedHistoryBattle : presentation.room,
+              source.battleId == id, let account = presentation.account else { return }
+        do { try rebuildRoster() } catch { return }
+        guard presentation.canRematch(source), let side = source.side(for: account.trainer.trainerId) else { return }
+        rematchFromHistory = presentation.showsHistory
+        if challengeIntent?.sourceID != id { challengeIntent = nil }
+        presentation.rematchSourceID = id
+        presentation.selectedOpponentID = side == .p1 ? source.p2.trainerId : source.p1.trainerId
+        presentation.mode = source.mode
+        if presentation.selectedEntry.map({ presentation.entryIsEligible($0) }) != true {
+            presentation.selectedEntryID = presentation.roster.first(where: presentation.entryIsEligible)?.id
+        }
+        presentation.showsHistory = false; presentation.notice = nil
+        navigationRevision &+= 1
+    }
+
     /// History owns only immutable display frames. It never enters the live process/settlement path.
     private func clearHistory(keepOpen: Bool = false) {
         presentation.showsHistory = keepOpen
@@ -554,21 +655,36 @@ final class OnlineBattleSession {
 
     private func battleAction(_ action: OnlineBattleUIAction, epoch: UInt64) async throws {
         let navigation = navigationRevision
+        let isRematch: Bool
+        if case .submitRematch = action { isRematch = true } else { isRematch = false }
         if case .challenge = action { await refresh(); try current(epoch) }
+        if isRematch { await refresh(); try current(epoch) }
         if case .accept = action { await refresh(); try current(epoch) }
         guard onlineAllowed, authenticated, reconciled, let api, let account = presentation.account else { throw OnlineBattleFailure.invalidRequest }
         var result: OnlineBattleView
-        if case .challenge = action {
+        let isChallenge: Bool
+        if case .challenge = action { isChallenge = true } else { isChallenge = false }
+        if isChallenge || isRematch {
+            let sourceID = isRematch ? presentation.rematchSourceID : nil
+            if isRematch {
+                guard let sourceID, let source = historyViews[sourceID] ?? views[sourceID], source.state == .completed,
+                      let side = source.side(for: account.trainer.trainerId) else { throw OnlineBattleFailure.invalidRequest }
+                let opponent = side == .p1 ? source.p2.trainerId : source.p1.trainerId
+                guard presentation.selectedOpponentID == opponent, presentation.mode == source.mode,
+                      presentation.members.contains(where: { $0.trainerId == opponent && $0.status == .active }) else { throw OnlineBattleFailure.invalidRequest }
+            }
             let previousRoom = challengeIntent.flatMap { intent in
-                views.values.first { $0.state.isActive && $0.p1.trainerId == account.trainer.trainerId && $0.p2.trainerId == intent.target && $0.p1.snapshot == intent.snapshot && $0.mode == intent.mode }
+                views.values.first { $0.state.isActive && $0.rematchOf == intent.sourceID && $0.p1.trainerId == account.trainer.trainerId && $0.p2.trainerId == intent.target && $0.p1.snapshot == intent.snapshot && $0.mode == intent.mode }
             }
             let snapshot = try selectedSnapshot(allow: previousRoom.map { try receiptKey($0, account: account) })
             guard let target = presentation.selectedOpponentID, target != account.trainer.trainerId else { throw OnlineBattleFailure.invalidRequest }
-            if challengeIntent?.snapshot != snapshot || challengeIntent?.target != target || challengeIntent?.mode != presentation.mode {
-                challengeIntent = .init(requestID: UUID().uuidString, target: target, mode: presentation.mode, snapshot: snapshot)
+            if challengeIntent?.sourceID != sourceID || challengeIntent?.snapshot != snapshot || challengeIntent?.target != target || challengeIntent?.mode != presentation.mode {
+                challengeIntent = .init(sourceID: sourceID, requestID: UUID().uuidString, target: target, mode: presentation.mode, snapshot: snapshot)
             }
             let intent = challengeIntent!
-            result = try await api.createBattle(requestId: intent.requestID, targetTrainerId: intent.target, mode: intent.mode, snapshot: intent.snapshot)
+            if let previousRoom, previousRoom.p1.snapshot == intent.snapshot, previousRoom.rematchOf == intent.sourceID { result = previousRoom }
+            else if let sourceID { result = try await api.rematch(id: sourceID, requestId: intent.requestID, snapshot: intent.snapshot) }
+            else { result = try await api.createBattle(requestId: intent.requestID, targetTrainerId: intent.target, mode: intent.mode, snapshot: intent.snapshot) }
             try current(epoch)
             // A local evolution, heal, or practice entry during the request invalidates consent.
             guard (try? selectedSnapshot(allow: receiptKey(result, account: account), id: snapshot.instanceId)) == snapshot else {
@@ -577,6 +693,9 @@ final class OnlineBattleSession {
                 throw OnlineBattleFailure.invalidRequest
             }
             challengeIntent = nil
+            if isRematch, navigation == navigationRevision {
+                presentation.rematchSourceID = nil; rematchFromHistory = false; clearHistory()
+            }
         } else {
             guard let room = presentation.room else { throw OnlineBattleFailure.invalidRequest }
             switch action {
@@ -641,7 +760,7 @@ final class OnlineBattleSession {
         guard epoch == generation else { return }
         authenticated = false; reconciled = false
         presentation.canStart = false; presentation.phase = .setup; presentation.account = nil
-        clearHistory(); historyViews = [:]; presentation.battles = []; presentation.liveLogs = []
+        resetExtras(); clearHistory(); historyViews = [:]; presentation.battles = []; presentation.liveLogs = []
         presentation.connectionStatus = "접속키가 만료되었어요. 복구코드로 다시 연결해 주세요"
         ticker?.cancel(); ticker = nil
         await api?.setAccessKey(nil)
