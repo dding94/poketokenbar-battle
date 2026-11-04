@@ -17,7 +17,7 @@ on:
         description: Validation scope
         type: choice
         default: app
-        options: [app, engine, engine-contract]
+        options: [app, engine, engine-contract, all]
       macos:
         description: Engine runner selection
         type: choice
@@ -38,9 +38,9 @@ jobs:
   # under the coverage gate. test-union checks that the shards ran every listed test once between them.
   build-test:
     needs: changes
-    # A dispatch skips `changes` and picks the scope itself; !cancelled() keeps that skipped need from
+    # A partial dispatch skips `changes` and picks the scope itself; !cancelled() keeps that skipped need from
     # skipping this job too.
-    if: ${{ !cancelled() && ((github.event_name == 'workflow_dispatch' && inputs.scope == 'app') || needs.changes.outputs.app == 'true') }}
+    if: ${{ !cancelled() && ((github.event_name == 'workflow_dispatch' && (inputs.scope == 'app' || inputs.scope == 'all')) || needs.changes.outputs.app == 'true') }}
     strategy:
       fail-fast: false
       matrix:
@@ -151,7 +151,7 @@ jobs:
   secret-scan:
     needs: changes
     # A dispatch skips `changes`; !cancelled() keeps that skipped need from skipping this job too.
-    if: ${{ !cancelled() && (inputs.scope || 'app') == 'app' }}
+    if: ${{ !cancelled() && ((inputs.scope || 'app') == 'app' || inputs.scope == 'all') }}
     name: secret-scan
     runs-on: ubuntu-latest
     timeout-minutes: 3
@@ -174,7 +174,8 @@ jobs:
   # changed, and the server job when server/ or this workflow changed. A PR compares with its base, a push with the
   # newest green push run it builds on (scripts/changed-since-green.sh says why).
   changes:
-    if: ${{ github.event_name != 'workflow_dispatch' }}
+    # Release preparation can request all gates at an exact HEAD even when only documentation changed.
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.scope == 'all' }}
     name: changes
     runs-on: ubuntu-latest
     # Seconds of work (a full-history checkout, three API calls and diffs); 3 minutes like secret-scan.
@@ -226,13 +227,13 @@ jobs:
 
   determinism:
     needs: changes
-    # A dispatch skips `changes` and picks the scope itself; !cancelled() keeps that skipped need from
+    # A partial dispatch skips `changes` and picks the scope itself; !cancelled() keeps that skipped need from
     # skipping this job too.
     if: ${{ !cancelled() && ((github.event_name == 'workflow_dispatch' && inputs.scope != 'app') || needs.changes.outputs.engine == 'true') }}
     strategy:
       fail-fast: false
       matrix:
-        os: ${{ (inputs.macos || 'both') == 'both' && fromJSON('["macos-15","macos-26"]') || fromJSON(format('["{0}"]', inputs.macos)) }}
+        os: ${{ (inputs.scope == 'all' || (inputs.macos || 'both') == 'both') && fromJSON('["macos-15","macos-26"]') || fromJSON(format('["{0}"]', inputs.macos)) }}
     runs-on: ${{ matrix.os }}
     # About 1.5x the slowest green run (614 s on macos-15, 2026-10-30; the corpus alone took 186 s).
     timeout-minutes: 15
@@ -252,18 +253,18 @@ jobs:
           ./scripts/check-test-filter.sh "$FILTER" "$RUNNER_TEMP/jsc-boundary.log"
           ./scripts/battle-coverage.sh
       - name: Install pinned dependencies
-        if: ${{ (inputs.scope || 'engine') == 'engine' }}
+        if: ${{ (inputs.scope || 'engine') == 'engine' || inputs.scope == 'all' }}
         working-directory: engine
         run: npm ci --ignore-scripts
       - name: Engine contracts and deterministic corpus
-        if: ${{ (inputs.scope || 'engine') == 'engine' }}
+        if: ${{ (inputs.scope || 'engine') == 'engine' || inputs.scope == 'all' }}
         working-directory: engine
         run: npm test && npm run corpus && npm run compatibility
 
   # The battle server (PR 04; contract in docs/BATTLE_PLAN.md, Appendix B), a Node project of its own.
   server:
     needs: changes
-    if: ${{ needs.changes.outputs.server == 'true' }}
+    if: ${{ needs.changes.outputs.server == 'true' || (github.event_name == 'workflow_dispatch' && inputs.scope == 'all') }}
     name: server
     runs-on: ubuntu-latest
     # PR 06 took 37 s; two minutes leaves install/startup headroom on the standard runner.
