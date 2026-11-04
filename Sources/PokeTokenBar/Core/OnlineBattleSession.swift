@@ -97,7 +97,7 @@ final class OnlineBattleSession {
     /// Notification delivery never waits for a whole battle. Changes during a read retain one follow-up read.
     func requestRefresh() {
         guard onlineAllowed, authenticated else { return }
-        if refreshTask != nil { refreshAgain = true }
+        if refreshTask != nil { refreshAgain = true; requestStandingsRefresh() }
         else { Task { [weak self] in await self?.refresh() } }
     }
     func bootstrap() async {
@@ -275,7 +275,7 @@ final class OnlineBattleSession {
                 try await process(room, account: account, api: api, epoch: epoch)
             }
             try current(epoch); reconciled = true
-            try rebuildRoster(); publish()
+            try rebuildRoster(); reconcileRematchIntent(account: account); publish()
             if let connection { let snapshot = await connection.snapshot(); try current(epoch); presentation.canStart = snapshot.state == .connected }
         } catch {
             guard epoch == generation, onlineAllowed else { return }
@@ -595,6 +595,19 @@ final class OnlineBattleSession {
             }
         }
     }
+    /// A lost POST response can be discovered by the ordinary list read. It is the same
+    /// explicitly submitted intent, so expose its room instead of trapping the UI on a held entry.
+    private func reconcileRematchIntent(account: OnlineBattleAccount) {
+        guard !actionInFlight, let intent = challengeIntent, let sourceID = intent.sourceID,
+              presentation.rematchSourceID == sourceID,
+              let room = views.values.first(where: {
+                  $0.state.isActive && $0.rematchOf == sourceID && $0.p1.trainerId == account.trainer.trainerId &&
+                  $0.p2.trainerId == intent.target && $0.mode == intent.mode && $0.p1.snapshot == intent.snapshot
+              }), (try? selectedSnapshot(allow: receiptKey(room, account: account))) == intent.snapshot else { return }
+        challengeIntent = nil; presentation.rematchSourceID = nil; rematchFromHistory = false
+        clearHistory(); prefersLobby = false; selectedBattleID = room.battleId
+    }
+
     private func prepareRematch(_ id: String) {
         guard onlineAllowed, authenticated, !actionInFlight,
               let source = presentation.selectedHistoryBattle?.battleId == id ? presentation.selectedHistoryBattle : presentation.room,
