@@ -35,7 +35,7 @@ if name=='git':
     elif args[:1]==['log']: print('feat: battle screen' if os.environ.get('DOC_FAIL') else '')
     elif args[:1]==['rev-parse']: print(os.environ.get('BRANCH','feat/release-fixture') if '--abbrev-ref' in args else '1'*40)
     elif args[:1]==['status']: print(' M source.swift' if os.environ.get('DIRTY') else '')
-    elif args[:1]==['ls-files']: print(os.environ.get('UNTRACKED_SOURCE',''))
+    elif args[:1]==['ls-files']: print(os.environ.get('UNTRACKED_SOURCE','') or ('Sources/New.swift' if pathlib.Path('Sources/New.swift').exists() else ''))
     elif args[:1] and args[0] in ('add','commit','push') and os.environ.get('ALLOW_PUBLICATION_STUB'): pass
     else: sys.exit(90)
 elif name=='security': print('  1) '+os.environ.get('ACTUAL_LEAF',os.environ['PTB_EXPECTED_LEAF'])+' "PokeTokenBar Battle Local"')
@@ -203,6 +203,17 @@ bash scripts/package-battle-engines.sh "build/PokeTokenBar Battle.app/Contents/R
         self.assertIn('app "PokeTokenBar Battle.app"',cask)
         self.assertIn('build:skip-install=1 version=3.0.0',self.calls())
         self.assertNotRegex(self.calls(),r'(?m)^gh release |^gh api -X |^pkill |^git (add|commit|push|tag) ')
+
+    def test_source_added_during_build_rejects_artifact_before_packaging(self):
+        self.fake_build()
+        build = self.repo / 'scripts/build-app.sh'
+        build.write_text(build.read_text() + '\nprintf "// newly compiled source\\n" > Sources/New.swift\n')
+        result = self.run_release('--prepare-build', '3.0.0')
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('build:skip-install=1', self.calls())
+        self.assertIn('Untracked build/test inputs', result.stderr)
+        self.assertNotIn('ditto ', self.calls())
+        self.assertFalse((self.repo / 'build/release/poke-token-bar-battle.rb').exists())
 
     def test_leaf_mismatch_stops_without_prompt_or_build(self):
         self.fake_build()
