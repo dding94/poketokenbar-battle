@@ -7,8 +7,13 @@ export class BattleRelay {
   constructor(private readonly store: BattleStore) {}
   open(b: Battle, now: number, after: BattleEffect[]): void {
     b.roundSeq++;
-    this.store.sql.exec("INSERT INTO battle_rounds(battle_id,seq,deadline) VALUES(?,?,?)", b.battleId, b.roundSeq, b.mode === "manual" ? now + TURN_MS : null);
-    if (b.mode === "auto") this.release(b, this.store.round(b.battleId, b.roundSeq)!, now, after);
+    if (b.mode === "auto") {
+      const pair: Pair = { roundSeq: b.roundSeq, p1: { kind: "policy" }, p2: { kind: "policy" }, releasedAt: now };
+      this.store.sql.exec("INSERT INTO battle_rounds(battle_id,seq,pair) VALUES(?,?,?)", b.battleId, b.roundSeq, JSON.stringify(pair));
+      after.push({ recipients: [b.p1, b.p2], message: { type: "battle_round", battleId: b.battleId, pair } });
+    } else {
+      this.store.sql.exec("INSERT INTO battle_rounds(battle_id,seq,deadline) VALUES(?,?,?)", b.battleId, b.roundSeq, now + TURN_MS);
+    }
   }
   choice(b: Battle, side: Side, seq: number, choice: string, now: number, after: BattleEffect[]): Result<boolean> {
     if (b.mode !== "manual") return fail("invalid_state");
@@ -17,9 +22,9 @@ export class BattleRelay {
     if (round && round[side] !== null) return round[side] === slot ? ok(false) : fail("choice_conflict");
     if (b.state !== "RUNNING") return fail("invalid_state");
     if (!round || round.seq !== b.roundSeq || round.pair !== null) return fail("stale_round");
-    this.store.sql.exec(`UPDATE battle_rounds SET ${side}=? WHERE battle_id=? AND seq=?`, slot, b.battleId, seq);
     round[side] = slot;
-    if (round.p1 !== null && round.p2 !== null) { this.release(b, round, now, after); return ok(true); }
+    if (round.p1 !== null && round.p2 !== null) { this.release(b, round, now, after, side); return ok(true); }
+    this.store.sql.exec(`UPDATE battle_rounds SET ${side}=? WHERE battle_id=? AND seq=?`, slot, b.battleId, seq);
     return ok(false); // No room update, notification, or peer submission signal.
   }
   advance(b: Battle, seq: number, now: number, after: BattleEffect[]): Result<boolean> {
@@ -35,10 +40,11 @@ export class BattleRelay {
     if (!round || round.pair !== null || round.deadline === null || now < round.deadline) return false;
     this.release(b, round, round.deadline, after); return true;
   }
-  private release(b: Battle, round: Round, at: number, after: BattleEffect[]): void {
+  private release(b: Battle, round: Round, at: number, after: BattleEffect[], side?: Side): void {
     const token = (slot: number | null): RelayToken => b.mode === "auto" ? { kind: "policy" } : slot === null ? { kind: "timeout" } : { kind: "move", slot };
     const pair: Pair = { roundSeq: round.seq, p1: token(round.p1), p2: token(round.p2), releasedAt: at };
-    this.store.sql.exec("UPDATE battle_rounds SET pair=? WHERE battle_id=? AND seq=? AND pair IS NULL", JSON.stringify(pair), b.battleId, round.seq);
+    if (side) this.store.sql.exec(`UPDATE battle_rounds SET ${side}=?,pair=? WHERE battle_id=? AND seq=? AND pair IS NULL`, round[side], JSON.stringify(pair), b.battleId, round.seq);
+    else this.store.sql.exec("UPDATE battle_rounds SET pair=? WHERE battle_id=? AND seq=? AND pair IS NULL", JSON.stringify(pair), b.battleId, round.seq);
     after.push({ recipients: [b.p1, b.p2], message: { type: "battle_round", battleId: b.battleId, pair } });
   }
 }

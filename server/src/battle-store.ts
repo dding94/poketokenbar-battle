@@ -41,7 +41,18 @@ export class BattleStore {
   get(id: string): Battle | null { const row = this.sql.exec<StoredBattle>("SELECT data FROM battle_rooms WHERE id=?", id).toArray()[0]; return row ? JSON.parse(row.data) : null; }
   put(b: Battle): void {
     const deadline = this.deadline(b);
-    this.sql.exec(`INSERT INTO battle_rooms(id,group_id,p1,p2,state,deadline,data) VALUES(?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET state=excluded.state,deadline=excluded.deadline,data=excluded.data`, b.battleId, b.groupId, b.p1, b.p2, b.state, deadline, JSON.stringify(b));
+    // Read the persisted deadline inside the caller's transaction, after any round changes.
+    // UPSERT would consume an AUTOINCREMENT value even for an existing room.
+    const existing = this.sql.exec<{ deadline: number | null }>("SELECT deadline FROM battle_rooms WHERE id=?", b.battleId).toArray()[0];
+    const data = JSON.stringify(b);
+    if (!existing) {
+      this.sql.exec("INSERT INTO battle_rooms(id,group_id,p1,p2,state,deadline,data) VALUES(?,?,?,?,?,?,?)", b.battleId, b.groupId, b.p1, b.p2, b.state, deadline, data);
+    } else if (existing.deadline === deadline) {
+      // Omitting the indexed column avoids its write even when SQLite sees the same value.
+      this.sql.exec("UPDATE battle_rooms SET state=?,data=? WHERE id=?", b.state, data, b.battleId);
+    } else {
+      this.sql.exec("UPDATE battle_rooms SET state=?,deadline=?,data=? WHERE id=?", b.state, deadline, data, b.battleId);
+    }
   }
   deadline(b: Battle): number | null {
     if (PRESTART.has(b.state)) return b.expiresAt;
