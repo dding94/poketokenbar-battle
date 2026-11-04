@@ -85,7 +85,7 @@ describe("result comparison and atomic records", () => {
     for (const [who, socket] of [[f.p1, f.a], [f.p2, f.b]] as const) expect((await action(who, next, "start", { revision: 2, connectionId: socket.hello.connectionId, readyToken: config.readyToken, engineHash: versions.engineHash })).status).toBe(200);
     const nf = { ...f, view: (await getBattle(f.p1, next)).body }; const view = await release(nf);
     const draw = reportFor(view, { winner: "draw", finalHp: { p1: 40, p2: 30 } }); await action(f.p1, next, "report", draw); expect((await action(f.p2, next, "report", draw)).body.state).toBe("COMPLETED");
-    expect(await records(f.p1.trainerId)).toMatchObject({ wins: 1, draws: 1, streak: 0, best_streak: 1 }); expect(await records(f.p2.trainerId)).toMatchObject({ losses: 1, draws: 1, streak: 0 });
+    expect(await records(f.p1.trainerId)).toMatchObject({ wins: 1, draws: 1, streak: 0, best_streak: 1, streak_reached_order: null }); expect(await records(f.p2.trainerId)).toMatchObject({ losses: 1, draws: 1, streak: 0 });
   });
   it.each(["leave", "remove"])("atomically voids running battle and cancels pending challenges on %s", async kind => {
     const f = await terminal(); const id = f.view.battleId;
@@ -113,6 +113,8 @@ describe("result comparison and atomic records", () => {
   });
   it("increments consecutive wins and retains the best streak after losing", async () => {
     const f = await terminal(); let view = f.view;
+    await setClock(f.view.startedAt);
+    let lastOrder = 0;
     for (const [index, winner] of ["p1", "p1", "p2"].entries()) {
       if (index > 0) {
         const created = await createBattle(f.p1, f.p2); expect(created.status).toBe(200); const id = created.body.battleId;
@@ -126,9 +128,12 @@ describe("result comparison and atomic records", () => {
       const body = reportFor(view, { winner, finalHp: winner === "p1" ? { p1: 50, p2: 0 } : { p1: 0, p2: 50 } });
       expect((await action(f.p1, view.battleId, "report", body)).status).toBe(200);
       expect((await action(f.p2, view.battleId, "report", body)).body.state).toBe("COMPLETED");
+      const winnerRecord = await records(winner === "p1" ? f.p1.trainerId : f.p2.trainerId);
+      expect(Number(winnerRecord!.streak_reached_order)).toBeGreaterThan(lastOrder);
+      lastOrder = Number(winnerRecord!.streak_reached_order);
       if (index === 1) expect(await records(f.p1.trainerId)).toMatchObject({ wins: 2, streak: 2, best_streak: 2 });
     }
-    expect(await records(f.p1.trainerId)).toMatchObject({ wins: 2, losses: 1, draws: 0, streak: 0, best_streak: 2 });
+    expect(await records(f.p1.trainerId)).toMatchObject({ wins: 2, losses: 1, draws: 0, streak: 0, best_streak: 2, streak_reached_order: null });
     expect(await records(f.p2.trainerId)).toMatchObject({ wins: 1, losses: 2, streak: 1, best_streak: 1 });
   });
   it("restores the same battle under a recovered key", async () => {

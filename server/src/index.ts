@@ -171,6 +171,14 @@ const routes: Record<string, Partial<Record<string, Handler>>> = {
     },
   },
 
+  "/v1/standings": {
+    GET: async (ctx) => {
+      const keyHash = await accessKeyHash(ctx.request);
+      if (new URL(ctx.request.url).searchParams.size !== 0) throw new ApiError("bad_request");
+      return json(200, unwrap(await ctx.league.standings({ keyHash })));
+    },
+  },
+
   "/v1/group": {
     GET: async (ctx) => json(200, unwrap(await ctx.league.group({ keyHash: await accessKeyHash(ctx.request) }))),
   },

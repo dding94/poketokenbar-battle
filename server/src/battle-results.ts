@@ -26,7 +26,10 @@ export class BattleResults {
     } else {
       if (saved[0]!.payload === payload) {
         b.state = "COMPLETED"; b.result = report;
-        for (const player of ["p1", "p2"] as const) this.record(b[player], report.winner === "draw" ? "draw" : report.winner === player ? "win" : "loss");
+        const order = this.store.sql.exec<{ value: string }>("UPDATE meta SET value=CAST(value AS INTEGER)+1 WHERE key='battle_completion_sequence' RETURNING value").toArray()[0];
+        if (!order || !Number.isSafeInteger(Number(order.value))) throw new Error("invalid completion sequence");
+        for (const player of ["p1", "p2"] as const) this.record(b[player], report.winner === "draw" ? "draw" : report.winner === player ? "win" : "loss", Number(order.value));
+        after.push({ recipients: [], groupId: b.groupId, message: { type: "standings_changed" } });
       } else {
         b.state = "VOID"; b.reason = "result_mismatch";
         after.push({ recipients: [], groupId: b.groupId, message: { type: "battle_void", battleId: b.battleId, reason: "result_mismatch" } });
@@ -35,11 +38,12 @@ export class BattleResults {
     }
     this.store.put(b); after.push(battleChanged(b)); return ok(null);
   }
-  private record(trainerId: string, outcome: "win" | "loss" | "draw"): void {
+  private record(trainerId: string, outcome: "win" | "loss" | "draw", order: number): void {
     const win = outcome === "win" ? 1 : 0, loss = outcome === "loss" ? 1 : 0, draw = outcome === "draw" ? 1 : 0;
-    this.store.sql.exec(`INSERT INTO battle_records(trainer_id,wins,losses,draws,streak,best_streak) VALUES(?,?,?,?,?,?)
+    this.store.sql.exec(`INSERT INTO battle_records(trainer_id,wins,losses,draws,streak,best_streak,streak_reached_order) VALUES(?,?,?,?,?,?,?)
       ON CONFLICT(trainer_id) DO UPDATE SET wins=wins+excluded.wins, losses=losses+excluded.losses, draws=draws+excluded.draws,
       streak=CASE WHEN excluded.wins=1 THEN streak+1 ELSE 0 END,
-      best_streak=MAX(best_streak, CASE WHEN excluded.wins=1 THEN streak+1 ELSE 0 END)`, trainerId, win, loss, draw, win, win);
+      streak_reached_order=excluded.streak_reached_order,
+      best_streak=MAX(best_streak, CASE WHEN excluded.wins=1 THEN streak+1 ELSE 0 END)`, trainerId, win, loss, draw, win, win, win ? order : null);
   }
 }

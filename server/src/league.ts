@@ -1,3 +1,4 @@
+import { migrateStandings, readStandings, type Standings } from "./standings";
 import { Battles } from "./battles";
 import type { BattleEffect } from "./battle-effects";
 import { BATTLE_SCHEMA } from "./battle-store";
@@ -23,7 +24,7 @@ import { type GroupChange, KEY_HASH_HEADER, Realtime } from "./realtime";
 
 // The League never sees a raw key or code: every *Hash argument is computed by the Worker.
 
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 const MINUTE = 60_000;
 const DAY = 24 * 60 * MINUTE;
 export const ATTEMPT_LIMIT = 10;
@@ -164,6 +165,7 @@ export class League extends DurableObject<Env> {
     this.ctx.storage.transactionSync(() => {
       if (version < 1) for (const statement of SCHEMA_V1) this.sql.exec(statement);
       if (version < 2) for (const statement of BATTLE_SCHEMA) this.sql.exec(statement);
+      if (version < 3) migrateStandings(this.sql);
       this.sql.exec(
         "INSERT INTO meta (key, value) VALUES ('schema_version', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
         String(SCHEMA_VERSION),
@@ -210,6 +212,13 @@ export class League extends DurableObject<Env> {
       const result = this.battles.dispatch(auth.value, input.id, input.action, input.body, this.clock(), effects, input.before);
       after.push(...effects.map(effect => ({ kind: "battle" as const, effect })));
       return result;
+    });
+  }
+
+  standings(input: { keyHash: string }): Result<Standings> {
+    return this.ctx.storage.transactionSync(() => {
+      const auth = this.access.actor(input.keyHash, "member");
+      return auth.ok ? ok(readStandings(this.sql, auth.value.groupId)) : auth;
     });
   }
 
