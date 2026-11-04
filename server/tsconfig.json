@@ -18,5 +18,5 @@
     "checkJs": false,
     "noEmit": true
   },
-  "include": ["src/**/*.ts", "test/**/*.ts"]
+  "include": ["src/**/*.ts", "test/**/*.ts", "measure/**/*.ts"]
 }

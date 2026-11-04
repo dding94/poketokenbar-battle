@@ -20,7 +20,7 @@ export function migratePackedBattles(sql: SqlStorage): void {
   sql.exec("ALTER TABLE battle_rooms ADD COLUMN turn_deadline INTEGER");
   sql.exec("CREATE INDEX battle_running ON battle_rooms(seq) WHERE state='RUNNING'");
   if (sql.exec("SELECT 1 FROM battle_rounds r WHERE NOT EXISTS (SELECT 1 FROM battle_rooms b WHERE b.id=r.battle_id) LIMIT 1").toArray().length) invalid();
-  for (const row of sql.exec<{ id: string; data: string }>("SELECT id,data FROM battle_rooms ORDER BY seq").toArray()) {
+  for (const row of sql.exec<{ id: string; data: string }>("SELECT id,data FROM battle_rooms ORDER BY seq")) {
     const b: Battle = JSON.parse(row.data);
     if (b.battleId !== row.id || !Number.isInteger(b.roundSeq) || b.roundSeq < 0 || b.roundSeq > 200) invalid();
     const rounds = sql.exec<Round>("SELECT battle_id,seq,deadline,p1,p2,pair FROM battle_rounds WHERE battle_id=? ORDER BY seq", row.id).toArray();
