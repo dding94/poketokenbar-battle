@@ -23,4 +23,11 @@ final class OnlineBattleHistoryTextTests: XCTestCase {
         let text = OnlineBattleHistoryText.logs(["|-damage|p1a: Eevee|89/132 par", "|-damage|p2a: Pikachu|32/100", "|-status|p2a: Pikachu|par", "|tie|"], localSide: .p1).joined()
         XCTAssertTrue(text.contains("89/132")); XCTAssertTrue(text.contains("32/100")); XCTAssertTrue(text.contains("마비")); XCTAssertTrue(text.contains("무승부"))
     }
+    func testCanonicalTieMarkerProducesKoreanTerminalText() {
+        XCTAssertEqual(OnlineBattleHistoryText.logs(["|tie"], localSide: .p2), ["무승부 · 배틀을 마쳤습니다."])
+    }
+    func testUnknownEffectHasGenericFallbackWithoutExposingProtocolOrPayload() {
+        XCTAssertEqual(OnlineBattleHistoryText.logs(["|-future-private-tag|p1a: name|SECRET"], localSide: .p1), ["전투 효과가 처리되었습니다."])
+    }
+
 }

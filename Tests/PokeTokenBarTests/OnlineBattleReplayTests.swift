@@ -31,6 +31,7 @@ final class OnlineBattleReplayTests: XCTestCase {
                     let own = side == .p1 ? final.view.p1 : final.view.p2
                     XCTAssertEqual(own.hp, side == .p1 ? fixture.battle.result!.finalHp.p1 : fixture.battle.result!.finalHp.p2)
                     XCTAssertFalse(final.logs.isEmpty)
+                    if fixture.battle.result?.winner == .draw { XCTAssertTrue(final.logs.contains("무승부 · 배틀을 마쳤습니다.")) }
                     for index in 1..<replay.frames.count {
                         XCTAssertTrue(replay.frames[index].logs.starts(with: replay.frames[index - 1].logs))
                     }
@@ -65,7 +66,7 @@ final class OnlineBattleReplayTests: XCTestCase {
         for state in ["VOID", "CANCELLED", "DECLINED", "EXPIRED", "RUNNING"] {
             XCTAssertThrowsError(try OnlineBattleReplay(battle: changed(battle) { $0["state"] = state }, localTrainerID: "trainer-one", engineFactory: engine))
         }
-        for key in ["config", "result"] {
+        for key in ["config", "result", "startedAt"] {
             XCTAssertThrowsError(try OnlineBattleReplay(battle: changed(battle) { $0[key] = NSNull() }, localTrainerID: "trainer-one", engineFactory: engine))
         }
         for key in ["logHash", "journalHash", "engineHash"] {
@@ -95,6 +96,34 @@ final class OnlineBattleReplayTests: XCTestCase {
         let untrusted = try BattleEngine(url: url, expectedHash: hash)
         XCTAssertThrowsError(try OnlineBattleReplay(battle: battle, localTrainerID: "trainer-one", engineFactory: { _ in untrusted }))
         XCTAssertThrowsError(try OnlineBattleResolver(battle: battle, localTrainerID: "trainer-one", engine: untrusted))
+    }
+
+    @MainActor func testReplayFailureReasonsSeparateUnavailableMissingAndUnverifiedData() throws {
+        let battle = try fixtures()[0].battle
+        let missing = try changed(battle) { $0["result"] = NSNull() }
+        XCTAssertThrowsError(try OnlineBattleReplay(battle: missing, localTrainerID: "trainer-one", engineFactory: engine)) {
+            XCTAssertEqual($0 as? OnlineBattleReplay.Failure, .incompleteRecord)
+        }
+        XCTAssertThrowsError(try OnlineBattleReplay(battle: battle, localTrainerID: "trainer-one", engineFactory: { _ in throw BattleEngine.Failure.missingBundle })) {
+            XCTAssertEqual($0 as? OnlineBattleReplay.Failure, .unavailableEngine)
+        }
+        XCTAssertThrowsError(try OnlineBattleReplay(battle: battle, localTrainerID: "trainer-one", engineFactory: { _ in throw BattleEngine.Failure.checksumMismatch })) {
+            XCTAssertEqual($0 as? OnlineBattleReplay.Failure, .verificationFailed)
+        }
+    }
+
+    // Also run this with a temporarily advanced live manifest during the future-upgrade regression check.
+    @MainActor func testPinnedCompletedReplayIsIndependentOfTheCurrentManifest() throws {
+        let battle = try fixtures()[0].battle
+        let hash = try XCTUnwrap(battle.config?.engineHash)
+        let archived = try BattleEngine(url: root.appendingPathComponent("engine/archive/\(hash).js"), expectedHash: hash)
+        XCTAssertNoThrow(try OnlineBattleReplay(battle: battle, localTrainerID: "trainer-two", engineFactory: { _ in archived }))
+        let completed = try OnlineBattleResolver.completedResolver(battle: battle, localTrainerID: "trainer-two", engine: archived)
+        defer { completed.close() }
+        XCTAssertNoThrow(try completed.verifyCompleted(battle))
+        if hash != BattleEngineManifest.sha256 {
+            XCTAssertThrowsError(try OnlineBattleResolver(battle: battle, localTrainerID: "trainer-two", engine: archived))
+        }
     }
 
 }
