@@ -6,6 +6,21 @@ import { closeSocketsAfterAll, connect } from "./socket";
 import { running } from "./battle-session";
 closeSocketsAfterAll(); useRealClockAfterEach();
 describe("lockstep relay", () => {
+  it.each(["manual", "auto"])("rolls back %s pair publication when the following room write fails", async mode => {
+    const f = await running(mode), id = f.view.battleId;
+    if (mode === "manual") expect((await action(f.p1, id, "choices", { roundSeq: 1, choice: "move 3" })).status).toBe(200);
+    const before = (await getBattle(f.p2, id)).body;
+    await f.a.socket.sync(); await f.b.socket.sync();
+    await runInDurableObject(leagueStub(), (_i, state) => state.storage.sql.exec("CREATE TRIGGER fail_relay_room BEFORE UPDATE ON battle_rooms BEGIN SELECT RAISE(ABORT, 'test_fault'); END"));
+    const publish = () => mode === "manual" ? action(f.p2, id, "choices", { roundSeq: 1, choice: "move 2" }) : action(f.p2, id, "advance", { processedRoundSeq: 1 });
+    try { expectError(await publish(), 500, "internal"); }
+    finally { await runInDurableObject(leagueStub(), (_i, state) => state.storage.sql.exec("DROP TRIGGER fail_relay_room")); }
+    expect((await getBattle(f.p2, id)).body).toEqual(before);
+    await f.a.socket.sync(); await f.b.socket.sync();
+    const retry = await publish(); expect(retry.status, retry.text).toBe(200);
+    expect(retry.body.journal).toHaveLength(mode === "manual" ? 1 : 2);
+    const duplicate = await publish(); expect(duplicate.status).toBe(200); expect(duplicate.body).toEqual(retry.body);
+  });
   it("opens round1 and never exposes the first choice or submission signal to its opponent", async () => {
     const f = await running(); const id = f.view.battleId;
     expect(f.view.roundSeq).toBe(1); expect(f.view.deadline).toBe(f.view.startedAt + 30000);
