@@ -79,6 +79,7 @@ final class OnlineBattleSession {
         for resolver in resolvers.values { resolver.close() }; resolvers = [:]; views = [:]
         selectedBattleID = nil; resultByBattleID = [:]; prefersLobby = false; checkedDeadlines = [:]; nextRecoveryRead = nil
         presentation.account = nil; presentation.members = []; presentation.battles = []
+        clearHistory(); presentation.liveLogs = []
         presentation.room = nil; presentation.arena = nil; presentation.request = nil
         presentation.recoveryCode = nil; presentation.result = nil; presentation.canRetryCredentialSave = false
         presentation.canStart = false; presentation.isBusy = false; presentation.phase = .setup
@@ -123,6 +124,7 @@ final class OnlineBattleSession {
             settings = next; bootstrapped = false
             presentation.serverAddress = next.serverURL ?? ""
             presentation.account = nil; presentation.members = []; presentation.battles = []
+            clearHistory(); presentation.liveLogs = []
             presentation.room = nil; presentation.arena = nil; presentation.request = nil
             presentation.result = nil; presentation.recoveryCode = nil; presentation.notice = nil
             presentation.canRetryCredentialSave = false; presentation.canStart = false
@@ -197,6 +199,7 @@ final class OnlineBattleSession {
             selectedBattleID = nil; prefersLobby = false; checkedDeadlines = [:]; nextRecoveryRead = nil
             prepared = [:]; acknowledgedStarts = []; submittedReports = []; challengeIntent = nil
             presentation.account = nil; presentation.members = []; presentation.battles = []
+            clearHistory(); presentation.liveLogs = []
             presentation.room = nil; presentation.arena = nil; presentation.request = nil
             presentation.result = nil; presentation.recoveryCode = nil; presentation.canStart = false
             presentation.phase = .setup
@@ -374,7 +377,9 @@ final class OnlineBattleSession {
             showResult(receipt, outcome: outcome)
             return
         }
-        let resolver = try OnlineBattleResolver(battle: battle, localTrainerID: account.trainer.trainerId, engine: engineFactory())
+        guard let hash = battle.config?.engineHash else { throw OnlineBattleFailure.invalidResponse }
+        let resolver = try OnlineBattleResolver.completedResolver(battle: battle, localTrainerID: account.trainer.trainerId,
+                                                                  engine: completedEngine(hash: hash))
         defer { resolver.close() }
         let proof = try resolver.verifyCompleted(battle)
         guard presentation.roster.contains(where: { $0.id == proof.localInstanceID }) else { throw OnlineBattleFailure.invalidResponse }
@@ -423,11 +428,13 @@ final class OnlineBattleSession {
         presentation.arena = nil; presentation.request = nil; presentation.deadline = nil
         presentation.choiceSubmitted = false
         presentation.moveSlugs = [:]; presentation.abilitySlugs = [:]
+        presentation.liveLogs = []
         guard let room, let account = presentation.account else { presentation.phase = authenticated ? .lobby : .setup; return }
         presentation.localSide = room.side(for: account.trainer.trainerId) ?? .p1
         presentation.deadline = room.deadline.map { Date(timeIntervalSince1970: $0 / 1000) }
         presentation.choiceSubmitted = room.ownChoice != nil
         presentation.arena = resolvers[room.battleId]?.view; presentation.request = resolvers[room.battleId]?.request
+        presentation.liveLogs = OnlineBattleHistoryText.logs(resolvers[room.battleId]?.logs ?? [], localSide: presentation.localSide)
         publishDisclosedNames(room)
         switch room.state {
         case .pending, .accepted, .ready: presentation.phase = .room
@@ -459,9 +466,21 @@ final class OnlineBattleSession {
         case .selectOpponent(let id): presentation.selectedOpponentID = id; challengeIntent = nil; return
         case .setMode(let mode): presentation.mode = mode; challengeIntent = nil; return
         case .acknowledgeRecoveryCode: presentation.recoveryCode = nil; return
-        case .dismissResult, .backToLobby: prefersLobby = true; navigationRevision &+= 1; selectedBattleID = nil; publish(); return
+        case .dismissResult, .backToLobby: clearHistory(); prefersLobby = true; navigationRevision &+= 1; selectedBattleID = nil; publish(); return
         case .openBattle(let id): prefersLobby = false; navigationRevision &+= 1; selectedBattleID = id; publish(); return
         case .configureServer(let value): await configureServer(value); return
+        case .showHistory:
+            guard onlineAllowed, authenticated, presentation.account != nil else { return }
+            clearHistory(); presentation.showsHistory = true; return
+        case .openReplay(let id): openReplay(id); return
+        case .seekReplay(let index):
+            guard onlineAllowed, authenticated, presentation.showsHistory,
+                  let replay = presentation.replay, replay.frames.indices.contains(index) else { return }
+            presentation.replayFrameIndex = index; return
+        case .closeReplay:
+            clearHistory(keepOpen: onlineAllowed && authenticated && presentation.showsHistory); return
+        case .challenge, .accept, .confirm, .prepareBattle, .decline, .cancel, .chooseMove:
+            guard !presentation.showsHistory else { return }
         default: break
         }
         guard onlineAllowed, !actionInFlight else { return }
@@ -479,6 +498,46 @@ final class OnlineBattleSession {
             catch { publish(); await handle(error, epoch: epoch) }
         }
     }
+    /// History owns only immutable display frames. It never enters the live process/settlement path.
+    private func clearHistory(keepOpen: Bool = false) {
+        presentation.showsHistory = keepOpen
+        presentation.selectedHistoryBattle = nil
+        presentation.replay = nil
+        presentation.replayFrameIndex = 0
+        presentation.historyBusy = false
+        presentation.historyError = nil
+    }
+    private func completedEngine(hash: String) throws -> BattleEngine {
+        if hash == BattleEngineManifest.sha256 { return try engineFactory() }
+        return try BattleEngineArchive.engine(hash: hash)
+    }
+    private func openReplay(_ id: String) {
+        guard onlineAllowed, authenticated, let account = presentation.account,
+              let room = views[id], !room.state.isActive,
+              room.side(for: account.trainer.trainerId) != nil else { return }
+        clearHistory(keepOpen: true)
+        presentation.selectedHistoryBattle = room
+        guard room.state == .completed else {
+            presentation.historyError = room.state == .void
+                ? "무효로 끝난 경기예요. 확정된 승패나 보상은 없어요."
+                : "시작 전에 종료되어 다시보기 자료가 없어요."
+            return
+        }
+        // Synchronous replay has no network or state-store dependencies. Future historical versions
+        // use only the archive allowlist; a missing old engine never falls back to the current one.
+        do {
+            presentation.replay = try OnlineBattleReplay(battle: room, localTrainerID: account.trainer.trainerId) { hash in
+                try self.completedEngine(hash: hash)
+            }
+        } catch OnlineBattleReplay.Failure.unavailableEngine {
+            presentation.historyError = "이 경기의 전투 엔진이 앱에 없어 다시 볼 수 없어요. 경기 요약은 유지돼요."
+        } catch OnlineBattleReplay.Failure.incompleteRecord {
+            presentation.historyError = "다시보기에 필요한 경기 자료가 없어요. 경기 요약은 유지돼요."
+        } catch {
+            presentation.historyError = "기록을 검증하지 못해 다시보기를 열 수 없어요. 경기 결과는 바꾸지 않았어요."
+        }
+    }
+
     private func battleAction(_ action: OnlineBattleUIAction, epoch: UInt64) async throws {
         let navigation = navigationRevision
         if case .challenge = action { await refresh(); try current(epoch) }
@@ -568,6 +627,7 @@ final class OnlineBattleSession {
         guard epoch == generation else { return }
         authenticated = false; reconciled = false
         presentation.canStart = false; presentation.phase = .setup; presentation.account = nil
+        clearHistory(); presentation.liveLogs = []
         presentation.connectionStatus = "접속키가 만료되었어요. 복구코드로 다시 연결해 주세요"
         ticker?.cancel(); ticker = nil
         await api?.setAccessKey(nil)
