@@ -132,6 +132,17 @@ it.each(scenarios)("local workerd cost: $name", async scenario => {
   expect(alarmRequests).toBe(games * (("timeout" in scenario ? scenario.rounds : 0) + (scenario.finish === "zero" || scenario.finish === "missing" ? 1 : 0)));
   expect(rpcRequests).toBe(httpRequests); expect(measured.rowsWritten).toBeGreaterThan(0); expect(measured.retainedCellBytes).toBeGreaterThan(0);
   print(JSON.stringify({ localWorkerdOnly: true, scenario: scenario.name, games, rounds: scenario.rounds, httpRequests, rpcRequests, alarmRequests, doRequests: rpcRequests + alarmRequests, ...measured, baselineDatabaseBytes, databaseDeltaBytes: measured.databaseBytes - baselineDatabaseBytes }));
+  if (scenario.name === "manual-25-batch10") {
+    await begin(stub);
+    const standings = await request("GET", "/v1/standings", owner.accessKey);
+    const standingsCost = await end(stub, 0);
+    expect(standings.rows).toHaveLength(2);
+    expect(standingsCost.rowsWritten).toBe(0);
+    expect(standingsCost.alarmWrites + standingsCost.alarmDeletes).toBe(0);
+    print(JSON.stringify({ localWorkerdOnly: true, scenario: "standings-after-10-games", members: standings.rows.length,
+      httpRequests: 1, doRequests: 1, rowsRead: standingsCost.rowsRead, rowsWritten: standingsCost.rowsWritten,
+      responseBytes: new TextEncoder().encode(JSON.stringify(standings)).length }));
+  }
   for (const { socket } of sockets) if (!socket.closeInfo) socket.close();
   await Promise.all(sockets.map(s => s.socket.closed()));
 });
