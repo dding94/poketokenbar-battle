@@ -193,11 +193,11 @@ final class OnlineBattleConnectionTests: XCTestCase {
         let requests = await driver.requests; XCTAssertEqual(requests.count, 3)
         await connection.stop()
     }
-    func testPresenceAndBattleNotificationsOnlyRequestRefresh() async throws {
+    func testPresenceRefreshesAccountWhileBattleNotificationsStayScoped() async throws {
         let (connection, _, _, events) = try await setup()
         await send(.text(hello), to: connection)
         for text in [#"{"v":1,"type":"presence","trainerId":"synthetic-other","online":true}"#, #"{"v":1,"type":"battle_changed","battleId":"bt_synthetic"}"#, #"{"v":1,"type":"battle_round","battleId":"bt_synthetic"}"#, #"{"v":1,"type":"group_changed","kind":"join"}"#] { await send(.text(text), to: connection) }
-        let count = await events.refreshCount; XCTAssertEqual(count, 5)
+        let count = await events.refreshCount; XCTAssertEqual(count, 3)
         await connection.stop()
     }
     func testGroupVoidNotificationRefreshesWithoutStoppingProtocol() async throws {
@@ -205,7 +205,7 @@ final class OnlineBattleConnectionTests: XCTestCase {
         await send(.text(hello), to: connection)
         await send(.text(#"{"v":1,"type":"battle_void","battleId":"bt_synthetic","reason":"result_mismatch"}"#), to: connection)
         let state = await connection.snapshot(); XCTAssertEqual(state.state, .connected)
-        let count = await events.refreshCount; XCTAssertEqual(count, 2)
+        let count = await events.refreshCount; XCTAssertEqual(count, 1)
         await connection.stop()
     }
     func testDriverStreamActuallyDeliversHelloToConnection() async throws {

@@ -60,10 +60,12 @@ private actor SessionConnection: OnlineBattleConnecting {
     var configurationCount = 0
     var stops = 0
     var state: OnlineBattleConnectionState = .connected
+    var trainer = "trainer-one"
+    func setTrainer(_ value: String) { trainer = value }
     func setState(_ value: OnlineBattleConnectionState) { state = value }
     func configure(origin: OnlineBattleOrigin?, accessKey: String?) { configurationCount += 1 }
     func setPopoverOpen(_ open: Bool) {}
-    func snapshot() -> OnlineBattleConnectionSnapshot { .init(state: state, generation: 1, connectionId: "connection", trainerId: "trainer-one", groupId: "group") }
+    func snapshot() -> OnlineBattleConnectionSnapshot { .init(state: state, generation: 1, connectionId: "connection", trainerId: trainer, groupId: "group") }
     func authenticationFailed(generation: UInt64) {}
     private var pauseStop = false
     private var stoppedWaiter: CheckedContinuation<Void, Never>?
@@ -132,13 +134,14 @@ final class OnlineBattleSessionTests: XCTestCase {
             .init(id: value.instanceId, name: value.publicInfo.species, snapshot: .init(schemaVersion: 1, instanceID: value.instanceId, engineHash: BattleEngineManifest.sha256, rulesVersion: BattleSnapshot.rules, policyVersion: BattleSnapshot.policy, set: value.set, publicInfo: value.publicInfo), blockedReason: nil)
         }
     }
-    private func setup(_ battles: [OnlineBattleView] = [], credential: SessionCredentials = .init(), effects: SessionEffects = .init(), trainer: String = "trainer-one", rosterOverride: [PracticeCandidate]? = nil, connection: SessionConnection = .init(), observer: SessionObserver? = nil, access: SessionAccess? = nil, enabled: Bool = true, clock: OnlineBattleConnectionClock = .init()) async throws -> (OnlineBattleSession, SessionHTTP, SessionCredentials, SessionEffects) {
+    private func setup(_ battles: [OnlineBattleView] = [], credential: SessionCredentials = .init(), effects: SessionEffects = .init(), trainer: String = "trainer-one", rosterOverride: [PracticeCandidate]? = nil, connection: SessionConnection = .init(), observer: SessionObserver? = nil, access: SessionAccess? = nil, enabled: Bool = true, clock: OnlineBattleConnectionClock = .init(), automaticTicks: Bool = false) async throws -> (OnlineBattleSession, SessionHTTP, SessionCredentials, SessionEffects) {
         let http = SessionHTTP(), room = try battle()
+        await connection.setTrainer(trainer)
         let localAccount = OnlineBattleAccount(trainer: .init(trainerId: trainer, displayEmail: account.trainer.displayEmail, role: .member, status: .active), group: account.group)
         await http.route("/v1/me", try JSONEncoder().encode(localAccount))
         await http.route("/v1/group", try JSONEncoder().encode(OnlineBattleGroupMembers(group: account.group, members: [])))
         await http.route("/v1/battles", try JSONEncoder().encode(OnlineBattlePage(battles: battles, before: nil)))
-        let session = OnlineBattleSession(settings: .init(profileID: UUID().uuidString, serverURL: "https://battle.example.invalid"), credentials: credential, transport: http, effects: effects, engineFactory: { try BattleEngine(url: self.engineURL) }, connectionFactory: { callback in observer?.callback = callback; return connection }, rosterProvider: { rosterOverride ?? self.roster(room) }, clock: clock, automaticTicks: false, enabled: enabled, accessAllowed: { access?.allowed ?? true })
+        let session = OnlineBattleSession(settings: .init(profileID: UUID().uuidString, serverURL: "https://battle.example.invalid"), credentials: credential, transport: http, effects: effects, engineFactory: { try BattleEngine(url: self.engineURL) }, connectionFactory: { callback in observer?.callback = callback; return connection }, rosterProvider: { rosterOverride ?? self.roster(room) }, clock: clock, automaticTicks: automaticTicks, enabled: enabled, accessAllowed: { access?.allowed ?? true })
         return (session, http, credential, effects)
     }
     func testStandingsOpenIsReadOnlyAndFailureStaysInsideOverlay() async throws {
@@ -741,6 +744,174 @@ final class OnlineBattleSessionTests: XCTestCase {
         await first.value; await second.value
         let reads = await http.count("/v1/me"); XCTAssertEqual(reads, 2)
     }
+    private func notify(_ observer: SessionObserver, _ connection: SessionConnection, room: OnlineBattleView,
+                        fields: [String: Any]) async throws {
+        var object = fields; object["v"] = 1; object["battleId"] = room.battleId
+        await observer.callback?(.battleNotification(await connection.snapshot(), battleID: room.battleId,
+            payload: try JSONSerialization.data(withJSONObject: object)))
+    }
+    private func pairNotice(_ room: OnlineBattleView, seq: Int = 1) throws -> [String: Any] {
+        ["type": "battle_round", "pair": try JSONSerialization.jsonObject(with: JSONEncoder().encode(room.journal[seq - 1]))]
+    }
+    func testPublicPairBeforeChoiceResponseDoesNotRollBackOpenRoundOrReadAccount() async throws {
+        let final = try battle(), observer = SessionObserver(), connection = SessionConnection(), clock = SessionClock()
+        let initial = try changed(final, ["state": "RUNNING", "result": NSNull(), "roundSeq": 1, "deadline": 60000, "journal": []])
+        let opened = try changed(initial, ["roundSeq": 2, "deadline": 61000,
+            "journal": JSONSerialization.jsonObject(with: JSONEncoder().encode(Array(final.journal.prefix(1))))])
+        let (session, http, _, _) = try await setup([initial], connection: connection, observer: observer, clock: .init(now: { clock.now() }))
+        let advance = "/v1/battles/\(final.battleId)/advance"
+        await http.route(advance, try JSONEncoder().encode(opened)); await session.bootstrap()
+        await http.suspendNext("/v1/battles/\(final.battleId)/choices")
+        let choosing = Task { await session.perform(.chooseMove(1)) }; await http.waitUntilBlocked()
+        try await notify(observer, connection, room: final, fields: pairNotice(final))
+        XCTAssertEqual(session.presentation.room?.roundSeq, 2)
+        await http.resume(try response(changed(initial, ["ownChoice": "move 1"])))
+        await choosing.value
+        try await notify(observer, connection, room: final, fields: pairNotice(final))
+        try await notify(observer, connection, room: final, fields: ["type": "battle_changed", "state": "RUNNING", "revision": initial.revision, "roundSeq": 1, "deadline": NSNull()])
+        XCTAssertEqual(session.presentation.room?.journal.count, 1)
+        XCTAssertEqual(session.presentation.room?.deadline, 61000)
+        XCTAssertNil(session.presentation.room?.ownChoice)
+        let advances = await http.count(advance), reads = await http.count("/v1/me"), roomReads = await http.count("/v1/battles/\(final.battleId)")
+        XCTAssertEqual(advances, 1); XCTAssertEqual(reads, 1); XCTAssertEqual(roomReads, 0)
+    }
+    func testAdvanceLocksBeforeAwaitAcrossNotificationAndRefresh() async throws {
+        let final = try battle(), observer = SessionObserver(), connection = SessionConnection()
+        let initial = try changed(final, ["state": "RUNNING", "result": NSNull(), "roundSeq": 1, "deadline": 60000, "journal": []])
+        let released = try changed(initial, ["deadline": NSNull(), "journal": JSONSerialization.jsonObject(with: JSONEncoder().encode(Array(final.journal.prefix(1))))])
+        let opened = try changed(released, ["roundSeq": 2, "deadline": 61000])
+        let (session, http, _, _) = try await setup([initial], connection: connection, observer: observer)
+        await session.bootstrap()
+        let path = "/v1/battles/\(final.battleId)/advance"
+        await http.suspendNext(path)
+        let incoming = Task { try await self.notify(observer, connection, room: final, fields: self.pairNotice(final)) }
+        await http.waitUntilBlocked()
+        await http.route("/v1/battles", try JSONEncoder().encode(OnlineBattlePage(battles: [released], before: nil)))
+        await session.refresh()
+        let count = await http.count(path); XCTAssertEqual(count, 1)
+        await http.resume(try response(opened)); try await incoming.value
+        XCTAssertEqual(session.presentation.room?.roundSeq, 2)
+    }
+    func testSecondPlayerConsumesOpenNotificationAndCancelsFallback() async throws {
+        let final = try battle(), observer = SessionObserver(), connection = SessionConnection(), clock = SessionClock()
+        let initial = try changed(final, ["state": "RUNNING", "result": NSNull(), "roundSeq": 1, "deadline": 60000, "journal": []])
+        let (session, http, _, _) = try await setup([initial], trainer: "trainer-two", connection: connection, observer: observer, clock: .init(now: { clock.now() }))
+        await session.bootstrap()
+        try await notify(observer, connection, room: final, fields: pairNotice(final))
+        try await notify(observer, connection, room: final, fields: ["type": "battle_changed", "state": "RUNNING", "revision": initial.revision, "roundSeq": 2, "deadline": 61000])
+        clock.advance(2); await session.tick()
+        XCTAssertEqual(session.presentation.room?.roundSeq, 2); XCTAssertEqual(session.presentation.room?.deadline, 61000)
+        let advances = await http.count("/v1/battles/\(final.battleId)/advance"), reads = await http.count("/v1/battles/\(final.battleId)")
+        XCTAssertEqual(advances, 0); XCTAssertEqual(reads, 0)
+    }
+    func testMissingPairLegacyMetadataAndInvalidTokensRecoverOnlyThatBattle() async throws {
+        let final = try battle(), observer = SessionObserver(), connection = SessionConnection(), clock = SessionClock()
+        let initial = try changed(final, ["state": "RUNNING", "result": NSNull(), "roundSeq": 1, "deadline": 60000, "journal": []])
+        let (session, http, _, _) = try await setup([initial], trainer: "trainer-two", connection: connection, observer: observer, clock: .init(now: { clock.now() }))
+        await http.route("/v1/battles/\(final.battleId)", try JSONEncoder().encode(initial)); await session.bootstrap()
+        let bad: [String: Any] = ["type": "battle_round", "pair": ["roundSeq": 1, "p1": ["kind": "move", "slot": 1, "source": ">eval 1"], "p2": ["kind": "timeout"], "releasedAt": 1]]
+        for fields in [
+            ["type": "battle_changed", "state": "RUNNING", "revision": initial.revision],
+            ["type": "battle_changed", "state": "RUNNING", "revision": initial.revision, "roundSeq": 1],
+            ["type": "battle_changed", "state": "RUNNING", "revision": initial.revision, "roundSeq": 2, "deadline": 61000],
+            try pairNotice(final, seq: 2), bad,
+            ["type": "battle_round", "pair": ["roundSeq": 1, "p1": ["kind": "policy"], "p2": ["kind": "policy"], "releasedAt": 1]]
+        ] { try await notify(observer, connection, room: final, fields: fields) }
+        let reads = await http.count("/v1/battles/\(final.battleId)"), all = await http.count("/v1/me")
+        XCTAssertEqual(reads, 6); XCTAssertEqual(all, 1); XCTAssertEqual(session.presentation.room?.journal.count, 0)
+    }
+    func testTerminalNoticeNeedsHTTPBeforeReleasingHoldAndOldGenerationIsIgnored() async throws {
+        let final = try battle(), observer = SessionObserver(), connection = SessionConnection()
+        let initial = try changed(final, ["state": "RUNNING", "result": NSNull(), "roundSeq": 1, "deadline": 60000, "journal": []])
+        let (session, http, _, effects) = try await setup([initial], connection: connection, observer: observer)
+        await session.bootstrap()
+        let payload = try JSONSerialization.data(withJSONObject: ["type": "battle_changed", "state": "VOID", "revision": initial.revision])
+        await observer.callback?(.battleNotification(.init(state: .connected, generation: 0, connectionId: "old", trainerId: "trainer-one", groupId: "group"), battleID: final.battleId, payload: payload))
+        var reads = await http.count("/v1/battles/\(final.battleId)"); XCTAssertEqual(reads, 0)
+        await http.suspendNext("/v1/battles/\(final.battleId)")
+        let incoming = Task { await observer.callback?(.battleNotification(await connection.snapshot(), battleID: final.battleId, payload: payload)) }
+        await http.waitUntilBlocked()
+        XCTAssertEqual(effects.state.onlineBattleHolds.count, 1); XCTAssertEqual(effects.applications, 0)
+        await http.resume(try response(changed(initial, ["state": "VOID", "reason": "report_timeout"])))
+        await incoming.value
+        XCTAssertTrue(effects.state.onlineBattleHolds.isEmpty); XCTAssertEqual(effects.applications, 0)
+        reads = await http.count("/v1/battles/\(final.battleId)"); XCTAssertEqual(reads, 1)
+    }
+    func testTimeoutAndAutomaticPairsUseClosedTokensWithoutRoundReads() async throws {
+        for index in [2, 6] {
+            let final = try battle(index), observer = SessionObserver(), connection = SessionConnection()
+            let initial = try changed(final, ["state": "RUNNING", "result": NSNull(), "roundSeq": 1, "deadline": NSNull(), "journal": []])
+            let (session, http, _, _) = try await setup([initial], trainer: "trainer-two", rosterOverride: roster(final), connection: connection, observer: observer)
+            await session.bootstrap()
+            try await notify(observer, connection, room: final, fields: pairNotice(final))
+            if index == 6 { try await notify(observer, connection, room: final, fields: pairNotice(final, seq: 2)) }
+            XCTAssertEqual(session.presentation.room?.journal.count, index == 6 ? 2 : 1)
+            let reads = await http.count("/v1/battles/\(final.battleId)")
+            XCTAssertEqual(reads, 0)
+            await session.setEnabled(false)
+        }
+    }
+    func testGroupMismatchForOtherParticipantsDoesNotQueryAnUnrelatedBattle() async throws {
+        let observer = SessionObserver(), connection = SessionConnection(), unrelated = try battle()
+        let (session, http, _, effects) = try await setup(connection: connection, observer: observer)
+        await session.bootstrap()
+        try await notify(observer, connection, room: unrelated, fields: ["type": "battle_void", "reason": "result_mismatch"])
+        let reads = await http.count("/v1/battles/\(unrelated.battleId)")
+        XCTAssertEqual(reads, 0); XCTAssertNil(session.presentation.notice); XCTAssertEqual(effects.applications, 0)
+    }
+    func testSecondPlayerAutomaticTimerFallsBackWithoutExplicitTick() async throws {
+        let final = try battle()
+        let first = try changed(final, ["state": "RUNNING", "result": NSNull(), "roundSeq": 1,
+            "journal": JSONSerialization.jsonObject(with: JSONEncoder().encode(Array(final.journal.prefix(1))))])
+        let opened = try changed(first, ["roundSeq": 2, "deadline": Date().timeIntervalSince1970 * 1000 + 30000])
+        let (session, http, _, _) = try await setup([first], trainer: "trainer-two", automaticTicks: true)
+        let path = "/v1/battles/\(final.battleId)/advance"
+        await http.suspendNext(path); await session.bootstrap()
+        await http.waitUntilBlocked()
+        let count = await http.count(path); XCTAssertEqual(count, 1)
+        await http.resume(try response(opened))
+        for _ in 0..<50 where session.presentation.room?.roundSeq != 2 { await Task.yield() }
+        XCTAssertEqual(session.presentation.room?.roundSeq, 2)
+        await session.setEnabled(false)
+    }
+    func testFallbackResponseLossRecoversOpenedDeadlineAtFiveSecondsWithoutFullRefresh() async throws {
+        let final = try battle(), clock = SessionClock()
+        let first = try changed(final, ["state": "RUNNING", "result": NSNull(), "roundSeq": 1,
+            "journal": JSONSerialization.jsonObject(with: JSONEncoder().encode(Array(final.journal.prefix(1))))])
+        let opened = try changed(first, ["roundSeq": 2, "deadline": 63000])
+        let (session, http, _, _) = try await setup([first], trainer: "trainer-two", clock: .init(now: { clock.now() }))
+        let path = "/v1/battles/\(final.battleId)"
+        await http.route(path + "/advance", Data(), status: 503)
+        await http.route(path, try JSONEncoder().encode(opened))
+        await session.bootstrap(); clock.advance(2); await session.tick()
+        var count = await http.count(path); XCTAssertEqual(count, 0)
+        clock.advance(4.99); await session.tick(); count = await http.count(path); XCTAssertEqual(count, 0)
+        clock.advance(0.01); await session.tick()
+        count = await http.count(path); XCTAssertEqual(count, 1)
+        let advances = await http.count(path + "/advance"), all = await http.count("/v1/me")
+        XCTAssertEqual(advances, 1); XCTAssertEqual(all, 1)
+        XCTAssertEqual(session.presentation.room?.deadline, 63000)
+    }
+    func testChangedDuplicateAndTerminalNotificationDuringBattleReadRequireFollowupProof() async throws {
+        let final = try battle(), observer = SessionObserver(), connection = SessionConnection(), clock = SessionClock()
+        let first = try changed(final, ["state": "RUNNING", "result": NSNull(), "roundSeq": 1,
+            "journal": JSONSerialization.jsonObject(with: JSONEncoder().encode(Array(final.journal.prefix(1))))])
+        let (session, http, _, effects) = try await setup([first], trainer: "trainer-two", connection: connection, observer: observer, clock: .init(now: { clock.now() }))
+        await session.bootstrap()
+        let path = "/v1/battles/\(final.battleId)"
+        await http.route(path, try JSONEncoder().encode(changed(first, ["state": "VOID"])))
+        await http.suspendNext(path)
+        var altered = final.journal[0]
+        altered = .init(roundSeq: 1, p1: altered.p1, p2: altered.p2, releasedAt: altered.releasedAt + 1)
+        let incoming = Task { try await self.notify(observer, connection, room: final, fields: ["type": "battle_round", "pair": JSONSerialization.jsonObject(with: JSONEncoder().encode(altered))]) }
+        await http.waitUntilBlocked()
+        try await notify(observer, connection, room: final, fields: ["type": "battle_changed", "state": "VOID", "revision": first.revision])
+        XCTAssertEqual(effects.state.onlineBattleHolds.count, 1)
+        await http.resume(try response(first)); try await incoming.value
+        let reads = await http.count(path); XCTAssertEqual(reads, 2)
+        XCTAssertEqual(session.presentation.room?.state, .void)
+        XCTAssertTrue(effects.state.onlineBattleHolds.isEmpty); XCTAssertEqual(effects.applications, 0)
+    }
     func testSecondPlayerWaitsTwoSecondsBeforeFallbackAdvance() async throws {
         let final = try battle(), clock = SessionClock()
         let first = try changed(final, ["state": "RUNNING", "result": NSNull(), "roundSeq": 1,
@@ -760,13 +931,14 @@ final class OnlineBattleSessionTests: XCTestCase {
         await session.tick(); count = await http.count(path); XCTAssertEqual(count, 1)
     }
     func testAutomaticBattleAdvancesWhileHiddenReportsAndAppliesP2Result() async throws {
-        let final = try battle(1)
+        let final = try battle(1), clock = SessionClock()
         let first = try changed(final, ["state": "RUNNING", "result": NSNull(), "roundSeq": 1, "journal": JSONSerialization.jsonObject(with: JSONEncoder().encode(Array(final.journal.prefix(1))))])
-        let (session, http, _, effects) = try await setup([first], trainer: "trainer-two", rosterOverride: roster(final))
+        let (session, http, _, effects) = try await setup([first], trainer: "trainer-two", rosterOverride: roster(final), clock: .init(now: { clock.now() }))
         let steps = try (2...final.journal.count).map { count in try response(changed(final, ["state": "RUNNING", "result": NSNull(), "roundSeq": count, "journal": JSONSerialization.jsonObject(with: JSONEncoder().encode(Array(final.journal.prefix(count))))])) }
         await http.queue("/v1/battles/\(final.battleId)/advance", steps)
         await http.route("/v1/battles/\(final.battleId)/report", try JSONEncoder().encode(final))
         await session.perform(.setPopoverVisible(false)); await session.bootstrap()
+        for _ in 1..<final.journal.count { clock.advance(2); await session.tick() }
         XCTAssertEqual(effects.applications, 1)
         XCTAssertEqual(effects.state.onlineBattleReceipts.first?.localInstanceID, "instance-two")
         let reports = await http.bodies("/v1/battles/\(final.battleId)/report")
@@ -892,7 +1064,7 @@ final class OnlineBattleSessionTests: XCTestCase {
         let final = try battle(), running = try changed(battle(), ["state": "RUNNING", "result": NSNull(), "roundSeq": 1, "deadline": 30000, "journal": []])
         let (session, http, _, _) = try await setup([running], clock: .init(now: { 31 }, sleep: { _ in }))
         await session.bootstrap(); await session.perform(.setPopoverVisible(false)); await session.tick()
-        let count = await http.count("/v1/me"); XCTAssertEqual(count, 2)
+        let count = await http.count("/v1/battles/\(final.battleId)"); XCTAssertEqual(count, 1)
         XCTAssertEqual(session.presentation.room?.battleId, final.battleId)
         XCTAssertEqual(session.presentation.deadline, Date(timeIntervalSince1970: 30))
     }
@@ -1099,9 +1271,9 @@ final class OnlineBattleSessionTests: XCTestCase {
         let running = try changed(battle(), ["state": "RUNNING", "result": NSNull(), "roundSeq": 1, "deadline": 30000, "journal": []])
         let (session, http, _, _) = try await setup([running], clock: .init(now: { clock.now() }, sleep: { _ in }))
         await session.bootstrap(); await session.perform(.setPopoverVisible(false))
-        await http.queue("/v1/me", [.init(status: 503, body: Data())])
+        await http.queue("/v1/battles/\(running.battleId)", [.init(status: 503, body: Data())])
         await session.tick(); clock.advance(5); await session.tick()
-        let reads = await http.count("/v1/me"); XCTAssertEqual(reads, 3)
+        let reads = await http.count("/v1/battles/\(running.battleId)"); XCTAssertEqual(reads, 2)
     }
 
     func testSelectingCompletedRoomsShowsEachRoomsOwnResult() async throws {

@@ -22,10 +22,15 @@ private actor NativeHTTP: OnlineBattleHTTPTransport {
     private var offline = false
     private var reporting = false
     private(set) var committedDrops = 0
+    private var requests: [String: Int] = [:]
+    func counts() -> [String: Int] { requests }
     init(_ endpoint: NativeEndpoint) { self.endpoint = endpoint }
     func dropCompletedReportAndDisconnect() { dropCompletion = true }
     func send(_ request: URLRequest) async throws -> OnlineBattleHTTPResponse {
         guard !offline else { throw URLError(.notConnectedToInternet) }
+        let path = request.url!.path
+        let category = path.hasSuffix("/choices") ? "choices" : path.hasSuffix("/advance") ? "advance" : path.hasSuffix("/report") ? "report" : (request.httpMethod ?? "GET") + " " + (path.hasPrefix("/v1/battles/") ? "/v1/battles/:id" : path)
+        requests[category, default: 0] += 1
         let isReport = request.httpMethod == "POST" && request.url?.path.hasSuffix("/report") == true
         if isReport { reporting = true }
         defer { if isReport { reporting = false } }
@@ -98,9 +103,9 @@ final class OnlineBattleNativeAcceptanceTests: XCTestCase {
     }
     private func engine() throws -> BattleEngine { try BattleEngine(url: engineURL) }
     private struct Fixture: Decodable { let battle: OnlineBattleView }
-    private func snapshots() throws -> [OnlineBattleSnapshot] {
+    private func snapshots(_ index: Int = 0) throws -> [OnlineBattleSnapshot] {
         let file = try XCTUnwrap(Bundle.module.url(forResource: "golden", withExtension: "json", subdirectory: "OnlineBattle"))
-        let room = try JSONDecoder().decode([Fixture].self, from: Data(contentsOf: file))[0].battle
+        let room = try JSONDecoder().decode([Fixture].self, from: Data(contentsOf: file))[index].battle
         return [try XCTUnwrap(room.p1.snapshot), try XCTUnwrap(room.p2.snapshot)]
     }
     private struct Pair {
@@ -222,6 +227,67 @@ final class OnlineBattleNativeAcceptanceTests: XCTestCase {
             XCTAssertEqual(accepted.rematchOf, room.battleId)
             _ = try await pair.apis[0].cancel(id: accepted.battleId, revision: accepted.revision)
         }
+        try await pairedTwoHundredTurnRequestBudget()
+    }
+    /// Production Sessions, with no per-turn helper GET/advance. Measures actual request paths.
+    private func pairedTwoHundredTurnRequestBudget() async throws {
+        let pair = try await pair(), snapshots = try snapshots(6)
+        let initial = try await running(pair, mode: .manual, snapshots: snapshots)
+        let stores = try (0..<2).map { try store($0, snapshot: snapshots[$0], create: true) }
+        let transports = [NativeHTTP(endpoint), NativeHTTP(endpoint)]
+        let live = (0..<2).map { session(pair.grants[$0], snapshot: snapshots[$0], store: stores[$0], transport: transports[$0]) }
+        for session in live { await session.bootstrap() }
+        for _ in 0..<200 {
+            if live.allSatisfy({ $0.presentation.canStart && $0.presentation.room?.roundSeq == 1 }) { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        // Drain initial hello reconciliation before measuring the normal-turn request path.
+        for session in live { await session.refresh() }
+        let baseline = [await transports[0].counts(), await transports[1].counts()]
+        for seq in 1...200 {
+            for _ in 0..<400 {
+                if live.allSatisfy({ $0.presentation.room?.state == .running && $0.presentation.room?.roundSeq == seq && $0.presentation.room?.journal.count == seq - 1 }) { break }
+                try await Task.sleep(for: .milliseconds(5))
+            }
+            for session in live {
+                XCTAssertEqual(session.presentation.room?.roundSeq, seq)
+                XCTAssertEqual(session.presentation.room?.journal.count, seq - 1)
+                guard let request = session.presentation.request,
+                      let slot = request.moves.first(where: { !$0.disabled && $0.pp > 0 })?.slot else {
+                    XCTFail("Long-match fixture ran out of selectable moves before the terminal cap")
+                    throw OnlineBattleFailure.invalidResponse
+                }
+                await session.perform(.chooseMove(slot))
+            }
+        }
+        for _ in 0..<400 {
+            if stores.allSatisfy({ $0.state.onlineBattleReceipts.count == 1 }) { break }
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        for (i, session) in live.enumerated() {
+            XCTAssertEqual(session.presentation.room?.state, .completed)
+            XCTAssertEqual(session.presentation.room?.roundSeq, 200)
+            XCTAssertEqual(session.presentation.room?.result?.winner, .draw)
+            XCTAssertEqual(stores[i].state.onlineBattleReceipts.count, 1)
+            XCTAssertTrue(stores[i].state.onlineBattleHolds.isEmpty)
+            XCTAssertEqual(stores[i].state.onlineBattleReceipts.first?.grantedXP, 0)
+        }
+        var totals: [String: Int] = [:], deltas: [String: Int] = [:]
+        for i in 0..<2 {
+            for (key, value) in await transports[i].counts() {
+                totals[key, default: 0] += value
+                deltas[key, default: 0] += value - (baseline[i][key] ?? 0)
+            }
+        }
+        XCTAssertEqual(deltas["choices"], 400)
+        XCTAssertEqual(deltas["advance"], 199, "p2 must not duplicate normal p1 advancement; terminal round must not advance")
+        XCTAssertEqual(deltas["report"], 2)
+        XCTAssertEqual(deltas["GET /v1/me", default: 0], 0)
+        XCTAssertEqual(deltas["GET /v1/group", default: 0], 0)
+        XCTAssertEqual(deltas["GET /v1/battles", default: 0], 0)
+        XCTAssertLessThanOrEqual(deltas["GET /v1/battles/:id", default: 0], 6)
+        print("Native paired Session 200-turn requests including bootstrap: \(totals.sorted { $0.key < $1.key }); normal phase: \(deltas.sorted { $0.key < $1.key }); battle=\(initial.roundSeq)...200")
+        for session in live { await session.setEnabled(false) }
     }
     private func store(_ index: Int, snapshot: OnlineBattleSnapshot, create: Bool) throws -> CompanionStore {
         let save = folder.appendingPathComponent("synthetic-\(index).json")

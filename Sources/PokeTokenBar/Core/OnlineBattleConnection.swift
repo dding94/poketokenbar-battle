@@ -12,9 +12,11 @@ struct OnlineBattleConnectionSnapshot: Equatable, Sendable {
 }
 enum OnlineBattleConnectionEvent: Sendable {
     case changed(OnlineBattleConnectionSnapshot)
-    /// Notifications trigger authoritative HTTP reads; they never award results.
+    /// Account changes and reconnects reconcile through authoritative HTTP reads.
     case refreshRequested
     case standingsRefreshRequested
+    /// Scoped public relay data, tied to the authenticated socket that received it.
+    case battleNotification(OnlineBattleConnectionSnapshot, battleID: String, payload: Data)
 }
 enum OnlineBattleSocketEvent: Sendable, Equatable {
     case text(String), closed(Int), failed(Int?)
@@ -154,14 +156,16 @@ actor OnlineBattleConnection: OnlineBattleConnecting {
         let trainerId: String?
         let groupId: String?
         let online: [String]?
+        let battleId: String?
         // `presence.online` is a Boolean, while hello.online is an array.
-        private enum CodingKeys: String, CodingKey { case v, type, connectionId, trainerId, groupId, online }
+        private enum CodingKeys: String, CodingKey { case v, type, connectionId, trainerId, groupId, online, battleId }
         init(from decoder: Decoder) throws {
             let box = try decoder.container(keyedBy: CodingKeys.self)
             v = try box.decode(Int.self, forKey: .v); type = try box.decode(String.self, forKey: .type)
             connectionId = try box.decodeIfPresent(String.self, forKey: .connectionId)
             trainerId = try box.decodeIfPresent(String.self, forKey: .trainerId)
             groupId = try box.decodeIfPresent(String.self, forKey: .groupId)
+            battleId = try box.decodeIfPresent(String.self, forKey: .battleId)
             online = type == "hello" ? try box.decode([String].self, forKey: .online) : nil
         }
     }
@@ -187,7 +191,10 @@ actor OnlineBattleConnection: OnlineBattleConnecting {
                 await observer(.refreshRequested)
             } else if message.type == "standings_changed", state == .connected {
                 await observer(.standingsRefreshRequested)
-            } else if ["presence", "group_changed", "battle_changed", "battle_round", "battle_void"].contains(message.type), state == .connected {
+            } else if ["battle_changed", "battle_round", "battle_void"].contains(message.type), state == .connected,
+                      let id = message.battleId, id.hasPrefix("bt_"), id.count <= 128 {
+                await observer(.battleNotification(snapshot(), battleID: id, payload: Data(text.utf8)))
+            } else if ["presence", "group_changed"].contains(message.type), state == .connected {
                 await observer(.refreshRequested)
             } else { await terminate(.protocolError) }
         case .closed(4001): await terminate(.replaced)

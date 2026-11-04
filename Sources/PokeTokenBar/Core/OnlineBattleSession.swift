@@ -24,6 +24,19 @@ final class OnlineBattleSession {
     private var acknowledgedStarts = Set<String>()
     private var submittedReports = Set<String>()
     private var nextRecoveryRead: TimeInterval?
+    private struct RoundWork: Hashable {
+        let generation: UInt64
+        let battleID: String
+        let readyToken: String
+        let seq: Int
+    }
+    private var advancing = Set<RoundWork>()
+    private var reporting = Set<RoundWork>()
+    private var fallback: [String: (work: RoundWork, due: TimeInterval)] = [:]
+    private var fallbackTasks: [String: Task<Void, Never>] = [:]
+    private var battleReads = Set<String>()
+    private var battleReadAgain = Set<String>()
+    private var battleRecovery: [String: TimeInterval] = [:]
     private var api: OnlineBattleAPI?
     private var origin: OnlineBattleOrigin?
     private var connection: (any OnlineBattleConnecting)?
@@ -184,6 +197,142 @@ final class OnlineBattleSession {
             requestRefresh()
         case .standingsRefreshRequested:
             requestStandingsRefresh()
+        case .battleNotification(let snapshot, let id, let payload):
+            guard let connection, snapshot == (await connection.snapshot()), epoch == generation,
+                  snapshot.state == .connected, let account = presentation.account,
+                  snapshot.trainerId == account.trainer.trainerId, snapshot.groupId == account.group.groupId else { return }
+            await consumeNotification(payload, battleID: id, account: account, epoch: epoch)
+        }
+    }
+    private struct BattleNotice: Decodable {
+        let type: String
+        let state: OnlineBattleState?
+        let revision: Int?
+        let roundSeq: Int?
+        let deadline: Double?
+        let pair: OnlineBattlePair?
+        let hasDeadline: Bool
+        private enum CodingKeys: String, CodingKey { case type, state, revision, roundSeq, deadline, pair }
+        init(from decoder: Decoder) throws {
+            let box = try decoder.container(keyedBy: CodingKeys.self)
+            type = try box.decode(String.self, forKey: .type)
+            state = try box.decodeIfPresent(OnlineBattleState.self, forKey: .state)
+            revision = try box.decodeIfPresent(Int.self, forKey: .revision)
+            roundSeq = try box.decodeIfPresent(Int.self, forKey: .roundSeq)
+            deadline = try box.decodeIfPresent(Double.self, forKey: .deadline)
+            pair = try box.decodeIfPresent(OnlineBattlePair.self, forKey: .pair)
+            hasDeadline = box.contains(.deadline)
+        }
+    }
+    private func consumeNotification(_ payload: Data, battleID id: String, account: OnlineBattleAccount, epoch: UInt64) async {
+        guard onlineAllowed, authenticated, let api else { return }
+        guard let notice = try? JSONDecoder().decode(BattleNotice.self, from: payload) else {
+            await readBattle(id, epoch: epoch); return
+        }
+        // Mismatch announcements also go to nonparticipants; they contain no result to reconcile.
+        if notice.type == "battle_void", views[id] == nil { return }
+        guard let room = views[id], room.side(for: account.trainer.trainerId) != nil else {
+            await readBattle(id, epoch: epoch); return
+        }
+        // HTTP may have already consumed these buffered notifications, including an entire auto match.
+        if notice.type == "battle_round", let pair = notice.pair, pair.roundSeq > 0, pair.roundSeq <= room.journal.count {
+            if room.journal[pair.roundSeq - 1] != pair { await readBattle(id, epoch: epoch) }
+            return
+        }
+        if notice.type == "battle_changed", notice.revision == room.revision {
+            if !room.state.isActive { return }
+            if room.state == .reported, notice.state == .running || notice.state == .reported { return }
+        }
+        guard room.state == .running, room.config != nil, let resolver = resolvers[id] else {
+            await readBattle(id, epoch: epoch); return
+        }
+        do {
+            if notice.type == "battle_round", let pair = notice.pair {
+                guard (1...200).contains(pair.roundSeq), pair.releasedAt.isFinite, pair.releasedAt >= 0,
+                      [pair.p1, pair.p2].allSatisfy({ token in
+                          switch token {
+                          case .move(let slot): return room.mode == .manual && (1...4).contains(slot)
+                          case .timeout: return room.mode == .manual
+                          case .policy: return room.mode == .auto
+                          }
+                      }) else { await readBattle(id, epoch: epoch); return }
+                guard pair.roundSeq == room.journal.count + 1,
+                      resolver.processedRoundSeq == room.journal.count,
+                      pair.roundSeq == room.roundSeq || pair.roundSeq == room.roundSeq + 1 else {
+                    await readBattle(id, epoch: epoch); return
+                }
+                let updated = room.relayView(roundSeq: max(room.roundSeq, pair.roundSeq),
+                    deadline: nil,
+                    ownChoice: nil, journal: room.journal + [pair])
+                try await process(updated, account: account, api: api, epoch: epoch)
+                return
+            }
+            if notice.type == "battle_changed", notice.state == .running, notice.revision == room.revision, notice.hasDeadline,
+               let seq = notice.roundSeq, (1...200).contains(seq) {
+                // Earlier open/closed messages can arrive behind our own newer HTTP response.
+                if seq < room.roundSeq { return }
+                if seq == room.roundSeq {
+                    if seq <= room.journal.count || notice.deadline == room.deadline { return }
+                }
+                if room.mode == .manual, seq == room.roundSeq + 1, seq == resolver.processedRoundSeq + 1,
+                   let deadline = notice.deadline, deadline.isFinite, deadline > clock.now() * 1000,
+                   deadline <= clock.now() * 1000 + 30_000 {
+                    views[id] = room.relayView(roundSeq: seq, deadline: deadline, ownChoice: nil, journal: room.journal)
+                    cancelFallback(id); publish(); return
+                }
+            }
+            // Legacy, missing, changed, expired and terminal notifications all require HTTP proof.
+            await readBattle(id, epoch: epoch)
+        } catch {
+            await readBattle(id, epoch: epoch)
+        }
+    }
+    private func readBattle(_ id: String, epoch: UInt64) async {
+        guard epoch == generation, onlineAllowed, authenticated, let api, let account = presentation.account else { return }
+        if battleReads.contains(id) { battleReadAgain.insert(id); return }
+        battleReads.insert(id)
+        defer { if epoch == generation { battleReads.remove(id) } }
+        repeat {
+            battleReadAgain.remove(id)
+            do {
+                let room = try await api.battle(id: id); try current(epoch)
+                try await process(room, account: account, api: api, epoch: epoch)
+                try current(epoch); battleRecovery[id] = nil; try rebuildRoster(); publish()
+            } catch {
+                guard epoch == generation else { return }
+                await handle(error, epoch: epoch)
+                // Battle recovery stays scoped even when the general error path arms a full read.
+                nextRecoveryRead = nil; battleRecovery[id] = clock.now() + 5
+                return
+            }
+        } while battleReadAgain.contains(id) && epoch == generation
+    }
+    private func cancelFallback(_ id: String) {
+        fallback[id] = nil; fallbackTasks.removeValue(forKey: id)?.cancel()
+    }
+    private func scheduleFallback(_ work: RoundWork) {
+        guard fallback[work.battleID]?.work != work else { return }
+        cancelFallback(work.battleID)
+        fallback[work.battleID] = (work, clock.now() + 2)
+        guard automaticTicks else { return }
+        let clock = clock
+        fallbackTasks[work.battleID] = Task { [weak self] in
+            do { try await clock.sleep(2) } catch { return }
+            guard !Task.isCancelled else { return }
+            await self?.resumeFallback(work)
+        }
+    }
+    private func resumeFallback(_ work: RoundWork) async {
+        guard work.generation == generation, onlineAllowed, authenticated,
+              fallback[work.battleID]?.work == work,
+              let room = views[work.battleID], room.state == .running,
+              room.roundSeq == work.seq, room.config?.readyToken == work.readyToken,
+              let api, let account = presentation.account else { return }
+        fallback[work.battleID] = nil; fallbackTasks[work.battleID] = nil
+        do { try await process(room, account: account, api: api, epoch: work.generation, fallbackWork: work) }
+        catch {
+            await handle(error, epoch: work.generation)
+            if work.generation == generation { nextRecoveryRead = nil; battleRecovery[work.battleID] = clock.now() + 5 }
         }
     }
     func join(inviteCode: String, email: String) async {
@@ -304,7 +453,7 @@ final class OnlineBattleSession {
         if room.roundSeq == old.roundSeq, old.ownChoice != nil, room.ownChoice == nil, room.journal.count == old.journal.count { return false }
         return true
     }
-    private func process(_ initial: OnlineBattleView, account: OnlineBattleAccount, api: OnlineBattleAPI, epoch: UInt64) async throws {
+    private func process(_ initial: OnlineBattleView, account: OnlineBattleAccount, api: OnlineBattleAPI, epoch: UInt64, fallbackWork: RoundWork? = nil) async throws {
         var room = initial
         var refetched = false
         // An automatic battle has at most 200 public pairs. Each response must make progress.
@@ -313,6 +462,9 @@ final class OnlineBattleSession {
             guard accepts(room) else { return }
             guard let side = room.side(for: account.trainer.trainerId) else { throw OnlineBattleFailure.invalidResponse }
             views[room.battleId] = room
+            if let pending = fallback[room.battleId], room.state != .running || room.roundSeq > pending.work.seq {
+                cancelFallback(room.battleId)
+            }
             let key = try receiptKey(room, account: account)
             if [.void, .cancelled, .declined, .expired].contains(room.state) {
                 try effects.releaseOnlineBattle(key: key)
@@ -368,7 +520,12 @@ final class OnlineBattleSession {
                 let reportKey = room.battleId + ":" + report.readyToken
                 if room.state == .reported, submittedReports.contains(reportKey) { return }
                 // Sending the identical deterministic report is safe after a response was lost.
-                let updated = try await api.report(id: room.battleId, report: report); try current(epoch)
+                let work = RoundWork(generation: epoch, battleID: room.battleId, readyToken: report.readyToken, seq: report.terminalSeq)
+                guard reporting.insert(work).inserted else { return }
+                let updated: OnlineBattleView
+                do { updated = try await api.report(id: room.battleId, report: report); reporting.remove(work) }
+                catch { reporting.remove(work); throw error }
+                try current(epoch)
                 submittedReports.insert(reportKey)
                 guard accepts(updated) else { return }
                 if updated == room { return }
@@ -377,7 +534,13 @@ final class OnlineBattleSession {
                 continue
             }
             guard room.state == .running, resolver.processedRoundSeq == room.roundSeq, room.roundSeq > 0 else { return }
-            let updated = try await api.advance(id: room.battleId, processedRoundSeq: resolver.processedRoundSeq); try current(epoch)
+            let work = RoundWork(generation: epoch, battleID: room.battleId, readyToken: room.config!.readyToken, seq: resolver.processedRoundSeq)
+            if side == .p2, fallbackWork != work { scheduleFallback(work); return }
+            guard advancing.insert(work).inserted else { return }
+            let updated: OnlineBattleView
+            do { updated = try await api.advance(id: room.battleId, processedRoundSeq: resolver.processedRoundSeq); advancing.remove(work) }
+            catch { advancing.remove(work); throw error }
+            try current(epoch)
             guard updated != room else { return }
             room = updated
         }
@@ -567,6 +730,8 @@ final class OnlineBattleSession {
         presentation.standingsLoading = false
     }
     private func resetExtras() {
+        fallbackTasks.values.forEach { $0.cancel() }; fallbackTasks = [:]; fallback = [:]
+        advancing = []; reporting = []; battleReads = []; battleReadAgain = []; battleRecovery = [:]
         invalidateStandingsRead()
         presentation.showsStandings = false; presentation.standings = nil; presentation.standingsError = nil
         presentation.rematchSourceID = nil; rematchFromHistory = false
@@ -792,13 +957,17 @@ final class OnlineBattleSession {
     func tick() async {
         guard onlineAllowed, authenticated else { return }
         let now = clock.now()
+        for pending in Array(fallback.values) where now >= pending.due { await resumeFallback(pending.work) }
+        let recovery = battleRecovery.filter { now >= $0.value }.map(\.key)
+        for id in recovery { await readBattle(id, epoch: generation) }
         let due = views.values.filter { room in
-            room.state == .running && room.deadline.map { now * 1000 >= $0 } == true && now >= (checkedDeadlines[room.battleId] ?? 0)
+            room.state == .running && !recovery.contains(room.battleId) && room.deadline.map { now * 1000 >= $0 } == true && now >= (checkedDeadlines[room.battleId] ?? 0)
         }
-        guard !due.isEmpty || nextRecoveryRead.map({ now >= $0 }) == true else { return }
-        for room in due { checkedDeadlines[room.battleId] = now + 5 }
-        nextRecoveryRead = nil
-        await refresh()
+        for room in due {
+            checkedDeadlines[room.battleId] = now + 5
+            await readBattle(room.battleId, epoch: generation)
+        }
+        if nextRecoveryRead.map({ now >= $0 }) == true { nextRecoveryRead = nil; await refresh() }
     }
     private func revoke(epoch: UInt64) async {
         guard epoch == generation else { return }
@@ -848,5 +1017,14 @@ final class OnlineBattleAccessObservation {
                 await self.changed(self.read())
             }
         }
+    }
+}
+
+private extension OnlineBattleView {
+    func relayView(roundSeq: Int, deadline: Double?, ownChoice: String?, journal: [OnlineBattlePair]) -> Self {
+        .init(battleId: battleId, state: state, revision: revision, mode: mode, p1: p1, p2: p2,
+              createdAt: createdAt, expiresAt: expiresAt, startedAt: startedAt, reportedAt: reportedAt,
+              confirmed: confirmed, config: config, roundSeq: roundSeq, deadline: deadline, ownChoice: ownChoice,
+              journal: journal, result: result, reason: reason, rematchOf: rematchOf)
     }
 }
