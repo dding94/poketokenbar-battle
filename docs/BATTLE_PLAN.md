@@ -385,7 +385,7 @@ SQL 커서에 이미 포함된 색인 쓰기를 중복 가산하지 않는다. �
 
 실제 100경기의 DB 증가를 선형 환산하면 90일 **98,426,880바이트**, 365일 **399,175,680바이트**다. 보관은 계속되므로 영구 저장량이 상수라는 뜻은 아니다. `npm run measure:retention`은 종료 0·1건 통과·실패/skip 0이며 실제 완료 템플릿 1개+복제 이력 1,000개를 사용했다. 추가 DB 8,654,848바이트, 목록 100건 읽기 102행·응답 2,320,428바이트였다. 복제는 진행 중 페이지 분할을 재현하지 않으므로 더 큰 **실제 100경기 기반 약 399MB/년**을 예산으로 사용한다. 같은 fixture의 v3 200,200 round/1,001방을 v4로 이관해 보고 rowid 보존과 DB 50,728,960→10,899,456바이트를 확인했다. 로컬 wall 370ms는 hosted CPU 값이 아니다. 큰 기존 이력의 Free 이관 CPU·PITR·실제 계정 여유·두 맥/프록시·큰 시계 차이의 폴링 비용은 미검증이다.
 
-heavy 두 명령은 별도 `vitest.measure.config.ts`에 있어 일반 CI에 skip으로 섞이지 않는다. 일반 통합 서버는 41파일 **367건 통과·실패/skip 0**, 통합 앱 관련 검사는 **346건 통과·실패/skip 0**(실제 네이티브 3건 포함)였다. [전체 CI 41783050082](https://github.com/dding94/poketokenbar-battle/actions/runs/41783050082)(`ccd62e5`)도 앱 2,166건 실행 중 2,150건 통과·16 opt-in skip·실패 0, 서버 367건 통과, macOS 15/26 각각 Node/JSC 2,200판 불일치 0으로 성공했다. 이후 릴리스 로그 도구 보강의 재검증과 상세 명령·미실행 분기는 AI_HANDOFF를 따른다.
+heavy 두 명령은 별도 `vitest.measure.config.ts`에 있어 일반 CI에 skip으로 섞이지 않는다. 일반 통합 서버는 41파일 **367건 통과·실패/skip 0**, 통합 앱 관련 검사는 **346건 통과·실패/skip 0**(실제 네이티브 3건 포함)였다. [전체 CI 41783050082](https://github.com/dding94/poketokenbar-battle/actions/runs/41783050082)(`ccd62e5`)도 앱 2,166건 실행 중 2,150건 통과·16 opt-in skip·실패 0, 서버 367건 통과, macOS 15/26 각각 Node/JSC 2,200판 불일치 0으로 성공했다. 릴리스 로그 도구 보강 후 [최종 전체 CI 41784448755](https://github.com/dding94/poketokenbar-battle/actions/runs/41784448755)(`fe4b9e2`)도 같은 앱/서버/결정성 건수로 성공했고 릴리스 Python 35건도 통과했다. 실제 `release-ci.py`는 같은 HEAD·8개 작업·네이티브 3건을 확인해 종료 0이었다. 상세 명령·미실행 분기는 AI_HANDOFF를 따른다.
 
 ### PR 13 1차 개선 비교 — 한도 미충족 (2026-11-04)
 
@@ -407,6 +407,8 @@ heavy 두 명령은 별도 `vitest.measure.config.ts`에 있어 일반 CI에 ski
 로그인된 사용자 Chrome의 Cloudflare 대시보드에서 **무료·현재 요금제**를 확인했다. 당일 계정 합계는 Worker 요청 0/100,000, DO 요청 1/100,000, duration 0.045 GB-s, SQL 읽기 49행·쓰기 2행·저장 241.66kB였다. namespace 표의 오류는 0이었다. 계정 합계 관측이며 장기 부하·배포 후 수치·복구/PITR·CPU 전수 검증이 아니다. 계정 식별값과 다른 서비스 이름은 기록하지 않는다.
 
 [공식 가격](https://developers.cloudflare.com/durable-objects/platform/pricing/)의 요청 100k/일·읽기 5M/일·쓰기 100k/일·계정 저장 5GB는 재확인했다. [한도 문서](https://developers.cloudflare.com/durable-objects/platform/limits/)의 객체 저장 표(10GB)와 Free 초과 FAQ(1GB), CPU 기본값과 Workers 한도 표현은 여전히 구분해 읽고 기존 보수적 가정을 유지한다. 실제 변경·배포 승인 전에는 최신 관측 시점과 증거를 다시 제시한다.
+
+사용자 별도 승인 후 개발 Worker `ptb-battle-league-dev`에 최신 코드(v4 이관 포함)를 배포했다. 버전 `fcdc4a4d-d9a7-4d9b-8091-6b789c966784`, 배포 종료 0. health 200·인증 없는 standings 401·잘못된 형식의 합성 초대 join 404를 curl로 확인했다(각 종료 0). 이는 배포/입력 경계 확인이며 실제 기존 데이터 이관 내용·경기 부하·CPU·복구/PITR·배포 후 사용량은 미검증이다. 앱 설치·운영 배포·공개 릴리스는 미실행이고 PR 13 전체 체크박스는 유지한다.
 
 ### PR 12 로컬 전적판 비용 (2026-11-04)
 

@@ -1,10 +1,10 @@
 # 다음 AI를 위한 작업 인계
 
-최종 갱신: 2026-11-04. **PR 13 로컬 구현·독립 리뷰·100경기 저장 실측 완료, 최종 CI·번들 검증 중. 실제 설치본·개발 Worker는 PR 07 닉네임 버전 그대로다. PR 13 전체는 미완료이며 실제 두 맥 E2E는 사용자 요청으로 미실행이다. 아래 초기 stub·배포 전 표현은 당시 기록이다.**
+최종 갱신: 2026-11-04. **PR 13 구현·독립 리뷰·100경기 로컬 저장 실측·최종 CI·개발 번들 검증 완료. 사용자 승인 후 개발 Worker도 최신 코드로 배포했다. 실제 앱 설치본은 PR 07 닉네임 버전 그대로다. PR 13 전체는 미완료이며 실제 두 맥 E2E는 사용자 요청으로 미실행이다. 아래 초기 stub·배포 전 표현은 당시 기록이다.**
 
 ### 진행 중: PR 13 (2026-11-04)
 
-사용자 요청으로 PR 13을 시작했다. `3bbcf13`·feat/local-practice-battle·깨끗한 작업 트리와 포크 origin/원본 push 비활성화를 확인했다. **사용자 결정은 하루 100판 검증 목표 유지·추가 최적화이며 경기 상한/보관 축소를 추가하지 않았다.** H.5 압축 저장·알람 복구, H.6 알림 재사용·p1 advance/p2 복구·프로토콜 heartbeat를 구현하고 독립 리뷰를 마쳤다. 통합 관련 앱 346건·서버 367건 통과, 최종 CI·공용 번들 검증은 아래 후속 기록을 따른다. 실제 두 맥 시험은 기존대로 미실행이며 개발/운영 배포·설치·공개 릴리스는 아직 승인/실행하지 않았다. PR 13 체크박스는 미완료다.
+사용자 요청으로 PR 13을 시작했다. `3bbcf13`·feat/local-practice-battle·깨끗한 작업 트리와 포크 origin/원본 push 비활성화를 확인했다. **사용자 결정은 하루 100판 검증 목표 유지·추가 최적화이며 경기 상한/보관 축소를 추가하지 않았다.** H.5 압축 저장·알람 복구, H.6 알림 재사용·p1 advance/p2 복구·프로토콜 heartbeat를 구현하고 독립 리뷰를 마쳤다. 통합 관련 앱 346건·서버 367건 통과, 최종 CI·공용 번들 검증은 아래 후속 기록을 따른다. 실제 두 맥 시험은 기존대로 미실행이다. 개발 배포는 별도 승인 후 완료했고, 이번 운영 배포·앱 설치·공개 릴리스는 실행하지 않았다. PR 13 체크박스는 미완료다.
 
 - **H.5/H.6 통합:** 저장 RED 5건 중 단언 실패 4·기존 호환 1건 통과(종료 1), 앱 RED 2건·단언 실패 3, 공개 알림 RED 2건 실패, 리뷰 RED 3건·단언 실패 9, 실제 text heartbeat RED 3건 중 단언 실패 1(각 종료 1). 제한 환경 포트 차단의 실행 0건은 RED로 세지 않았다. SQL/알람 rollback·post-commit 조회 실패·이관 transaction 제거 변형은 각각 1/1/3건 실패 후 원복했다. 실제 cold alarm의 예약 2회 RED 뒤 timeout/early/비배틀 복구 GREEN 4건. 앱 advance 잠금/generation/HTTP 정산/heartbeat 소켓 종료 변형은 각각 1/2/1/2개 단언 실패 후 원복했다.
 - **최종 로컬 통합:** 위에 기록한 격리 wrapper·동일 Swift 필터 재실행은 종료 0, **346건 통과·실패/skip 0**. `check-test-filter.sh`도 346건·종료 0. 실제 Node workerd+Swift HTTP/WS+JSC+paired Session 200턴과 네이티브 3건이 포함된다. 200턴 정상 통신은 602~603회, 부트스트랩 포함 620~621회(경기 중 me/group/list 0)였다. 프로토콜 pong 성공·문자열 pong 0·닫힌 소켓 실패→새 connectionId 재접속도 실제 경계로 확인했다. OCR는 로컬 미실행이다. `npm ci --prefix server`, `npm run typecheck --prefix server`, `npm test --prefix server`: 각 종료 0, **41파일 367건 통과·실패/skip 0**, audit 0.
@@ -12,8 +12,13 @@
 - **독립 리뷰:** 소비된 알람 rollback 뒤 늦은 선택 수락, cold early alarm 중복 쓰기, 그룹 화면 이동으로 p2 복구 타이머/요청 잠금 소실, 서버와 로컬 시계 차이로 매 턴 GET 발생을 찾아 수정했다. `0ad83ec`·`ed9a820`·`fdd7279`까지 잔여 P1/P2 없음. 리뷰어는 H.5 26건을 별도 실행했고 앱 114건/native 3건은 작업자 증거·코드 검토(별도 재실행 아님)다. 새 Swift 분기는 `llvm-cov --show-regions`로 확인했으며 Task 취소/소멸 등 방어 경로와 ping timer 등록 직전 완료 경합의 일부 분기는 미실행이다. 실제 두 맥/앱 프로세스 재시작/Keychain/프록시/Free CPU·PITR는 계속 미검증이다.
 - **최종 공용 개발 번들:** 아래 중간 번들과 같은 `PTB_SKIP_INSTALL=1` 빌드 명령을 최종 앱 소스로 재실행, 종료 0. fork bundle/LaunchAgent·arm64/x86_64 minOS 15·JIT·strict codesign·엔진 해시 검사 및 `ditto -c -k --keepParent` 종료 0. `build/PokeTokenBar-Battle-PR13.zip` SHA256 `ea382bc288926c621b85cfd4d0f536fe9dd46d68a13f82d0be361c2a66d86f55`, 실행 파일 SHA256 `fc17b26db869fbd1ae5553297546c7c77c9a415e89bf3e14efc48922a4a4d88e`. ad-hoc 개발 서명이고 설치/실행/공개하지 않았다. 공인 서명/공증·정확한 HEAD 전체 CI를 요구하는 `release.sh --prepare-build`의 완료 증거는 아니다.
 - **전체 CI 1차 성공:** [41783050082](https://github.com/dding94/poketokenbar-battle/actions/runs/41783050082), 소스 `ccd62e5`, `git push`·`gh run watch --exit-status` 종료 0. 앱 rest 2,160건 중 16 skip·실패 0, rendering 6건·실패/skip 0: 합계 **2,166건 실행·2,150건 통과·16 skip·실패 0**. test-union이 2,166건 정확히 한 번 실행을 확인했고 네이티브 3건은 실제 통과·skip 0이다. 기존 opt-in 16건은 미검증이다. 서버 **41파일 367건 통과·실패/skip 0**, audit 0. macOS 15/26 각각 Swift 경계 369건·Node 계약 49건 통과·실패/skip 0, Node/JSC 2,200판 불일치/재생/상태 실패 0(200턴 draw 200판). 경계 검사는 앱과 중복이므로 합산하지 않는다.
-- **릴리스 로그 처리 후속:** 실제 `gh api .../jobs/.../logs`가 ANSI가 든 로그를 거절해 종료 1이었다. 로그 endpoint에만 `--allow-escape-sequences`를 주고 비공개 capture 후 CSI를 제거하는 경로로 수정했다. 고정 run/attempt/job 검증은 유지한다. RED 1건 실패→`python3 -m unittest discover -s scripts/tests -p 'test_release*.py' -v` **35건 통과·실패/skip 0·종료 0**, 정규화 제거 변형 1건 실패 후 바이트 원복. 독립 리뷰 잔여 P1/P2 없음. 이 추가 변경의 전체 CI 및 실제 release-ci 확인을 마지막으로 진행한다.
-- **배포 전 준비:** 2026-11-04 최종 로컬 검증 후 사용자 Chrome에서 Free 현재 요금제, 계정 Worker 0/100k·DO 1/100k·duration 0.045GB-s·SQL 읽기 49/5M·쓰기 2/100k·저장 241.66kB, 활성 개발 버전 `60b017d9`를 다시 확인했다. `wrangler deploy --env dev --dry-run --outdir <build 경로> --env-file <빈 임시 파일>` 종료 0, 90.08KiB(gzip 22.06KiB), League 바인딩 하나. 임시 XDG 설정과 최소 환경·dotenv/프로세스 env/metrics 비활성화로 비밀값을 읽지 않았다. `build/pr13-worker-dry-run/index.js` SHA256 `327d10fc3d8cb17d3bf309197bc2ffb24048a323af7af2865dc7cc404f9216fd`. 실제 배포/스키마 이관/데이터 복구는 실행하지 않았다.
+- **릴리스 로그 처리 후속:** 실제 `gh api .../jobs/.../logs`가 ANSI가 든 로그를 거절해 종료 1이었다. 로그 endpoint에만 `--allow-escape-sequences`를 주고 비공개 capture 후 CSI를 제거하는 경로로 수정했다. 고정 run/attempt/job 검증은 유지한다. RED 1건 실패→`python3 -m unittest discover -s scripts/tests -p 'test_release*.py' -v` **35건 통과·실패/skip 0·종료 0**, 정규화 제거 변형 1건 실패 후 바이트 원복. 독립 리뷰 잔여 P1/P2 없음. 이 추가 변경도 아래 최종 전체 CI와 실제 release-ci 조회로 확인했다.
+- **배포 전 준비:** 2026-11-04 최종 로컬 검증 후 사용자 Chrome에서 Free 현재 요금제, 계정 Worker 0/100k·DO 1/100k·duration 0.045GB-s·SQL 읽기 49/5M·쓰기 2/100k·저장 241.66kB, 활성 개발 버전 `60b017d9`를 다시 확인했다. `wrangler deploy --env dev --dry-run --outdir <build 경로> --env-file <빈 임시 파일>` 종료 0, 90.08KiB(gzip 22.06KiB), League 바인딩 하나. 임시 XDG 설정과 최소 환경·dotenv/프로세스 env/metrics 비활성화로 비밀값을 읽지 않았다. `build/pr13-worker-dry-run/index.js` SHA256 `327d10fc3d8cb17d3bf309197bc2ffb24048a323af7af2865dc7cc404f9216fd`. 이 시점은 실제 배포 전 관측이다. 이후 승인된 배포 결과는 아래 기록을 따른다.
+
+
+- **최종 전체 CI:** [41784448755](https://github.com/dding94/poketokenbar-battle/actions/runs/41784448755), 소스 `fe4b9e2`, 필수 8개 작업 성공. `gh run watch 41784448755 --exit-status`는 첫 조회의 API 연결 시간 초과로 종료 1, 재조회는 종료 0이었다(테스트 실패 아님). 앱 **2,166건 실행·2,150건 통과·16 skip·실패 0**, 네이티브 3건 실제 통과·skip 0, test-union 2,166건 정확히 한 번 실행. 서버 **41파일 367건 통과·실패/skip 0**, 릴리스 Python **35건 통과·실패/skip 0**. macOS 15/26 각각 Swift 경계 369건·Node 계약 49건 통과, 2,200판 불일치/재생/상태 실패 0·200턴 draw 200판. 중복 자동 CI `41784446803`은 취소했으며 통과로 세지 않는다.
+- **실제 릴리스 증거 조회:** 깨끗한 `fe4b9e2`에서 `python3 scripts/release-ci.py 41784448755` 종료 0, 동일 HEAD/attempt·8개 작업·네이티브 3건을 확인했다. 이전 소스의 `python3 scripts/release-ci.py 41783050082`는 exact HEAD 불일치로 종료 1(의도한 음성 검사). 최종 기록용 문서 커밋은 이 소스 뒤에 붙는다. 향후 실제 `--prepare-build`는 그때의 정확한 HEAD 전체 CI를 다시 요구하며 이번 조회를 서명·게시 증거로 쓰지 않는다.
+- **승인된 개발 배포:** 2026-11-04 사용자가 개발 Worker 업데이트를 별도 승인했다. `node server/node_modules/wrangler/bin/wrangler.js deploy --env dev --env-file <빈 임시 파일>` 종료 0, `ptb-battle-league-dev` 버전 `fcdc4a4d-d9a7-4d9b-8091-6b789c966784`, 90.08KiB(gzip 22.06KiB). 기존 OAuth로 배포했으며 비밀값 원문을 읽거나 출력하지 않았다. 전적판·재대결·저장 형식 v4 이관 코드를 반영했다. `curl` 확인은 각 종료 0: health 200, 인증 없는 standings 401, 잘못된 형식의 합성 초대 입력 join 404. 최초 Python urllib 확인은 JSON 해석 실패로 종료 1이었고 curl로 재확인했다. 실제 기존 데이터의 이관 내용·복구/PITR·인증된 경기·배포 후 Free 사용량/CPU는 미검증이다. 배포 성공을 이 항목들의 통과로 확대하지 않는다. 앱 설치·운영 배포·공개 릴리스는 하지 않았다.
 
 - 1차 서버 최적화: RED 5건·단언 실패 5(종료 1), 깨끗한 `npm ci`·`npm run typecheck`·`npm test` 각 종료 0, 35파일 336건 통과·실패/skip 0. 4개 변형은 각각 2/1/2/1건 실패 후 원복. `npm run measure:battles` 확장 12건 통과(종료 0). 200턴 10판의 SQL 쓰기 26,492→20,372행, 알람 포함 30,522→24,402회, 읽기 686,042행·DO 요청 6,082회·DB 증가 499,712바이트. 100판/일 외삽 쓰기 약 24.4만·읽기 약 686만으로 여전히 실패하며 저장량 감소도 아직 없다. 앱 GET/ping·다른 서비스는 별도다.
 - 네이티브 RED 3건 중 단언 실패 1(종료 1), GREEN 3건 통과·실패/skip 0(종료 0). 실제 Swift HTTP/WS·JSC·로컬 workerd·Session·임시 CompanionStore를 연결한다. 서버 처리 후 응답 유실·세션/디스크 저장 재생성·중복 정산·VOID·재대결을 검사한다. 방 생성/수락/시작은 API로 준비하고 키 저장은 대역이다. 같은 프로세스의 Session/Store 재생성이므로 실제 앱 재시작·두 맥·Keychain 실기로 확대하지 않는다.
@@ -450,7 +455,7 @@ PR 05 실측의 재접속 표본 0·전수 CPU·계정 DO 오류 원인·회사 
 
 ## 아직 정하지 않은 세부값 (제안 기본값)
 
-- 무료 한도 대응의 구체적 방법(턴당 쓰기 최적화·일일 경기 상한)은 PR 13 전 별도 결정한다(PR 07에서 제외 승인).
+- 무료 한도 대응은 2026-11-04 하루 100판 목표 유지·저장 구조 추가 최적화로 결정했다. 상한/보관 축소 없이 구현·로컬 계측을 마쳤으며 실제 Free 부하·복구 검증이 남아 있다(§7, 부록 H).
 - 과거 경기 재생 방식은 2026-11-04 구버전 엔진 앱 보관으로 확정했다(부록 F).
 - 포크의 문제 리포트 수신처(`AppIdentity.supportEmail`, 현재 nil이라 리포트 행 숨김).
 - 원본 앱이 함께 실행 중일 때 경고할지(두 앱이 같은 토큰 로그로 각자 개체를 키운다).
@@ -486,8 +491,9 @@ PR 05 실측의 재접속 표본 0·전수 CPU·계정 DO 오류 원인·회사 
 ```text
 이 저장소의 AGENTS.md와 docs/AI_HANDOFF.md, docs/BATTLE_PLAN.md를 읽어줘.
 feat/local-practice-battle 브랜치의 현재 상태를 확인하고,
-PR 11~12 검증 기록과 미배포/미설치 상태를 확인하고 PR 13 전 무료 한도 보완과 인수 준비를 진행해줘.
-실제 두 맥 시험은 사용자 요청으로 미실행이며, 배포·설치·실기 시험은 구체적인 준비 뒤 별도 승인을 받아줘.
+PR 13 최종 CI(41784448755, 소스 fe4b9e2)와 개발 Worker 배포 기록을 확인하고 남은 인수·무료 운영 실측/복구·릴리스 준비를 진행해줘.
+개발 Worker는 PR 13 코드지만 설치된 앱은 PR 07이다. 최신 개발 ZIP은 build/PokeTokenBar-Battle-PR13.zip이다.
+실제 두 맥 시험은 사용자 요청으로 미실행이다. 이미 승인·완료된 개발 배포를 반복하지 말고, 추가 배포·앱 설치·실기 시험·공개 릴리스는 구체적인 준비 뒤 별도 승인을 받아줘.
 월 0원 조건과 로그인 화면 없는 초대코드 + 닉네임 방식을 유지해줘.
 ```
 
