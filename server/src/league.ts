@@ -186,6 +186,7 @@ export class League extends DurableObject<Env> {
    * with its hash. Only an active trainer is accepted; anything else gets no upgrade.
    */
   override fetch(request: Request): Response {
+    this.scheduler.repair(this.clock());
     if (request.headers.get("upgrade")?.toLowerCase() !== "websocket") return errorResponse("upgrade_required");
     const keyHash = request.headers.get(KEY_HASH_HEADER);
     if (!keyHash) return errorResponse("unauthorized");
@@ -198,14 +199,17 @@ export class League extends DurableObject<Env> {
 
   /** `ping` never gets here (runtime auto-response); every other message closes the socket. */
   override webSocketMessage(ws: WebSocket, _message: string | ArrayBuffer): void {
+    this.scheduler.repair(this.clock());
     this.realtime.unexpectedMessage(ws);
   }
 
   override webSocketClose(ws: WebSocket, _code: number, _reason: string, _wasClean: boolean): void {
+    this.scheduler.repair(this.clock());
     this.realtime.departed(ws);
   }
 
   override webSocketError(ws: WebSocket, _error: unknown): void {
+    this.scheduler.repair(this.clock());
     this.realtime.departed(ws);
   }
 
@@ -223,6 +227,7 @@ export class League extends DurableObject<Env> {
   }
 
   standings(input: { keyHash: string }): Result<Standings> {
+    this.scheduler.repair(this.clock());
     return this.ctx.storage.transactionSync(() => {
       const auth = this.access.actor(input.keyHash, "member");
       return auth.ok ? ok(readStandings(this.sql, auth.value.groupId)) : auth;
@@ -589,7 +594,7 @@ export class League extends DurableObject<Env> {
     this.scheduler.begin(now, consumed);
     let result: Result<T>;
     try { result = this.ctx.storage.transactionSync(() => fn(after)); }
-    catch (error) { this.scheduler.discard(); throw error; }
+    catch (error) { this.scheduler.rollback(); throw error; }
     this.scheduler.finish();
     for (const effect of after) {
       if (effect.kind === "revoke") this.realtime.revoke(effect.trainerId);

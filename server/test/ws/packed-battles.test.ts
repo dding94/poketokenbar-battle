@@ -57,3 +57,13 @@ it("preserves a private current round on VOID and accepts old published move ret
   const after = await f.get(); expect(after.state).toBe("VOID"); expect(after.deadline).toBe(before.deadline); expect(after.ownChoice).toBe("move 4");
   expect((await f.action(0, "choices", { roundSeq: 1, choice: "move 3" })).journal).toEqual(before.journal);
 });
+it("enforces expiry on the first HTTP request after an alarm transaction rolls back", async () => {
+  const f = await packedSession(); await f.clock(f.view.deadline + 1);
+  await runInDurableObject(f.stub, (_i, state) => state.storage.sql.exec("CREATE TRIGGER fail_alarm_room BEFORE UPDATE ON battle_rooms BEGIN SELECT RAISE(ABORT, 'test_fault'); END"));
+  // Direct delivery deliberately leaves no runtime retry racing this next HTTP request.
+  try { await expect(runInDurableObject(f.stub, instance => instance.alarm())).rejects.toThrow(); }
+  finally { await runInDurableObject(f.stub, (_i, state) => state.storage.sql.exec("DROP TRIGGER fail_alarm_room")); }
+  const late = await f.request("POST", `${f.path}/choices`, f.players[0].accessKey, { roundSeq: 1, choice: "move 1" });
+  expect(late.status).toBe(409); expect((await f.get()).journal[0].p1).toEqual({ kind: "timeout" });
+  expect(await f.alarm()).toBe(f.view.startedAt + 72 * 3600_000);
+});
