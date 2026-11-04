@@ -4,7 +4,14 @@
 
 ### 진행 중: PR 12 (2026-11-04)
 
-사용자가 PR 12 진행을 요청했다. 시작은 origin과 같은 `8b1dc73`, 작업 트리 깨끗함, 포크 origin/upstream 참조 전용을 확인했다. 챔피언은 활동 멤버의 양수 현재 연승 최댓값·동률 선착순·모두 0이면 없음, 승률은 확정 5판부터 승/(승+패+무)로 확정했다. 부록 G를 먼저 기록하고 서버 전적/이관·앱 연결·UI를 별도 worktree로 나눈다. 아직 새 기능 테스트·구현은 하지 않았다. PR 11 자동 검증/앱 ZIP 근거는 아래와 같으며 설치본·개발 Worker는 바꾸지 않았다.
+사용자가 PR 12 진행을 요청했다. 시작은 origin과 같은 `8b1dc73`, 작업 트리 깨끗함, 포크 origin/upstream 참조 전용을 확인했다. 챔피언은 활동 멤버의 양수 현재 연승 최댓값·동률 선착순·모두 0이면 없음, 승률은 확정 5판부터 승/(승+패+무)로 확정했다. 부록 G를 먼저 커밋하고 서버·앱 연결·UI를 별도 worktree로 구현했다. 현재 구현·독립 리뷰·로컬 검증 완료, 원격 CI·공용 번들 검증은 진행 중이다. 설치본·개발 Worker는 바꾸지 않았다.
+
+- RED: 서버 11건 중 10건 단언 실패(종료 1, typecheck 0), UI 2건·단언 실패 3, 앱 연결 3건·단언 실패 11. 리뷰/경합 회귀는 각각 2건·단언 실패 2, 2건·단언 실패 8(모두 종료 1). 컴파일 실패나 실행 0건은 RED로 세지 않았다.
+- 서버 worktree `cd server && npm ci`, `npm run typecheck`, `npm test`: 각 종료 0, 최종 34파일 **326건 통과·실패/skip 0**. `npm run measure:battles`: 종료 0, 9건 통과·실패/skip 0. 비용은 BATTLE_PLAN §7의 로컬 추정으로 기록했다. 이관 순서 MAX→MIN·동률 ASC→DESC·확정 순서 +1→+0 변형은 각각 1건 실패(종료 1) 후 원복했다.
+- 최종 통합 로컬: `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer PTB_STATE_DIR=/private/tmp/ptb-pr12-root-state CLANG_MODULE_CACHE_PATH=/private/tmp/ptb-pr12-root-modules PTB_SNAPSHOT_SCREENSHOT_DIR=<repo>/build/pr12/screenshots swift test --disable-sandbox --scratch-path /private/tmp/ptb-pr07-clean-build --jobs 2 --enable-code-coverage --filter 'OnlineBattle|BattleEngineTests|BattleEngineArchiveTests|SaveTransferTests|PracticeStakesStoreTests|SaveSnapshot|PracticeLaunchTests|LocalizedUILiteralTests'`: **종료 0, 289건 통과·실패/skip 0**. 같은 필터의 `scripts/check-test-filter.sh` 종료 0. 로컬 OCR 미실행. 합성 SwiftUI 전적판/오류/재대결 준비 전후 이미지를 build/pr12/screenshots에 만들고 활성 신청 버튼까지 시각 확인했다. 실제 앱·두 맥 시험 증거가 아니다.
+- 앱 가드 변형: 닫힌 팝오버 차단 제거, 재대결 source 일치 제거, 진행 중 일반 읽기 중 전적 갱신 제거 각각 회귀 1건·단언 실패 1·종료 1 후 원복. `llvm-cov show --show-regions`에서 새 분기를 직접 확인하고 401 키 폐기와 p2 관점 재대결 등 실제 미실행 분기를 보강했다. weak self 소멸, 선행 가드 중복, API 취소 검사 후 성공 경로의 늦은 응답 가드, 재대결 준비의 roster 읽기 실패 등 일부 방어 경로는 로컬 미실행이다.
+- 독립 리뷰: 서버 원자 이관/순서/그룹 경계와 UI 검토, 앱의 그룹 알림 합치기 중 전적판 갱신 누락·POST 오류보다 알림이 먼저 오는 재대결 잠금 경합을 수정했다. 응답 유실 뒤 체력 변경 시 기존 신청 취소도 회귀로 고정했다. `07acd81`까지 리뷰 후 남은 P1/P2 지적 없음(리뷰어 별도 테스트 미실행). 원인·부류 스윕은 defect-log. 최종 통합 소스 `6a00472`.
+
 
 ### 마지막 완료: PR 11 (2026-11-04)
 
@@ -14,7 +21,7 @@
 
 PR 11 구현·독립 리뷰·공용 번들 검증 완료. 최종 [CI 41754139329](https://github.com/dding94/poketokenbar-battle/actions/runs/41754139329), 소스 `a1e6d3e`, **전체 성공**. 앱 rest 2,115건 실행·16 skip·실패 0, rendering 6건·실패/skip 0으로 **합계 2,121건 실행·2,105건 통과·16 skip·실패 0**. test-union이 2,121건 정확히 한 번 실행을 확인했다. Core 라인 94.23%, 포크 가드·엔진 포장·secret-scan 성공. 서버 npm ci·typecheck·test 성공, 31파일 315건·실패/skip 0. macOS 15·26 각각 Swift 경계 369건·실패/skip 0, Node 계약 49건·실패/skip 0, Node/JSC 2,200판 불일치/재생/상태 실패 0(200턴 무승부 200판). 경계 테스트는 앱 전체와 중복이므로 합산하지 않는다. `gh run watch --exit-status`, 최종 상태/로그 조회 모두 종료 0(초기 제한 환경 연결 실패는 종료 1, 재조회 성공).
 
-다음은 PR 12 연승·챔피언·재대결·그룹 전적판이다. 챔피언 동률 기준·승률 표시 최소 경기 수 등의 미확정 기획값은 구현에 필요할 때 사용자에게 확인한다. 무료 한도 대응은 승인대로 PR 13 전 별도 처리한다. 이번 앱 ZIP은 제작만 했으며 `/Applications` 설치본은 PR 07 버전 그대로다. PR 07/13의 실제 두 맥 시험은 계속 미실행이다. 구버전 엔진의 바이트/버전을 고정해 앱에 보관하고 현재 엔진은 중복 포장하지 않는다. 종료 경기 요약, 장면별 다시보기, 한국어 로그, p2 관점/기술·특성 공개, 엔진 없음/손상 안내를 추가했다. 읽기 전용 기록 색인·재생 프레임은 라이브 방/정산과 분리했다. 서버 API·스키마·실제 저장소는 바꾸지 않았다.
+PR 11 완료 당시 다음은 PR 12 연승·챔피언·재대결·그룹 전적판이었다. 챔피언 동률·승률 최소 경기 수는 위 PR 12 사용자 결정으로 확정했다. 무료 한도 대응은 승인대로 PR 13 전 별도 처리한다. 이번 앱 ZIP은 제작만 했으며 `/Applications` 설치본은 PR 07 버전 그대로다. PR 07/13의 실제 두 맥 시험은 계속 미실행이다. 구버전 엔진의 바이트/버전을 고정해 앱에 보관하고 현재 엔진은 중복 포장하지 않는다. 종료 경기 요약, 장면별 다시보기, 한국어 로그, p2 관점/기술·특성 공개, 엔진 없음/손상 안내를 추가했다. 읽기 전용 기록 색인·재생 프레임은 라이브 방/정산과 분리했다. 서버 API·스키마·실제 저장소는 바꾸지 않았다.
 
 - 계약 `c908885` → Core RED `f861ca4`(12건·단언 실패 31), Session RED `131b729`(5건·단언 실패 10), UI RED `ec6e8ba`(1건·단언 실패 2) → GREEN/리뷰 수정. Session 첫 RED는 API stub을 임시로 함께 컴파일했고 정식 stub 커밋은 테스트 직후 통합했다. 컴파일 실패/환경 제한 실행 0건은 RED로 세지 않았다.
 - 최종 로컬 명령: 명령별 `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`, 임시 `PTB_STATE_DIR`/`CLANG_MODULE_CACHE_PATH`에서 `swift test --disable-sandbox --scratch-path /private/tmp/ptb-pr07-clean-build --jobs 2 --enable-code-coverage --filter 'OnlineBattle|BattleEngineTests|BattleEngineArchiveTests|SaveTransferTests|PracticeStakesStoreTests|SaveSnapshot|PracticeLaunchTests|LocalizedUILiteralTests'`. **종료 0, 267건 통과·실패/skip 0**. `check-test-filter.sh` 종료 0. 진행 중 로그를 먼저 검사한 필터 확인은 종료 1이었으며 완료 로그로 다시 검사했다. 로컬 OCR은 실행하지 않았다.
