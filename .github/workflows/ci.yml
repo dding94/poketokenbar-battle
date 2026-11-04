@@ -1,7 +1,7 @@
 name: CI
 
 # Public since 2026-10-29, so standard runners are free. Pushes to feat/** and pull requests run the
-# app jobs unless only server/ changed, determinism when the engine boundary or this file changed, and
+# app jobs for app/server integration inputs, determinism when the engine boundary or this file changed, and
 # the server job when server/ or this workflow changed (see `changes`); a dispatch picks the scope. Push and PR events
 # have no inputs, hence the `inputs.<name> || <default>` fallbacks.
 # A push or PR that changes only docs (docs/**, *.md) runs nothing: no test or script reads them.
@@ -69,6 +69,15 @@ jobs:
       - name: Show Swift version
         run: swift --version
 
+      - uses: actions/setup-node@v4
+        if: matrix.shard == 'rest'
+        with:
+          node-version: '24.14.0'
+
+      - name: Install isolated native acceptance server dependencies
+        if: matrix.shard == 'rest'
+        run: npm ci --prefix server --ignore-scripts
+
       # check-test-filter.sh fails the step when an alternative ran no test (a renamed class would
       # otherwise drop out silently). An unset `shell` has no pipefail, so it is set here.
       - name: Rendering tests
@@ -84,7 +93,8 @@ jobs:
         if: matrix.shard == 'rest'
         run: |
           set -o pipefail
-          ./scripts/test-gate.sh --skip "$RENDERING_TESTS" 2>&1 | tee "$RUNNER_TEMP/test-logs/rest.log"
+          ./scripts/run-native-acceptance.sh -- ./scripts/test-gate.sh --skip "$RENDERING_TESTS" 2>&1 | tee "$RUNNER_TEMP/test-logs/rest.log"
+          ./scripts/check-test-filter.sh OnlineBattleNativeAcceptanceTests "$RUNNER_TEMP/test-logs/rest.log"
           ./scripts/battle-coverage.sh
 
       # The suite as built, for test-union; also after a failure, so test-union still compares.
@@ -98,6 +108,7 @@ jobs:
           bash scripts/test-fork-identity-guard.sh
           bash scripts/test-build-app-slices.sh
           bash scripts/test-battle-engine-archive.sh
+          python3 -m unittest discover -s scripts/tests -p 'test_release*.py' -v
 
       - name: Keep the test logs for test-union
         if: ${{ !cancelled() }}
@@ -194,9 +205,8 @@ jobs:
             'Sources/PokeTokenBar/Core/Battle*.swift' 'Sources/PokeTokenBar/Core/Practice*.swift' \
             'Sources/PokeTokenBar/Core/OnlineBattle*.swift'
 
-      # Everything but server/ and docs, so a new top-level path runs the app jobs by default. No Swift
-      # file, Package.swift or script reads server/ (the tests read Sources/, engine/ and scripts/ by
-      # name, 2026-10-30); once one names a server/ path, a server change counts as an app change.
+      # A checked-in native acceptance harness now reads server/, so server-only changes must
+      # also exercise the app's real HTTP/WS/session/store boundary. Keep discovery for renamed paths.
       - name: App inputs changed
         id: app
         run: |
