@@ -20,13 +20,25 @@ private actor NativeHTTP: OnlineBattleHTTPTransport {
     let endpoint: NativeEndpoint
     private var dropCompletion = false
     private var offline = false
+    private var reporting = false
     private(set) var committedDrops = 0
     init(_ endpoint: NativeEndpoint) { self.endpoint = endpoint }
     func dropCompletedReportAndDisconnect() { dropCompletion = true }
     func send(_ request: URLRequest) async throws -> OnlineBattleHTTPResponse {
         guard !offline else { throw URLError(.notConnectedToInternet) }
+        let isReport = request.httpMethod == "POST" && request.url?.path.hasSuffix("/report") == true
+        if isReport { reporting = true }
+        defer { if isReport { reporting = false } }
         let response = try await OnlineBattleURLSessionTransport().send(endpoint.rewrite(request))
-        // RED scaffold: the integration assertion must detect that no post-commit loss occurred.
+        // A concurrent notification read cannot sneak a completed result past the disconnected client.
+        guard !offline, isReport || !reporting else { throw URLError(.notConnectedToInternet) }
+        if dropCompletion, isReport, response.status == 200,
+           let room = try? JSONDecoder().decode(OnlineBattleView.self, from: response.body), room.state == .completed {
+            // workerd has already committed. Lose only the response, then keep this client offline
+            // until a fresh session/transport is created from its on-disk state.
+            committedDrops += 1; offline = true
+            throw URLError(.networkConnectionLost)
+        }
         return response
     }
 }
@@ -303,24 +315,44 @@ final class OnlineBattleNativeAcceptanceTests: XCTestCase {
         let pair = try await pair(), snapshots = try snapshots()
         let initial = try await running(pair, mode: .manual, snapshots: snapshots)
         let (terminal, report) = try await terminal(initial, pair: pair)
-        _ = try await pair.apis[0].report(id: terminal.battleId, report: report)
+        let reported = try await pair.apis[0].report(id: terminal.battleId, report: report)
+        XCTAssertEqual(reported.state, .reported)
+        let stores = try (0..<2).map { try store($0, snapshot: snapshots[$0], create: true) }
+        for i in 0..<2 {
+            let scope = OnlineBattleScope(originHash: try OnlineBattleOrigin(NativeEndpoint.productOrigin).hash,
+                groupID: pair.grants[i].group.groupId, trainerID: pair.grants[i].trainer.trainerId)
+            try stores[i].holdOnlineBattle(key: .init(scope: scope, battleID: reported.battleId), instanceID: snapshots[i].instanceId)
+        }
+        // Only p1 reconnects while the other result is missing. Its repeated report cannot settle.
+        let first = session(pair.grants[0], snapshot: snapshots[0], store: stores[0], transport: NativeHTTP(endpoint))
+        await first.bootstrap(); await first.refresh()
+        let waiting = try await pair.apis[0].battle(id: terminal.battleId)
+        XCTAssertEqual(waiting.state, .reported)
+        XCTAssertTrue(stores[0].state.onlineBattleReceipts.isEmpty)
+        XCTAssertEqual(stores[0].state.onlineBattleHolds.count, 1)
+        XCTAssertEqual(stores[0].state.active?.usedAtStage, 1_000_000)
+        XCTAssertEqual(stores[0].healthShare(of: snapshots[0].instanceId), 1)
+        assertUnchangedEconomy(stores[0])
         let mismatch = OnlineBattleReport(readyToken: report.readyToken, engineHash: report.engineHash,
             terminalSeq: report.terminalSeq, winner: report.winner, logHash: String(repeating: "0", count: 64),
             journalHash: report.journalHash, finalHp: report.finalHp)
         let void = try await pair.apis[1].report(id: terminal.battleId, report: mismatch)
         XCTAssertEqual(void.state, .void)
+        let second = session(pair.grants[1], snapshot: snapshots[1], store: stores[1], transport: NativeHTTP(endpoint))
+        await second.bootstrap()
+        for session in [first, second] { await session.refresh() }
         for i in 0..<2 {
-            let store = try store(i, snapshot: snapshots[i], create: true)
-            let scope = OnlineBattleScope(originHash: try OnlineBattleOrigin(NativeEndpoint.productOrigin).hash,
-                groupID: pair.grants[i].group.groupId, trainerID: pair.grants[i].trainer.trainerId)
-            try store.holdOnlineBattle(key: .init(scope: scope, battleID: void.battleId), instanceID: snapshots[i].instanceId)
-            let session = session(pair.grants[i], snapshot: snapshots[i], store: store, transport: NativeHTTP(endpoint))
-            await session.bootstrap(); await session.refresh()
-            XCTAssertTrue(store.state.onlineBattleHolds.isEmpty)
-            XCTAssertTrue(store.state.onlineBattleReceipts.isEmpty)
-            XCTAssertEqual(store.healthShare(of: snapshots[i].instanceId), 1)
-            XCTAssertEqual(store.state.active?.usedAtStage, 1_000_000)
-            assertUnchangedEconomy(store)
+            XCTAssertTrue(stores[i].state.onlineBattleHolds.isEmpty)
+            XCTAssertTrue(stores[i].state.onlineBattleReceipts.isEmpty)
+            XCTAssertEqual(stores[i].healthShare(of: snapshots[i].instanceId), 1)
+            XCTAssertEqual(stores[i].state.active?.usedAtStage, 1_000_000)
+            assertUnchangedEconomy(stores[i])
+            let reopened = try store(i, snapshot: snapshots[i], create: false)
+            XCTAssertTrue(reopened.state.onlineBattleHolds.isEmpty)
+            XCTAssertTrue(reopened.state.onlineBattleReceipts.isEmpty)
+            XCTAssertEqual(reopened.state.battleHealth, stores[i].state.battleHealth)
+            XCTAssertEqual(reopened.state.active?.usedAtStage, 1_000_000)
+            assertUnchangedEconomy(reopened)
         }
         let standings = try await pair.apis[0].standings()
         XCTAssertEqual(standings.rows.reduce(0) { $0 + $1.wins + $1.losses + $1.draws }, 0)
