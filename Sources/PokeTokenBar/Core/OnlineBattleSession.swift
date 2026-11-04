@@ -37,6 +37,8 @@ final class OnlineBattleSession {
     private var reconciled = false
     private var popoverOpen = false
     private var views: [String: OnlineBattleView] = [:]
+    /// Display-only terminal records, including those not yet verified for settlement.
+    private var historyViews: [String: OnlineBattleView] = [:]
     private var resolvers: [String: OnlineBattleResolver] = [:]
     private var resultByBattleID: [String: OnlineBattleUIResult] = [:]
     private var prefersLobby = false
@@ -76,7 +78,7 @@ final class OnlineBattleSession {
         let old = connection, oldAPI = api; connection = nil
         authenticated = false; reconciled = false; bootstrapped = false; actionInFlight = false
         pendingGrant = nil; challengeIntent = nil; prepared = [:]; acknowledgedStarts = []; submittedReports = []
-        for resolver in resolvers.values { resolver.close() }; resolvers = [:]; views = [:]
+        for resolver in resolvers.values { resolver.close() }; resolvers = [:]; views = [:]; historyViews = [:]
         selectedBattleID = nil; resultByBattleID = [:]; prefersLobby = false; checkedDeadlines = [:]; nextRecoveryRead = nil
         presentation.account = nil; presentation.members = []; presentation.battles = []
         clearHistory(); presentation.liveLogs = []
@@ -117,7 +119,7 @@ final class OnlineBattleSession {
             refreshTask?.cancel(); refreshTask = nil; ticker?.cancel(); ticker = nil
             let old = connection; connection = nil
             for resolver in resolvers.values { resolver.close() }
-            resolvers = [:]; views = [:]; selectedBattleID = nil; resultByBattleID = [:]; prefersLobby = false; checkedDeadlines = [:]
+            resolvers = [:]; views = [:]; historyViews = [:]; selectedBattleID = nil; resultByBattleID = [:]; prefersLobby = false; checkedDeadlines = [:]
             api = nil; origin = nil; pendingGrant = nil; challengeIntent = nil
             authenticated = false; reconciled = false; actionInFlight = false
             refreshAgain = false; prepared = [:]; acknowledgedStarts = []; submittedReports = []; nextRecoveryRead = nil
@@ -195,7 +197,7 @@ final class OnlineBattleSession {
             let old = connection; connection = nil
             authenticated = false; reconciled = false
             for resolver in resolvers.values { resolver.close() }
-            resolvers = [:]; views = [:]; resultByBattleID = [:]
+            resolvers = [:]; views = [:]; historyViews = [:]; resultByBattleID = [:]
             selectedBattleID = nil; prefersLobby = false; checkedDeadlines = [:]; nextRecoveryRead = nil
             prepared = [:]; acknowledgedStarts = []; submittedReports = []; challengeIntent = nil
             presentation.account = nil; presentation.members = []; presentation.battles = []
@@ -254,6 +256,10 @@ final class OnlineBattleSession {
                 throw OnlineBattleFailure.unauthorized
             }
             presentation.account = account; presentation.members = group.members
+            historyViews = [:]
+            for room in battles where !room.state.isActive && room.side(for: account.trainer.trainerId) != nil {
+                historyViews[room.battleId] = room
+            }
             presentation.notice = nil; try rebuildRoster()
             // Old unapplied completions are reconciled before accepting new entries or acquiring newer holds.
             for room in battles.sorted(by: { ($0.state == .completed ? 0 : 1, $0.createdAt) < ($1.state == .completed ? 0 : 1, $1.createdAt) }) {
@@ -265,7 +271,11 @@ final class OnlineBattleSession {
             if let connection { let snapshot = await connection.snapshot(); try current(epoch); presentation.canStart = snapshot.state == .connected }
         } catch {
             guard epoch == generation, onlineAllowed else { return }
-            reconciled = false; await handle(error, epoch: epoch)
+            reconciled = false
+            // Do not republish cached rows after revocation or move unfinished onboarding to the lobby.
+            // Only an authenticated account can expose the separately fetched archive summaries.
+            if authenticated, presentation.account != nil { publish() }
+            await handle(error, epoch: epoch)
         }
     }
     private func scope(_ account: OnlineBattleAccount) throws -> OnlineBattleScope {
@@ -421,8 +431,12 @@ final class OnlineBattleSession {
               try selectedSnapshot(allow: receiptKey(room, account: account), id: own.instanceId) == own else { throw OnlineBattleFailure.invalidRequest }
     }
     private func publish() {
-        presentation.battles = views.values.sorted { $0.createdAt > $1.createdAt }
-        let room = prefersLobby ? nil : (selectedBattleID.flatMap { views[$0] } ?? presentation.battles.first(where: { $0.state.isActive }) ?? presentation.battles.first)
+        var listed = views
+        for (id, room) in historyViews { listed[id] = room }
+        presentation.battles = listed.values.sorted { ($0.createdAt, $0.battleId) > ($1.createdAt, $1.battleId) }
+        // Only processed live views can drive the live room/result; archive summaries cannot settle it.
+        let live = views.values.sorted { ($0.createdAt, $0.battleId) > ($1.createdAt, $1.battleId) }
+        let room = prefersLobby ? nil : (selectedBattleID.flatMap { views[$0] } ?? live.first(where: { $0.state.isActive }) ?? live.first)
         presentation.room = room
         presentation.result = room.flatMap { resultByBattleID[$0.battleId] }
         presentation.arena = nil; presentation.request = nil; presentation.deadline = nil
@@ -513,7 +527,7 @@ final class OnlineBattleSession {
     }
     private func openReplay(_ id: String) {
         guard onlineAllowed, authenticated, let account = presentation.account,
-              let room = views[id], !room.state.isActive,
+              let room = historyViews[id] ?? views[id], !room.state.isActive,
               room.side(for: account.trainer.trainerId) != nil else { return }
         clearHistory(keepOpen: true)
         presentation.selectedHistoryBattle = room
@@ -627,7 +641,7 @@ final class OnlineBattleSession {
         guard epoch == generation else { return }
         authenticated = false; reconciled = false
         presentation.canStart = false; presentation.phase = .setup; presentation.account = nil
-        clearHistory(); presentation.liveLogs = []
+        clearHistory(); historyViews = [:]; presentation.battles = []; presentation.liveLogs = []
         presentation.connectionStatus = "접속키가 만료되었어요. 복구코드로 다시 연결해 주세요"
         ticker?.cancel(); ticker = nil
         await api?.setAccessKey(nil)

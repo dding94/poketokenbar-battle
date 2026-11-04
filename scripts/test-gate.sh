@@ -25,6 +25,7 @@ LOGIC_CORE=(
   Sources/PokeTokenBar/Core/OnlineBattle*.swift
   "Sources/PokeTokenBar/Core/HatchRule.swift"
   "Sources/PokeTokenBar/Core/BattleSnapshot.swift"
+  "Sources/PokeTokenBar/Core/BattleEngineArchive.swift"
   "Sources/PokeTokenBar/Core/CompanionModel.swift"
   "Sources/PokeTokenBar/Core/PokemonForm.swift"
   "Sources/PokeTokenBar/Core/CollectionWeight.swift"

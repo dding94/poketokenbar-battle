@@ -97,6 +97,7 @@ jobs:
         run: |
           bash scripts/test-fork-identity-guard.sh
           bash scripts/test-build-app-slices.sh
+          bash scripts/test-battle-engine-archive.sh
 
       - name: Keep the test logs for test-union
         if: ${{ !cancelled() }}
@@ -234,7 +235,7 @@ jobs:
         run: echo "PTB_STATE_DIR=$RUNNER_TEMP/ptb-engine-state" >> "$GITHUB_ENV"
       - name: Swift JavaScriptCore boundary
         env:
-          FILTER: "BattleEngineTests|BattleSnapshotTests|OnlineBattleResolverTests|PracticeBattleTests|PracticeSessionTests|PracticePlaybackTests|PracticeHintsTests|PracticeWild|PracticeRecord|PracticeDaily|PracticeTemperament|PracticeStakes|PracticeWordingTests|PracticeScreenRenderingTests|LocalizedUILiteralTests|ScrollerLaneTests"
+          FILTER: "BattleEngineTests|BattleEngineArchiveTests|BattleSnapshotTests|OnlineBattleResolverTests|OnlineBattleReplayTests|OnlineBattleReplayVisibleNamesTests|OnlineBattleHistoryTextTests|PracticeBattleTests|PracticeSessionTests|PracticePlaybackTests|PracticeHintsTests|PracticeWild|PracticeRecord|PracticeDaily|PracticeTemperament|PracticeStakes|PracticeWordingTests|PracticeScreenRenderingTests|LocalizedUILiteralTests|ScrollerLaneTests"
         run: |
           set -o pipefail
           swift test --enable-code-coverage --filter "$FILTER" 2>&1 | tee "$RUNNER_TEMP/jsc-boundary.log"

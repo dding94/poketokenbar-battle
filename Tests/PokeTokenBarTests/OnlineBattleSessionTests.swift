@@ -162,6 +162,21 @@ final class OnlineBattleSessionTests: XCTestCase {
         XCTAssertEqual(effects.applications, 1)
     }
 
+    func testHistoryReportsMissingAndCorruptDataWithoutEffects() async throws {
+        let valid = try battle()
+        var report = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(valid.result)) as? [String: Any])
+        report["logHash"] = "tampered"
+        for room in [try changed(valid, ["config": NSNull()]), try changed(valid, ["result": report])] {
+            let (session, _, _, effects) = try await setup([room])
+            await session.bootstrap()
+            await session.perform(.openReplay(room.battleId))
+            XCTAssertEqual(session.presentation.selectedHistoryBattle?.battleId, room.battleId)
+            XCTAssertNil(session.presentation.replay)
+            XCTAssertNotNil(session.presentation.historyError)
+            XCTAssertEqual(effects.effectCalls, 0)
+        }
+    }
+
     func testHistoryKeepsUnavailableUnpaidSummaryWithoutUnlockingNewChallenges() async throws {
         let valid = try battle()
         var config = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(valid.config)) as? [String: Any])
