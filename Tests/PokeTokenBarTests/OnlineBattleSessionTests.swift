@@ -352,6 +352,43 @@ final class OnlineBattleSessionTests: XCTestCase {
         XCTAssertEqual(posts, 1)
     }
 
+    func testRematchLostResponseThenLocalHealCancelsStalePendingConsent() async throws {
+        for explicitRetry in [false, true] {
+            let source = try battle(), pending = try rematchPending(battle())
+            let (session, http, _, effects) = try await setup([source])
+            try await activeOpponent(http)
+            await session.bootstrap(); await session.perform(.prepareRematch(source.battleId))
+            session.presentation.selectedEntryID = "instance-one"
+            await session.perform(.submitRematch)
+            effects.setHealthShare(0.5, of: "instance-one")
+            await http.route("/v1/battles", try JSONEncoder().encode(OnlineBattlePage(battles: [source, pending], before: nil)))
+            await http.route("/v1/battles/bt_rematch/cancel", try JSONEncoder().encode(changed(pending, ["state": "CANCELLED"])))
+            if explicitRetry { await session.perform(.submitRematch) } else { await session.refresh() }
+            let cancels = await http.count("/v1/battles/bt_rematch/cancel")
+            XCTAssertEqual(cancels, 1)
+            XCTAssertTrue(effects.state.onlineBattleHolds.isEmpty)
+            XCTAssertEqual(session.presentation.rematchSourceID, source.battleId)
+            XCTAssertTrue(session.presentation.canSubmitRematch)
+        }
+    }
+
+    func testRematchNotificationBeforeLostResponseStillExposesCreatedRoom() async throws {
+        let source = try battle(), pending = try rematchPending(battle())
+        let (session, http, _, _) = try await setup([source])
+        try await activeOpponent(http)
+        await session.bootstrap(); await session.perform(.prepareRematch(source.battleId))
+        session.presentation.selectedEntryID = "instance-one"
+        await http.suspendNext("/v1/battles/\(source.battleId)/rematch")
+        let submit = Task { await session.perform(.submitRematch) }
+        await http.waitUntilBlocked()
+        await http.route("/v1/battles", try JSONEncoder().encode(OnlineBattlePage(battles: [source, pending], before: nil)))
+        await session.refresh()
+        await http.resume(.init(status: 503, body: Data())); await submit.value
+        XCTAssertNil(session.presentation.rematchSourceID)
+        XCTAssertEqual(session.presentation.room?.battleId, pending.battleId)
+        XCTAssertNil(session.presentation.notice)
+    }
+
     func testRematchChangedSnapshotAndSourceGetNewIntent() async throws {
         let source = try battle(), other = try battle(idOverride: "bt_other")
         let (session, http, _, effects) = try await setup([source, other])
