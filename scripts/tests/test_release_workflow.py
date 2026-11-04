@@ -53,6 +53,7 @@ elif name=='gh':
         if '/jobs/' in args[1] and args[1].endswith('/logs'): key='CI_LOG_FILE'
         elif '/jobs?' in args[1]: key='CI_JOBS_FILE'
         else: key='CI_RUN_FILE'
+        if key=='CI_LOG_FILE' and '\x1b' in pathlib.Path(os.environ[key]).read_text() and '--allow-escape-sequences' not in args: sys.exit(94)
         print(pathlib.Path(os.environ[key]).read_text())
     elif args[:2]==['api','repos/dding94/homebrew-tap/contents/Casks/poke-token-bar-battle.rb']:
         path=os.environ.get('FAKE_TAP')
@@ -214,6 +215,15 @@ bash scripts/package-battle-engines.sh "build/PokeTokenBar Battle.app/Contents/R
         self.assertIn('Untracked build/test inputs', result.stderr)
         self.assertNotIn('ditto ', self.calls())
         self.assertFalse((self.repo / 'build/release/poke-token-bar-battle.rb').exists())
+
+    def test_colored_ci_logs_are_captured_and_normalized_without_terminal_output(self):
+        self.fake_build()
+        self.ci_log = self.ci_log.replace(' passed ', ' \x1b[32mpassed\x1b[0m ')
+        self.write_ci_fixture()
+        result = self.run_release('--prepare-build', '3.0.0')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertNotIn('\x1b', result.stdout + result.stderr)
+        self.assertIn('--allow-escape-sequences', self.calls())
 
     def test_leaf_mismatch_stops_without_prompt_or_build(self):
         self.fake_build()
