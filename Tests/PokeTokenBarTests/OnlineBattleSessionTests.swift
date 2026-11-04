@@ -250,8 +250,46 @@ final class OnlineBattleSessionTests: XCTestCase {
         XCTAssertGreaterThan(after, before)
     }
 
+    func testStandingsUnauthorizedRevokesAccountInsteadOfLeavingPrivateBoard() async throws {
+        let (session, http, _, _) = try await setup()
+        await session.bootstrap(); await session.perform(.setPopoverVisible(true))
+        await http.route("/v1/standings", Data(), status: 401)
+        await session.perform(.showStandings)
+        XCTAssertNil(session.presentation.account)
+        XCTAssertNil(session.presentation.standings)
+        XCTAssertFalse(session.presentation.showsStandings)
+        XCTAssertFalse(session.presentation.standingsLoading)
+        XCTAssertEqual(session.presentation.phase, .setup)
+    }
+
+    func testRematchSecondParticipantTargetsOriginalFirstParticipant() async throws {
+        let source = try battle()
+        let (session, http, _, _) = try await setup([source], trainer: "trainer-two")
+        let member = OnlineBattleMember(trainerId: "trainer-one", displayEmail: "opponent@example.invalid", role: .member, status: .active, joinedAt: 0, online: false)
+        await http.route("/v1/group", try JSONEncoder().encode(OnlineBattleGroupMembers(group: account.group, members: [member])))
+        await session.bootstrap(); await session.perform(.prepareRematch(source.battleId))
+        XCTAssertEqual(session.presentation.rematchOpponent?.trainerId, "trainer-one")
+        XCTAssertEqual(session.presentation.rematchMode, source.mode)
+        XCTAssertTrue(session.presentation.canSubmitRematch)
+    }
+
+    func testRematchBackgroundReadDoesNotResolveDifferentSourceIntent() async throws {
+        let source = try battle(), pending = try changed(rematchPending(battle()), ["rematchOf": "bt_other_source"])
+        let (session, http, _, _) = try await setup([source])
+        try await activeOpponent(http)
+        await session.bootstrap(); await session.perform(.prepareRematch(source.battleId))
+        session.presentation.selectedEntryID = "instance-one"
+        await session.perform(.submitRematch)
+        await http.route("/v1/battles", try JSONEncoder().encode(OnlineBattlePage(battles: [source, pending], before: nil)))
+        await session.refresh()
+        XCTAssertEqual(session.presentation.rematchSourceID, source.battleId)
+        XCTAssertFalse(session.presentation.canSubmitRematch)
+        let posts = await http.count("/v1/battles/\(source.battleId)/rematch")
+        XCTAssertEqual(posts, 1)
+    }
+
     func testStandingsLateResponseCannotSurviveCloseDisableOrRevocation() async throws {
-        for reset in 0..<4 {
+        for reset in 0..<6 {
             let observer = SessionObserver(), connection = SessionConnection()
             let (session, http, _, _) = try await setup(connection: connection, observer: observer)
             await session.bootstrap(); await session.perform(.setPopoverVisible(true))
@@ -264,7 +302,12 @@ final class OnlineBattleSessionTests: XCTestCase {
             case 2:
                 await connection.setState(.revoked)
                 await observer.callback?(.changed(await connection.snapshot()))
-            default: await session.perform(.setPopoverVisible(false))
+            case 3: await session.perform(.setPopoverVisible(false))
+            case 4:
+                let grant = try JSONSerialization.data(withJSONObject: ["trainer": JSONSerialization.jsonObject(with: JSONEncoder().encode(account.trainer)), "group": JSONSerialization.jsonObject(with: JSONEncoder().encode(account.group)), "accessKey": "new-synthetic-key", "recoveryCode": "new-synthetic-code"])
+                await http.route("/v1/join", grant)
+                await session.perform(.join(inviteCode: "SYNTHETIC", email: "synthetic@example.invalid"))
+            default: await session.configureServer("https://new-battle.example.invalid")
             }
             await http.resume(.init(status: 200, body: Data(#"{"groupId":"group","championTrainerId":null,"rows":[]}"#.utf8)))
             await opening.value
