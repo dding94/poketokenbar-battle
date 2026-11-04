@@ -1,5 +1,24 @@
 import SwiftUI
 
+/// Maps only metadata already present in one viewer frame to its saved API slug.
+enum OnlineBattleReplayVisibleNames {
+    static func slugs(visible: BattleView.Pokemon, snapshot: OnlineBattleSnapshot?)
+        -> (moves: [String: String], abilities: [String: String]) {
+        guard let snapshot else { return ([:], [:]) }
+        func normalized(_ value: String) -> String {
+            value.lowercased().filter { $0.isLetter || $0.isNumber }
+        }
+        let moves = Dictionary(uniqueKeysWithValues: Set(visible.moves).compactMap { id in
+            snapshot.set.moves.first { normalized($0) == normalized(id) }.map { (id, $0) }
+        })
+        var abilities: [String: String] = [:]
+        if let ability = visible.ability, normalized(ability) == normalized(snapshot.set.ability) {
+            abilities[ability] = snapshot.set.ability
+        }
+        return (moves, abilities)
+    }
+}
+
 /// Past matches stay separate from the live room, choice and result state.
 @MainActor
 struct OnlineBattleHistory: View {
@@ -58,7 +77,7 @@ struct OnlineBattleHistory: View {
                     .font(.caption2).foregroundStyle(.secondary)
             }.practiceCard()
             if let replay = model.replay, replay.frames.indices.contains(model.replayFrameIndex) {
-                replayView(replay)
+                replayView(replay, battle: battle)
             } else if model.historyBusy {
                 Label(l.onlineReplayLoading, systemImage: "hourglass").font(.caption).practiceCard()
             } else {
@@ -69,10 +88,14 @@ struct OnlineBattleHistory: View {
         }
     }
 
-    private func replayView(_ replay: OnlineBattleReplay) -> some View {
+    private func replayView(_ replay: OnlineBattleReplay, battle: OnlineBattleView) -> some View {
         let frame = replay.frames[model.replayFrameIndex]
         let own = replay.localSide == .p1 ? frame.view.p1 : frame.view.p2
         let foe = replay.localSide == .p1 ? frame.view.p2 : frame.view.p1
+        let ownSnapshot = replay.localSide == .p1 ? battle.p1.snapshot : battle.p2.snapshot
+        let foeSnapshot = replay.localSide == .p1 ? battle.p2.snapshot : battle.p1.snapshot
+        let ownSlugs = OnlineBattleReplayVisibleNames.slugs(visible: own, snapshot: ownSnapshot)
+        let foeSlugs = OnlineBattleReplayVisibleNames.slugs(visible: foe, snapshot: foeSnapshot)
         return VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Text(l.onlineReplay).font(.subheadline.bold())
@@ -81,8 +104,10 @@ struct OnlineBattleHistory: View {
                     .font(.caption).monospacedDigit().foregroundStyle(.secondary)
             }
             OnlineBattleCombatantCard(side: foe, own: false, l: l, artwork: artwork,
+                                      moveSlugs: foeSlugs.moves, abilitySlugs: foeSlugs.abilities,
                                       speciesNameProvider: speciesNameProvider, speciesNameStore: speciesNameStore)
             OnlineBattleCombatantCard(side: own, own: true, l: l, artwork: artwork,
+                                      moveSlugs: ownSlugs.moves, abilitySlugs: ownSlugs.abilities,
                                       speciesNameProvider: speciesNameProvider, speciesNameStore: speciesNameStore)
             HStack(spacing: 7) {
                 stepButton(l.onlineReplayFirst, symbol: "backward.end.fill", index: 0)

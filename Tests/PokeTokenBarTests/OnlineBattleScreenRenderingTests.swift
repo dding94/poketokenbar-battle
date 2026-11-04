@@ -19,7 +19,7 @@ final class OnlineBattleScreenRenderingTests: XCTestCase {
                                 stats: ["hp": 110, "atk": 75, "def": 60, "spa": 70, "spd": 70, "spe": 110]))
     }
     static func room(state: OnlineBattleState = .running, mode: OnlineBattleMode = .manual, confirmed: Bool = true,
-                     id: String = "synthetic-battle", createdAt: Double = 0) -> OnlineBattleView {
+                     id: String = "synthetic-battle", createdAt: Double = 1_793_683_500_000) -> OnlineBattleView {
         let snapshot = snapshot()
         return .init(battleId: id, state: state, revision: 1, mode: mode,
                      p1: .init(trainerId: "synthetic-me", snapshot: .init(snapshot: snapshot, hp: 88), publicInfo: nil, hpPercent: nil),
@@ -30,9 +30,9 @@ final class OnlineBattleScreenRenderingTests: XCTestCase {
     static func model() -> OnlineBattlePresentation {
         let model = OnlineBattlePresentation()
         model.serverAddress = "https://battle.example.invalid"
-        model.account = .init(trainer: .init(trainerId: "synthetic-me", displayEmail: "me@example.invalid", role: .member, status: .active),
+        model.account = .init(trainer: .init(trainerId: "synthetic-me", displayEmail: "나래", role: .member, status: .active),
                               group: .init(groupId: "synthetic-group", name: "동료들의 배틀", hostTrainerId: "synthetic-foe"))
-        model.members = [.init(trainerId: "synthetic-foe", displayEmail: "friend@example.invalid", role: .host, status: .active,
+        model.members = [.init(trainerId: "synthetic-foe", displayEmail: "연습친구", role: .host, status: .active,
                                joinedAt: 0, online: true)]
         let snapshot = snapshot()
         model.roster = [.init(id: snapshot.instanceID, name: "피카츄", snapshot: snapshot, blockedReason: nil)]
@@ -139,15 +139,18 @@ final class OnlineBattleScreenRenderingTests: XCTestCase {
     }
     func testVerifiedP2ReplayRendersReadOnlyScenesInsidePopover() async throws {
         let url = try XCTUnwrap(Bundle.module.url(forResource: "golden", withExtension: "json", subdirectory: "OnlineBattle"))
-        let battle = try XCTUnwrap(JSONDecoder().decode([Golden].self, from: Data(contentsOf: url)).first?.battle)
+        let archived = try XCTUnwrap(JSONDecoder().decode([Golden].self, from: Data(contentsOf: url)).first?.battle)
+        var json = try XCTUnwrap(JSONSerialization.jsonObject(with: BattleJSON.encoder().encode(archived)) as? [String: Any])
+        json["createdAt"] = 1_793_683_500_000
+        let battle = try JSONDecoder().decode(OnlineBattleView.self, from: JSONSerialization.data(withJSONObject: json))
         let sourceRoot = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         let replay = try OnlineBattleReplay(battle: battle, localTrainerID: "trainer-two", engineFactory: { _ in
             try BattleEngine(url: sourceRoot.appendingPathComponent("engine/dist/battle-engine.js"))
         })
         let model = Self.model()
-        model.account = .init(trainer: .init(trainerId: "trainer-two", displayEmail: "me@example.invalid", role: .member, status: .active),
+        model.account = .init(trainer: .init(trainerId: "trainer-two", displayEmail: "나래", role: .member, status: .active),
                               group: .init(groupId: "synthetic-group", name: "동료들의 배틀", hostTrainerId: "trainer-one"))
-        model.members = [.init(trainerId: "trainer-one", displayEmail: "friend@example.invalid", role: .host, status: .active,
+        model.members = [.init(trainerId: "trainer-one", displayEmail: "연습친구", role: .host, status: .active,
                                joinedAt: 0, online: true)]
         model.battles = [battle]
         model.showsHistory = true
