@@ -93,6 +93,7 @@ private final class SessionObserver { var callback: OnlineBattleConnection.Obser
 private final class SessionEffects: OnlineBattleEffects {
     var state = CompanionState()
     var applications = 0
+    var effectCalls = 0
     func healthShare(of instanceID: String) -> Double { state.battleHealth[instanceID] ?? 1 }
     func setHealthShare(_ share: Double, of instanceID: String) { state.battleHealth[instanceID] = share }
     func grantBattleXP(_ xp: Int) -> Bool { false }
@@ -104,6 +105,7 @@ private final class SessionEffects: OnlineBattleEffects {
     }
     func releaseOnlineBattle(key: OnlineBattleReceiptKey) { state.onlineBattleHolds.removeAll { $0.key == key } }
     func applyVerifiedOnlineBattleEffect(_ effect: VerifiedOnlineBattleEffect) throws -> OnlineBattleEffectReceipt {
+        effectCalls += 1
         if let old = state.onlineBattleReceipts.first(where: { $0.key == effect.key }) { return old }
         applications += 1
         let result = OnlineBattleLedger.commit(effect, to: state, on: Date(timeIntervalSince1970: 0))
@@ -139,6 +141,100 @@ final class OnlineBattleSessionTests: XCTestCase {
         let session = OnlineBattleSession(settings: .init(profileID: UUID().uuidString, serverURL: "https://battle.example.invalid"), credentials: credential, transport: http, effects: effects, engineFactory: { try BattleEngine(url: self.engineURL) }, connectionFactory: { callback in observer?.callback = callback; return connection }, rosterProvider: { rosterOverride ?? self.roster(room) }, clock: clock, automaticTicks: false, enabled: enabled, accessAllowed: { access?.allowed ?? true })
         return (session, http, credential, effects)
     }
+    func testHistoryReplayNavigationMakesNoRequestsOrEffectCalls() async throws {
+        let room = try battle()
+        let (session, http, _, effects) = try await setup([room])
+        await session.bootstrap()
+        let requests = await http.requests.count, calls = effects.effectCalls
+        let state = try JSONEncoder().encode(effects.state)
+        await session.perform(.showHistory)
+        XCTAssertTrue(session.presentation.showsHistory)
+        await session.perform(.openReplay(room.battleId))
+        let replay = try XCTUnwrap(session.presentation.replay)
+        XCTAssertEqual(replay.frames.count, room.journal.count + 1)
+        XCTAssertEqual(session.presentation.replayFrameIndex, 0)
+        await session.perform(.seekReplay(replay.frames.count - 1))
+        XCTAssertEqual(session.presentation.replayFrameIndex, replay.frames.count - 1)
+        await session.perform(.seekReplay(-1))
+        XCTAssertEqual(session.presentation.replayFrameIndex, replay.frames.count - 1)
+        await session.perform(.closeReplay)
+        XCTAssertNil(session.presentation.replay)
+        XCTAssertTrue(session.presentation.showsHistory)
+        let after = await http.requests.count
+        XCTAssertEqual(after, requests)
+        XCTAssertEqual(effects.effectCalls, calls)
+        // Encode sorted JSON to compare unchanged semantic state, irrespective of dictionary order.
+        XCTAssertEqual(try JSONSerialization.jsonObject(with: state) as? NSDictionary,
+                       try JSONSerialization.jsonObject(with: JSONEncoder().encode(effects.state)) as? NSDictionary)
+    }
+    func testHistoryFrameSurvivesLiveRefreshAndLobbyClosesOverlay() async throws {
+        let room = try battle()
+        let (session, _, _, effects) = try await setup([room])
+        await session.bootstrap()
+        await session.perform(.showHistory)
+        await session.perform(.openReplay(room.battleId))
+        await session.perform(.seekReplay(1))
+        await session.refresh()
+        XCTAssertTrue(session.presentation.showsHistory)
+        XCTAssertEqual(session.presentation.replay?.battleID, room.battleId)
+        XCTAssertEqual(session.presentation.replayFrameIndex, 1)
+        XCTAssertEqual(effects.applications, 1)
+        await session.perform(.backToLobby)
+        XCTAssertFalse(session.presentation.showsHistory)
+        XCTAssertNil(session.presentation.replay)
+        XCTAssertNil(session.presentation.selectedHistoryBattle)
+    }
+    func testHistoryIsClearedByKeyGateAndServerChange() async throws {
+        let room = try battle()
+        let (session, _, _, _) = try await setup([room])
+        await session.bootstrap()
+        await session.perform(.openReplay(room.battleId))
+        XCTAssertNotNil(session.presentation.replay)
+        await session.setEnabled(false)
+        XCTAssertNil(session.presentation.replay)
+        XCTAssertFalse(session.presentation.showsHistory)
+        await session.perform(.showHistory)
+        await session.perform(.openReplay(room.battleId))
+        XCTAssertNil(session.presentation.replay)
+        XCTAssertFalse(session.presentation.showsHistory)
+        await session.setEnabled(true)
+        await session.perform(.openReplay(room.battleId))
+        XCTAssertNotNil(session.presentation.replay)
+        await session.configureServer("https://new.example.invalid")
+        XCTAssertNil(session.presentation.replay)
+        XCTAssertNil(session.presentation.selectedHistoryBattle)
+        XCTAssertFalse(session.presentation.showsHistory)
+    }
+    func testHistoryVoidKeepsSummaryWithoutReplayingAndUnknownIDCannotSelect() async throws {
+        let room = try changed(battle(), ["state": "VOID", "result": NSNull()])
+        let (session, http, _, effects) = try await setup([room])
+        await session.bootstrap()
+        let requests = await http.requests.count
+        await session.perform(.showHistory)
+        await session.perform(.openReplay(room.battleId))
+        XCTAssertEqual(session.presentation.selectedHistoryBattle?.state, .void)
+        XCTAssertNil(session.presentation.replay)
+        XCTAssertNotNil(session.presentation.historyError)
+        await session.perform(.closeReplay)
+        await session.perform(.openReplay("bt_unknown"))
+        XCTAssertNil(session.presentation.selectedHistoryBattle)
+        let after = await http.requests.count
+        XCTAssertEqual(after, requests)
+        XCTAssertEqual(effects.effectCalls, 0)
+    }
+    func testHistoryOverlayBlocksHiddenLiveManualChoiceAtSessionBoundary() async throws {
+        let room = try changed(battle(), ["state": "RUNNING", "result": NSNull(), "roundSeq": 1, "journal": []])
+        let (session, http, _, _) = try await setup([room])
+        await session.bootstrap()
+        XCTAssertEqual(session.presentation.phase, .arena)
+        XCTAssertEqual(session.presentation.request?.kind, "move")
+        await session.perform(.showHistory)
+        let requests = await http.requests.count
+        await session.perform(.chooseMove(1))
+        let after = await http.requests.count
+        XCTAssertEqual(after, requests)
+    }
+
     func testBootstrapLoadsCredentialsOnceAndRefreshesAccount() async throws {
         let (session, http, credentials, _) = try await setup()
         await session.bootstrap(); await session.bootstrap(); await session.refresh()
