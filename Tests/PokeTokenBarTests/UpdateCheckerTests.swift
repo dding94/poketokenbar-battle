@@ -25,6 +25,35 @@ final class UpdateCheckerTests: XCTestCase {
         XCTAssertFalse(UpdateChecker.isNewer("2.0", than: "2.0.0"))  // 동일
     }
 
+    func testReleasePageMustBelongToFork() {
+        XCTAssertTrue(UpdateChecker.isTrustedReleaseURL("https://github.com/dding94/poketokenbar-battle/releases/tag/v2.6.0"))
+        for url in [
+            "https://github.com/chattymin/PokeTokenBar/releases/tag/v2.6.0",
+            "https://github.com/dding94/poketokenbar-battle-extra/releases/tag/v2.6.0",
+            "https://github.com/dding94/poketokenbar-battle/issues/1",
+            "https://github.com/dding94/poketokenbar-battle/releases/tag/",
+            "https://github.com/dding94/poketokenbar-battle/releases/tag/v2.6.0/extra",
+            "https://github.com:444/dding94/poketokenbar-battle/releases/tag/v2.6.0",
+            "https://someone@github.com/dding94/poketokenbar-battle/releases/tag/v2.6.0",
+        ] { XCTAssertFalse(UpdateChecker.isTrustedReleaseURL(url), url) }
+    }
+
+    @MainActor
+    func testForeignRepositoryResponseDoesNotStartCooldown() async {
+        var fetches = 0
+        let checker = UpdateChecker(currentVersion: "2.5.6", defaults: isolatedDefaults(), fetchLatest: {
+            fetches += 1
+            return .init(tag: "v2.6.0", url: fetches == 1
+                ? "https://github.com/chattymin/PokeTokenBar/releases/tag/v2.6.0"
+                : "https://github.com/dding94/poketokenbar-battle/releases/tag/v2.6.0")
+        })
+        await checker.check()
+        XCTAssertNil(checker.available)
+        await checker.check()
+        XCTAssertEqual(fetches, 2)
+        XCTAssertEqual(checker.available?.url, "https://github.com/dding94/poketokenbar-battle/releases/tag/v2.6.0")
+    }
+
     // MARK: - Detached upgrade script wait loop (#175)
 
     func testDetachedUpgradeScriptWaitsOnPidNotProcessName() {
@@ -41,7 +70,7 @@ final class UpdateCheckerTests: XCTestCase {
 
     // MARK: - Cooldown stamps only after a successful, validated check
 
-    private static let releaseURL = "https://github.com/chattymin/PokeTokenBar/releases/tag/v2.5.5"
+    private static let releaseURL = "https://github.com/dding94/poketokenbar-battle/releases/tag/v2.5.5"
 
     @MainActor
     private func isolatedDefaults() -> UserDefaults {
@@ -174,7 +203,7 @@ final class UpdateCheckerTests: XCTestCase {
         defer { box.removePersistentDomain(forName: suite) }
         let checker = UpdateChecker(currentVersion: "2.5.3", defaults: box)
 
-        checker.consider(latest: "2.5.4", url: "https://github.com/chattymin/PokeTokenBar/releases/tag/v2.5.4")
+        checker.consider(latest: "2.5.4", url: "https://github.com/dding94/poketokenbar-battle/releases/tag/v2.5.4")
         XCTAssertEqual(checker.available?.version, "2.5.4")
         XCTAssertNil(checker.skipped)
         XCTAssertEqual(checker.settingsNotice, .offer("2.5.4"))
@@ -185,16 +214,16 @@ final class UpdateCheckerTests: XCTestCase {
         XCTAssertEqual(checker.settingsNotice, .skipped("2.5.4"))
         XCTAssertEqual(box.string(forKey: "skippedUpdateVersion"), "2.5.4")
 
-        checker.consider(latest: "v2.5.4", url: "https://github.com/chattymin/PokeTokenBar/releases/tag/v2.5.4")
+        checker.consider(latest: "v2.5.4", url: "https://github.com/dding94/poketokenbar-battle/releases/tag/v2.5.4")
         XCTAssertNil(checker.available)
         XCTAssertEqual(checker.settingsNotice, .skipped("2.5.4"), "a skipped version is not the latest installed")
 
-        checker.consider(latest: "2.5.5", url: "https://github.com/chattymin/PokeTokenBar/releases/tag/v2.5.5")
+        checker.consider(latest: "2.5.5", url: "https://github.com/dding94/poketokenbar-battle/releases/tag/v2.5.5")
         XCTAssertEqual(checker.available?.version, "2.5.5")
         XCTAssertNil(checker.skipped)
         XCTAssertEqual(checker.settingsNotice, .offer("2.5.5"))
 
-        checker.consider(latest: "2.5.3", url: "https://github.com/chattymin/PokeTokenBar/releases/tag/v2.5.3")
+        checker.consider(latest: "2.5.3", url: "https://github.com/dding94/poketokenbar-battle/releases/tag/v2.5.3")
         XCTAssertEqual(checker.settingsNotice, .current, "the installed release is the latest")
     }
 
@@ -204,7 +233,7 @@ final class UpdateCheckerTests: XCTestCase {
         let box = UserDefaults(suiteName: suite)!
         defer { box.removePersistentDomain(forName: suite) }
         let checker = UpdateChecker(currentVersion: "2.5.3", defaults: box)
-        let url = "https://github.com/chattymin/PokeTokenBar/releases/tag/v2.5.4"
+        let url = "https://github.com/dding94/poketokenbar-battle/releases/tag/v2.5.4"
         checker.consider(latest: "2.5.4", url: url)
         checker.skipCurrent()
 
