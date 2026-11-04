@@ -72,10 +72,15 @@ final class UpdateChecker {
         consider(latest: version, url: release.url)
     }
 
-    /// NSWorkspace.open 으로 가는 릴리스 URL — https + github.com 만 허용(스킴 하이재킹 방지).
+    /// A release-page response must stay inside this fork, including the browser fallback.
     nonisolated static func isTrustedReleaseURL(_ string: String) -> Bool {
-        guard let url = URL(string: string), url.scheme == "https", url.host == "github.com" else { return false }
-        return true
+        guard let url = URLComponents(string: string), url.scheme == "https", url.host == "github.com",
+              url.user == nil, url.password == nil, url.port == nil,
+              url.query == nil, url.fragment == nil else { return false }
+        let prefix = "/\(AppIdentity.releaseRepo)/releases/tag/"
+        guard url.percentEncodedPath.hasPrefix(prefix) else { return false }
+        let tag = String(url.percentEncodedPath.dropFirst(prefix.count))
+        return normalizedReleaseVersion(tag) != nil
     }
 
     /// Release tag → comparable version, or nil when the tag is not a plain `MAJOR.MINOR.PATCH`

@@ -29,6 +29,7 @@ final class UpdateCheckerTests: XCTestCase {
         XCTAssertTrue(UpdateChecker.isTrustedReleaseURL("https://github.com/dding94/poketokenbar-battle/releases/tag/v2.6.0"))
         for url in [
             "https://github.com/chattymin/PokeTokenBar/releases/tag/v2.6.0",
+            "https://github.com/another/poketokenbar-battle/releases/tag/v2.6.0",
             "https://github.com/dding94/poketokenbar-battle-extra/releases/tag/v2.6.0",
             "https://github.com/dding94/poketokenbar-battle/issues/1",
             "https://github.com/dding94/poketokenbar-battle/releases/tag/",
