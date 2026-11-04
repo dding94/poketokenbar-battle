@@ -837,6 +837,44 @@ final class OnlineBattleSessionTests: XCTestCase {
         XCTAssertTrue(effects.state.onlineBattleHolds.isEmpty); XCTAssertEqual(effects.applications, 0)
         reads = await http.count("/v1/battles/\(final.battleId)"); XCTAssertEqual(reads, 1)
     }
+    func testBackToLobbyPreservesPendingSecondPlayerFallback() async throws {
+        let final = try battle(), clock = SessionClock()
+        let first = try changed(final, ["state": "RUNNING", "result": NSNull(), "roundSeq": 1,
+            "journal": JSONSerialization.jsonObject(with: JSONEncoder().encode(Array(final.journal.prefix(1))))])
+        let (session, http, _, _) = try await setup([first], trainer: "trainer-two", clock: .init(now: { clock.now() }))
+        let opened = try changed(first, ["roundSeq": 2, "deadline": 63000]), path = "/v1/battles/\(final.battleId)/advance"
+        await http.route(path, try JSONEncoder().encode(opened)); await session.bootstrap()
+        await session.perform(.backToLobby); clock.advance(2); await session.tick()
+        let count = await http.count(path); XCTAssertEqual(count, 1)
+        await session.perform(.openBattle(first.battleId)); XCTAssertEqual(session.presentation.room?.roundSeq, 2)
+    }
+    func testBackToLobbyPreservesInFlightAdvanceLock() async throws {
+        let final = try battle(), observer = SessionObserver(), connection = SessionConnection()
+        let initial = try changed(final, ["state": "RUNNING", "result": NSNull(), "roundSeq": 1, "deadline": 60000, "journal": []])
+        let released = try changed(initial, ["deadline": NSNull(), "journal": JSONSerialization.jsonObject(with: JSONEncoder().encode(Array(final.journal.prefix(1))))])
+        let (session, http, _, _) = try await setup([initial], connection: connection, observer: observer)
+        let path = "/v1/battles/\(final.battleId)/advance"
+        await session.bootstrap(); await http.suspendNext(path)
+        let incoming = Task { try await self.notify(observer, connection, room: final, fields: self.pairNotice(final)) }
+        await http.waitUntilBlocked(); await session.perform(.backToLobby)
+        await http.route("/v1/battles", try JSONEncoder().encode(OnlineBattlePage(battles: [released], before: nil)))
+        await session.refresh()
+        let count = await http.count(path); XCTAssertEqual(count, 1)
+        await http.resume(try response(changed(released, ["roundSeq": 2, "deadline": 61000]))); try await incoming.value
+    }
+    func testOpenNotificationUsesServerDeadlineDespiteClientClockSkew() async throws {
+        for localTime in [1.0, 100_000.0] {
+            let final = try battle(), observer = SessionObserver(), connection = SessionConnection()
+            let initial = try changed(final, ["state": "RUNNING", "result": NSNull(), "roundSeq": 1,
+                "journal": JSONSerialization.jsonObject(with: JSONEncoder().encode(Array(final.journal.prefix(1))))])
+            let deadline = final.journal[0].releasedAt + 30_000
+            let (session, http, _, _) = try await setup([initial], trainer: "trainer-two", connection: connection, observer: observer, clock: .init(now: { localTime }))
+            await session.bootstrap()
+            try await notify(observer, connection, room: final, fields: ["type": "battle_changed", "state": "RUNNING", "revision": initial.revision, "roundSeq": 2, "deadline": deadline])
+            let reads = await http.count("/v1/battles/\(final.battleId)"); XCTAssertEqual(reads, 0)
+            XCTAssertEqual(session.presentation.room?.roundSeq, 2); XCTAssertEqual(session.presentation.room?.deadline, deadline)
+        }
+    }
     func testTimeoutAndAutomaticPairsUseClosedTokensWithoutRoundReads() async throws {
         for index in [2, 6] {
             let final = try battle(index), observer = SessionObserver(), connection = SessionConnection()
