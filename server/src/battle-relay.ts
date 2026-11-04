@@ -10,7 +10,7 @@ export class BattleRelay {
     if (b.mode === "auto") {
       const pair: Pair = { roundSeq: b.roundSeq, p1: { kind: "policy" }, p2: { kind: "policy" }, releasedAt: now };
       this.store.sql.exec("INSERT INTO battle_rounds(battle_id,seq,pair) VALUES(?,?,?)", b.battleId, b.roundSeq, JSON.stringify(pair));
-      after.push({ recipients: [b.p1, b.p2], message: { type: "battle_round", battleId: b.battleId, pair } });
+      this.publish(b, pair, after);
     } else {
       this.store.sql.exec("INSERT INTO battle_rounds(battle_id,seq,deadline) VALUES(?,?,?)", b.battleId, b.roundSeq, now + TURN_MS);
     }
@@ -41,10 +41,13 @@ export class BattleRelay {
     this.release(b, round, round.deadline, after); return true;
   }
   private release(b: Battle, round: Round, at: number, after: BattleEffect[], side?: Side): void {
-    const token = (slot: number | null): RelayToken => b.mode === "auto" ? { kind: "policy" } : slot === null ? { kind: "timeout" } : { kind: "move", slot };
+    const token = (slot: number | null): RelayToken => slot === null ? { kind: "timeout" } : { kind: "move", slot };
     const pair: Pair = { roundSeq: round.seq, p1: token(round.p1), p2: token(round.p2), releasedAt: at };
     if (side) this.store.sql.exec(`UPDATE battle_rounds SET ${side}=?,pair=? WHERE battle_id=? AND seq=? AND pair IS NULL`, round[side], JSON.stringify(pair), b.battleId, round.seq);
     else this.store.sql.exec("UPDATE battle_rounds SET pair=? WHERE battle_id=? AND seq=? AND pair IS NULL", JSON.stringify(pair), b.battleId, round.seq);
+    this.publish(b, pair, after);
+  }
+  private publish(b: Battle, pair: Pair, after: BattleEffect[]): void {
     after.push({ recipients: [b.p1, b.p2], message: { type: "battle_round", battleId: b.battleId, pair } });
   }
 }
