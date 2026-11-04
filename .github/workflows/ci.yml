@@ -4,7 +4,7 @@ name: CI
 # app jobs for app/server integration inputs, determinism when the engine boundary or this file changed, and
 # the server job when server/ or this workflow changed (see `changes`); a dispatch picks the scope. Push and PR events
 # have no inputs, hence the `inputs.<name> || <default>` fallbacks.
-# A push or PR that changes only docs (docs/**, *.md) runs nothing: no test or script reads them.
+# Documentation-only changes do not start CI automatically; release preparation can request scope=all.
 on:
   push:
     branches: ['feat/**']
