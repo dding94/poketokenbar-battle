@@ -1304,3 +1304,13 @@ PR 13 릴리스 준비 인터페이스: `release.sh --check-only`는 점검 실�
 
 - 빌드 준비·게시 경로에서는 로컬 전체 XCTest/OCR를 실행하지 않는다. `PTB_CI_RUN_ID`는 확인할 실행의 숫자 ID일 뿐 승인/성공 우회값이 아니다. 읽기 전용 GitHub 조회로 포크 저장소·CI workflow·현재 HEAD·완료/성공을 확인하고, 추적 소스 변경이 있으면 거절한다. changes, 앱 두 갈래, test-union, secret-scan, server, macOS 15/26 결정성 작업과 필수 단계가 모두 성공해야 한다. 부분 실행·누락·skip·조회 실패는 빌드 전 실패한다.
 - rest 로그에서 네이티브 인수 검사 세 건의 실제 통과와 wrapper의 `required=3 passed=3 skipped=0`을 확인한다. 기존 선택적 테스트 skip은 별도 미검증이며 통과 수에 합치지 않는다. `--prepare`는 계속 오프라인 검토 전용이고 빌드 준비의 CI 확인은 키 생성·로그인·원격 변경을 하지 않는다.
+
+### H.5 하루 100판 목표를 유지하는 저장 구조 개선
+
+- **사용자 결정:** 1차 개선 뒤에도 긴 경기 100판/일이 한도를 넘으므로 경기 상한·보관 축소 대신 저장 구조를 더 개선한다. 200턴 100판의 쓰기·읽기·요청과 1년 보관량을 각각 검증하며, 저장 쓰기만 줄었다고 무료 운영 전체를 통과 처리하지 않는다. 실제 앱의 알림 후 GET·양쪽 advance·재시도·ping과 같은 계정의 다른 서비스는 별도 부하를 숨기지 않는다.
+- schema 4는 방 JSON에 공개 relay를 압축 보관한다. 완료 턴은 `[p1Code,p2Code,releasedAt-startedAt]` 튜플이며 seq는 배열 위치+1이다. code 0은 timeout, 1~4는 move, 5는 policy다. 진행 턴의 deadline·양쪽 미공개 선택은 별도로 보관한다. 외부 응답의 config·journal·pair·releasedAt·ownChoice·페이지 순서·토큰 허용 범위는 그대로 재구성한다. 첫 선택은 상대에게 노출하지 않으며 terminal 이후의 동일 선택 재시도와 미공개 턴을 남긴 VOID의 응답도 기존과 같다.
+- 첫 선택, 둘째 선택+pair, advance는 각각 방 data 단일 UPDATE로 저장하며 변경 없는 재시도는 쓰지 않는다. 기존 색인 deadline에는 도전/경기/보고의 lifecycle 기한을 두고, 실제 턴 기한은 비색인 turn_deadline에 같은 UPDATE로 쓴다. RUNNING 후보를 찾는 seq 부분 색인을 두되 매 턴 state/lifecycle deadline을 다시 쓰지 않는다. 전역 due/min은 SQL의 lifecycle 및 진행 턴 기한으로 계산한다.
+- SQL 알람 metadata 쓰기를 없애고 Cloudflare runtime의 영속 alarm을 재사용한다. 생성자의 `blockConcurrencyWhile` 안에서 `getAlarm()`과 SQL의 실제 기한을 조정하고 인스턴스에는 runtime alarm의 mirror만 둔다. 기존 예약이 이르면 그대로 유지하고 새 기한이 더 이른 경우에만 당긴다. 이른 알람은 방/metadata를 쓰지 않고 실제 다음 기한으로 다시 예약한다. 메모리는 데이터의 영속 원본이 아니며 재생성/hibernation 뒤에도 SQL와 runtime alarm으로 복원한다. SQL transaction 안에는 await를 추가하지 않는다.
+- 한 요청은 하나의 `now`로 만료와 동작을 판정한다. 기존 alarm이 미래이면 만료 대상이 없다는 하한으로만 사용한다. 커밋된 변경의 더 이른 기한 힌트를 예약에 반영하고, 알람 소비·늦은 요청·재생성 때 SQL의 실제 min을 다시 계산한다. 실패 응답(`Result.fail`)에도 먼저 커밋된 만료/시도 제한 변경은 유지하며 실제 예외 rollback 때만 힌트를 버린다. 예약 직전 mirror를 동기 갱신해 Promise 완료 역전으로 늦은 시각이 덮어쓰지 못하게 한다. 예약 실패는 인스턴스를 폐기하고 다음 생성자에서 복원한다.
+- v3→4는 동기 트랜잭션으로 각 방의 기존 최대 200턴을 검증·압축한 뒤에만 이전 round 테이블을 제거하고 버전을 올린다. 누락된 seq·선택/pair 모순·손상은 전체 rollback한다. 방 seq, 보고 rowid, 전적 확정 순서, 참가자/잠금/요청 영수증은 유지한다. v1/v2 자료는 기존 v3 전적 이관 후 v4를 적용한다.
+- RED와 결함 변형은 선택 비공개/동일 재시도, 1초·29초·30초·timeout 시계, 조기·지연·중복 알람, 예약 실패/완료 순서 역전/객체 재생성, attempt 정리 공존, 복수 진행 방, 원자 이관 실패와 기존 wire 비교를 포함한다. 단순 SQL probe에서는 부분 색인이 있어도 data+비색인 turn_deadline 갱신은 1행 쓰기임을 확인했다(1건 통과·종료 0). 경기당 약 840~860 쓰기는 아직 설계 추정이며 전체 harness와 누적 DB 크기를 측정하기 전 완료 근거가 아니다. JSON 처리/응답 바이트의 턴 수에 따른 비용과 실제 Free CPU·복구는 별도로 남긴다.
