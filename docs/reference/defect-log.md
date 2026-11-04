@@ -1352,6 +1352,10 @@ read_when:
 
 ## 프로세스 제어·업데이트
 
+- **포크 업데이트 URL은 호스트뿐 아니라 소유자·저장소·릴리스 경로까지 검증한다(PR 13).** 기존 검사는 HTTPS GitHub만 확인했고 테스트의 정상 URL도 원본 저장소를 유지해 포크 격리 결함을 놓쳤다. `UpdateChecker`의 fetch→check→consider와 브라우저 이동 경로를 함께 확인하고 정확한 `AppIdentity.releaseRepo`의 정규 버전 tag만 허용했다. userinfo·port·query·fragment와 외부/원본 저장소를 거절한다. 길이가 같은 다른 소유자 fixture도 넣어 prefix 가드까지 실제 도달하게 했다. RED 2건·단언 실패 10, 가드 제거 변형은 회귀 1건 실패 후 원복; 실패한 조회가 쿨다운을 시작하지 않아 다음 정상 URL을 받아들이는지도 검사했다.
+
+- **릴리스 준비도 테스트 실행 경계를 지켜야 한다(PR 13, 보강 중).** `--prepare-build`의 bare `test-gate.sh` 호출은 상태 폴더가 격리되지 않고 네이티브 3건을 skip하며 로컬 OCR까지 실행할 수 있었다. 점검 fixture가 테스트 명령을 성공 대역으로만 두어 이 호출 경계가 빠졌다. 준비·게시 두 경로를 스윕하고 실제 빌드/서명 없이 명령 대역으로 `UNISOLATED` 접근을 재현했다(추가 RED 2건, 각 단언 실패 1). 계약은 현재 HEAD의 전체 성공 CI와 실제 네이티브 3건 로그 확인으로 변경했다. 해당 수정·최종 회귀 검증은 진행 중이며 아직 완료 증거가 아니다.
+
 - **"나중에"는 이 버전을 다시 안 보여 주는 스킵이지, 다음에 또 물어보기가 아니다.** `skipCurrent()` 가
   `skippedUpdateVersion` 에 한 번 쓰면 `check()` 는 그 태그를 `available` 에서 빼고, Settings 의
   `else` 는 `available == nil` 을 "최신"으로 읽는다. 배너를 숨기는 것과 최신임을 선언하는 것은 다른

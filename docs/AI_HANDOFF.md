@@ -4,7 +4,12 @@
 
 ### 진행 중: PR 13 (2026-11-04)
 
-사용자 요청으로 PR 13을 시작했다. `3bbcf13`·feat/local-practice-battle·깨끗한 작업 트리와 포크 origin/원본 push 비활성화를 확인했다. 부록 H 계약을 먼저 기록하고, 계약 불변 서버 쓰기 최적화·실제 네이티브 통신 인수 harness·설치/게시 없는 릴리스 준비를 병렬 진행한다. 무료 경기 상한/보관 변경은 아직 결정하지 않았다. 실제 두 맥 시험은 기존대로 미실행이며 개발/운영 배포·설치·공개 릴리스는 아직 승인/실행하지 않았다. PR 13 체크박스는 미완료다.
+사용자 요청으로 PR 13을 시작했다. `3bbcf13`·feat/local-practice-battle·깨끗한 작업 트리와 포크 origin/원본 push 비활성화를 확인했다. 부록 H 계약을 먼저 기록하고 서버 쓰기 최적화·네이티브 통신 인수 harness·설치/게시 없는 릴리스 준비를 통합했다. **1차 최적화만으로 200턴 100판/일은 한도 초과이며, 사용자 결정은 하루 100판 검증 목표 유지·저장 구조 추가 최적화다. 경기 상한·보관 축소를 추가하지 않는다.** 2차 저장 계약 검토와 릴리스 준비의 CI 증거 확인 보강을 진행 중이다. PR 13 소스는 아직 push하지 않았다. 실제 두 맥 시험은 기존대로 미실행이며 개발/운영 배포·설치·공개 릴리스는 아직 승인/실행하지 않았다. PR 13 체크박스는 미완료다.
+
+- 1차 서버 최적화: RED 5건·단언 실패 5(종료 1), 깨끗한 `npm ci`·`npm run typecheck`·`npm test` 각 종료 0, 35파일 336건 통과·실패/skip 0. 4개 변형은 각각 2/1/2/1건 실패 후 원복. `npm run measure:battles` 확장 12건 통과(종료 0). 200턴 10판의 SQL 쓰기 26,492→20,372행, 알람 포함 30,522→24,402회, 읽기 686,042행·DO 요청 6,082회·DB 증가 499,712바이트. 100판/일 외삽 쓰기 약 24.4만·읽기 약 686만으로 여전히 실패하며 저장량 감소도 아직 없다. 앱 GET/ping·다른 서비스는 별도다.
+- 네이티브 RED 3건 중 단언 실패 1(종료 1), GREEN 3건 통과·실패/skip 0(종료 0). 실제 Swift HTTP/WS·JSC·로컬 workerd·Session·임시 CompanionStore를 연결한다. 서버 처리 후 응답 유실·세션/디스크 저장 재생성·중복 정산·VOID·재대결을 검사한다. 방 생성/수락/시작은 API로 준비하고 키 저장은 대역이다. 같은 프로세스의 Session/Store 재생성이므로 실제 앱 재시작·두 맥·Keychain 실기로 확대하지 않는다.
+- 통합 로컬 명령: `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer PTB_NATIVE_SCRATCH_PATH=/private/tmp/ptb-pr07-clean-build PTB_SNAPSHOT_SCREENSHOT_DIR=<repo>/build/pr13/screenshots scripts/run-native-acceptance.sh -- swift test --disable-sandbox --scratch-path /private/tmp/ptb-pr07-clean-build --jobs 2 --enable-code-coverage --filter 'OnlineBattle|UpdateCheckerTests|AppIdentityTests|SupportMailTests|BattleEngineTests|BattleEngineArchiveTests|SaveTransferTests|PracticeStakesStoreTests|SaveSnapshot|PracticeLaunchTests|LocalizedUILiteralTests'`: 종료 0, **328건 통과·실패/skip 0**(네이티브 3건 포함). wrapper가 임시 상태/모듈 폴더를 강제하며 OCR는 미실행. 필터 검사 종료 0. CI rest에 동일 harness를 연결했지만 최종 CI는 아직 미실행이다.
+- UpdateChecker는 정확한 포크 릴리스 경로만 허용하도록 수정했다. RED 2건·단언 실패 10(종료 1), GREEN 관련 36건 통과·실패/skip 0. prefix 가드 제거 변형은 회귀 1건 실패 후 원복했고 `llvm-cov --show-regions`에서 새 거절 분기를 확인했다. 릴리스 검사 28건 통과·실패/skip 0, 통합 `release.sh --check-only` 종료 0. 이후 빌드 준비에서 로컬 전체 test-gate를 직접 실행하는 격리/로컬 OCR 위반을 발견해 추가 RED 2건(각 단언 실패 1·종료 1) 후 보강 중이다. 빌드·게시 준비가 완료됐다고 보고하지 않는다.
 
 ### 마지막 완료: PR 12 (2026-11-04)
 
