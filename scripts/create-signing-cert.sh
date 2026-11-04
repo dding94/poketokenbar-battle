@@ -63,10 +63,14 @@ echo "==> login keychain 에 import (codesign 사용 허용)"
 security import "$TMP/identity.p12" -k "$KEYCHAIN" -P "$P12PW" -T /usr/bin/codesign
 security add-trusted-cert -r trustRoot -p codeSign -k "$KEYCHAIN" "$TMP/cert.pem" 2>/dev/null || true
 
+if ! identity_is_valid; then
+    echo "오류: '$IDENTITY' 유효 codesigning identity 확인 실패" >&2
+    echo "인증서는 재생성하지 않습니다. 이 스크립트를 다시 실행해 기존 인증서의 trust 설정을 확인하세요." >&2
+    exit 1
+fi
+
 echo "완료."
-identity_is_valid \
-    && echo "'$IDENTITY' 유효 codesigning identity 확인됨" \
-    || echo "경고: 유효 codesigning identity 확인 실패"
+echo "'$IDENTITY' 유효 codesigning identity 확인됨"
 echo
 echo "다음: ./scripts/build-app.sh 가 이 신원으로 서명합니다."
 echo "첫 빌드 시 'codesign 이 키를 사용하려 함' 프롬프트가 1회 뜨면 '항상 허용'을 누르세요."

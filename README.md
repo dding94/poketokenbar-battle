@@ -44,11 +44,11 @@ PR 00~07·11~12의 구현·자동 검증을 마쳤습니다(PR 08~10 폐기). �
 - `docs/BATTLE_PLAN.md`: 제품·설계·작업 순서의 기준
 - `docs/AI_HANDOFF.md`: 진행 상황과 다음 AI를 위한 인계
 - `engine/`: 고정 버전 시뮬레이터, JSON 계약·결정성 테스트, 제품 번들
-- `server/`: 아직 없음. PR 04 이후 범위
+- `server/`: Cloudflare Worker·SQLite League DO·실시간 선택 중계와 결과 확정
 
 ## 검증과 배포 상태
 
-공개 릴리스·Homebrew cask·실제 두 맥 인수 검증은 아직 완료되지 않았습니다. PR 12의 ad-hoc 개발 ZIP은 공개 릴리스가 아닙니다. 설치 없는 로컬 준비는 `./scripts/release.sh --check-only`, 노트/버전 검토는 `--prepare <version>`이며 자세한 경계와 백업 절차는 [RELEASE.md](RELEASE.md)를 따릅니다. 실제 서명 빌드·설치·외부 게시에는 별도 확인이 필요합니다.
+자체 서명 **2.6.0 테스트판**과 개인 Homebrew cask를 준비하고 있습니다. 게시·다운로드 확인 뒤 설치 명령을 추가합니다. Apple 공증과 실제 두 맥 인수 검증은 미완료입니다. PR 13의 ad-hoc 개발 ZIP과 이번 자체 서명 테스트판은 구분합니다. 설치 없는 로컬 준비는 `./scripts/release.sh --check-only`, 노트/버전 검토는 `--prepare <version>`이며 자세한 경계와 백업 절차는 [RELEASE.md](RELEASE.md)를 따릅니다. 실제 서명 빌드·설치·외부 게시에는 별도 확인이 필요합니다.
 
 `npm test --prefix engine`과 `cd engine && npm run corpus && npm run compatibility`로 엔진을 검증합니다. Node와 JavaScriptCore의 같은 2,200판을 로컬 macOS 26.5 및 CI macOS 15·26에서 실행했습니다. 정책 auto-v2(standard는 v1과 같음)는 불일치·재생·상태 복원 실패 0건입니다. BW2 541개 기술 호출 검사는 모든 조건별 효과 조합을 증명하지 않습니다.
 

@@ -217,7 +217,7 @@ Pi는 모델 여러 개를 세션 로그 하나로 흘려보낼 수 있습니다
 
 ## 설치와 릴리스 준비
 
-포크 최소 지원은 **macOS 15+**, Apple Silicon과 Intel입니다. 공개 릴리스·설치·Homebrew cask 검증은 아직 완료되지 않았습니다. 원본 앱의 설치 명령으로 Battle 포크를 설치할 수 없습니다. 준비/검증/별도 승인 게시와 백업 절차는 [RELEASE.md](RELEASE.md)를 확인하세요.
+포크 최소 지원은 **macOS 15+**, Apple Silicon과 Intel입니다. 자체 서명 **2.6.0 테스트판**과 개인 Homebrew cask를 준비 중이며 게시 확인 뒤 설치 명령을 제공합니다. Apple 공증·실제 두 맥 검증은 미완료입니다. 첫 실행 때 macOS의 실행 허용이 필요할 수 있습니다. [RELEASE.md](RELEASE.md)를 확인하세요.
 
 설치 없이 소스 번들만 만들려면:
 
