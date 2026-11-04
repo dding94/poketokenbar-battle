@@ -80,6 +80,18 @@ final class OnlineBattleConnectionTests: XCTestCase {
         XCTAssertEqual(count, 1)
         await connection.stop()
     }
+    func testBattleNotificationsDoNotRequestFullAccountRefresh() async throws {
+        let (connection, _, _, events) = try await setup()
+        await send(.text(hello), to: connection)
+        for payload in [
+            #"{"v":1,"type":"battle_round","battleId":"bt_test","pair":{"roundSeq":1,"p1":{"kind":"move","slot":1},"p2":{"kind":"timeout"},"releasedAt":1000}}"#,
+            #"{"v":1,"type":"battle_changed","battleId":"bt_test","state":"RUNNING","revision":2,"roundSeq":2,"deadline":31000}"#,
+            #"{"v":1,"type":"battle_changed","battleId":"bt_test","state":"RUNNING","revision":2}"#
+        ] { await send(.text(payload), to: connection) }
+        let reads = await events.refreshCount
+        XCTAssertEqual(reads, 1, "Only hello reconciles the entire account; battle notifications stay scoped")
+        await connection.stop()
+    }
     func testUnauthorizedUpgradeTakesPrecedenceOverAbnormalTransportClose() {
         XCTAssertEqual(OnlineBattleSocketEvent.receiveFailure(httpStatus: 401, closeCode: 1006), .failed(401))
         XCTAssertEqual(OnlineBattleSocketEvent.receiveFailure(httpStatus: nil, closeCode: 4003), .closed(4003))

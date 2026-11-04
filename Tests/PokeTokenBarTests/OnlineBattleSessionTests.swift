@@ -741,6 +741,24 @@ final class OnlineBattleSessionTests: XCTestCase {
         await first.value; await second.value
         let reads = await http.count("/v1/me"); XCTAssertEqual(reads, 2)
     }
+    func testSecondPlayerWaitsTwoSecondsBeforeFallbackAdvance() async throws {
+        let final = try battle(), clock = SessionClock()
+        let first = try changed(final, ["state": "RUNNING", "result": NSNull(), "roundSeq": 1,
+            "journal": JSONSerialization.jsonObject(with: JSONEncoder().encode(Array(final.journal.prefix(1))))])
+        let opened = try changed(first, ["roundSeq": 2, "deadline": 63000])
+        let (session, http, _, _) = try await setup([first], trainer: "trainer-two",
+            clock: .init(now: { clock.now() }))
+        let path = "/v1/battles/\(final.battleId)/advance"
+        await http.route(path, try JSONEncoder().encode(opened))
+        await session.bootstrap()
+        var count = await http.count(path); XCTAssertEqual(count, 0)
+        clock.advance(1.99); await session.tick()
+        count = await http.count(path); XCTAssertEqual(count, 0)
+        clock.advance(0.01); await session.tick()
+        count = await http.count(path); XCTAssertEqual(count, 1)
+        XCTAssertEqual(session.presentation.room?.roundSeq, 2)
+        await session.tick(); count = await http.count(path); XCTAssertEqual(count, 1)
+    }
     func testAutomaticBattleAdvancesWhileHiddenReportsAndAppliesP2Result() async throws {
         let final = try battle(1)
         let first = try changed(final, ["state": "RUNNING", "result": NSNull(), "roundSeq": 1, "journal": JSONSerialization.jsonObject(with: JSONEncoder().encode(Array(final.journal.prefix(1))))])
