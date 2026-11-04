@@ -49,6 +49,26 @@ extension L {
     var onlineBattles: String { online("진행 중인 경기", "Battles") }
     var onlineNoBattles: String { online("아직 진행 중인 경기가 없어요.", "No battles yet.") }
     var onlineHistory: String { online("지난 경기", "Battle history") }
+    var onlineStandings: String { online("그룹 전적판", "Group standings") }
+    var onlineStandingsLoading: String { online("전적을 불러오고 있어요…", "Loading standings…") }
+    var onlineStandingsUnavailable: String { online("전적판을 불러올 수 없어요.", "Standings are unavailable.") }
+    var onlineNoStandings: String { online("표시할 그룹 멤버가 없어요.", "No group members to show.") }
+    var onlineRetry: String { online("다시 시도", "Try again") }
+    var onlineChampion: String { online("챔피언", "Champion") }
+    var onlineStandingsRateHint: String { online("승률은 확정된 5경기부터 표시해요. 무승부도 경기 수에 포함돼요.", "Win rate appears after five confirmed battles; draws count toward the total.") }
+    func onlineRecord(_ wins: Int, _ losses: Int, _ draws: Int) -> String {
+        online("\(wins)승 \(losses)패 \(draws)무", "\(wins)W \(losses)L \(draws)D")
+    }
+    func onlineWinRate(_ rate: String) -> String { online("승률 \(rate)", "Win rate \(rate)") }
+    func onlineCurrentStreak(_ streak: Int) -> String { online("현재 연승 \(streak)", "Current streak \(streak)") }
+    func onlineBestStreak(_ streak: Int) -> String { online("최고 연승 \(streak)", "Best streak \(streak)") }
+    var onlineRematch: String { online("재대결 신청", "Request rematch") }
+    var onlineRematchPreparation: String { online("재대결 준비", "Prepare rematch") }
+    var onlineRematchBack: String { online("이전 화면", "Back") }
+    var onlineRematchOpponent: String { online("상대", "Opponent") }
+    var onlineRematchLocked: String { online("상대와 배틀 방식은 이전 경기와 같아요.", "The opponent and battle mode match the previous battle.") }
+    var onlineRematchSubmit: String { online("이 포켓몬으로 신청", "Request with this Pokémon") }
+    var onlineRematchUnavailable: String { online("활동 중인 상대와 건강한 출전 포켓몬이 필요해요. 기절하거나 다른 경기에 출전 중인 포켓몬은 선택할 수 없어요.", "An active opponent and a healthy available Pokémon are required. Fainted or reserved Pokémon cannot enter.") }
     var onlineNoHistory: String { online("아직 지난 경기가 없어요.", "No past battles yet.") }
     var onlineBackToHistory: String { online("기록 목록", "Back to history") }
     var onlineReplay: String { online("다시보기", "Replay") }

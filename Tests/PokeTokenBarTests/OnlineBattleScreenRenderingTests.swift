@@ -137,6 +137,38 @@ final class OnlineBattleScreenRenderingTests: XCTestCase {
         let whileLive = try await capture(host, named: "online-synthetic-history-while-live.png")
         XCTAssertEqual(history, whileLive, "A live update must not replace the selected archive screen")
     }
+    func testSyntheticStandingsAndFailureRenderInsidePopover() async throws {
+        let model = Self.model(); model.phase = .lobby
+        let host = await host(model)
+        let before = try await capture(host, named: "online-synthetic-before-standings.png")
+        model.showsStandings = true
+        model.standings = .init(groupId: "synthetic-group", championTrainerId: "synthetic-foe", rows: [
+            .init(trainerId: "synthetic-foe", displayName: "연습친구", wins: 3, losses: 1, draws: 1,
+                  streak: 2, bestStreak: 3, winRate: 0.6),
+            .init(trainerId: "synthetic-me", displayName: "나래", wins: 2, losses: 2, draws: 0,
+                  streak: 0, bestStreak: 2, winRate: nil)
+        ])
+        let standings = try await capture(host, named: "online-synthetic-standings.png")
+        model.standingsError = "서버에서 전적판을 불러오지 못했어요."
+        let error = try await capture(host, named: "online-synthetic-standings-error.png")
+        XCTAssertNotEqual(before, standings)
+        XCTAssertNotEqual(standings, error, "Failure must show an error and retry instead of stale rankings")
+        model.standingsError = nil
+        Self.arena(model)
+        let whileLive = try await capture(host, named: "online-synthetic-standings-while-live.png")
+        XCTAssertEqual(standings, whileLive, "A live battle update must not replace the standings screen")
+    }
+    func testSyntheticRematchPreparationIsDistinctFromCompletedResult() async throws {
+        let model = Self.model(); model.phase = .result
+        model.room = Self.room(state: .completed)
+        model.result = .init(title: "정식전 승리", detail: "결과가 저장됐어요.", xpAwarded: 10_000_000,
+                             hpApplied: true, isVoid: false)
+        let host = await host(model)
+        let result = try await capture(host, named: "online-synthetic-before-rematch.png")
+        model.rematchSourceID = "synthetic-battle"
+        let preparation = try await capture(host, named: "online-synthetic-rematch-preparation.png")
+        XCTAssertNotEqual(result, preparation)
+    }
     func testVerifiedP2ReplayRendersReadOnlyScenesInsidePopover() async throws {
         let url = try XCTUnwrap(Bundle.module.url(forResource: "golden", withExtension: "json", subdirectory: "OnlineBattle"))
         let archived = try XCTUnwrap(JSONDecoder().decode([Golden].self, from: Data(contentsOf: url)).first?.battle)

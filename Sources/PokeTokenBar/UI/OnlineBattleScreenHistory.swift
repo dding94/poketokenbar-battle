@@ -76,6 +76,16 @@ struct OnlineBattleHistory: View {
                 Text(Date(timeIntervalSince1970: battle.createdAt / 1000).formatted(date: .abbreviated, time: .shortened))
                     .font(.caption2).foregroundStyle(.secondary)
             }.practiceCard()
+            if battle.state == .completed,
+               battle.side(for: model.account?.trainer.trainerId ?? "") != nil {
+                Button(l.onlineRematch) { model.send(.prepareRematch(battle.battleId)) }
+                    .disabled(!model.canRematch(battle))
+                    .accessibilityIdentifier("online.history.rematch")
+                if !model.canRematch(battle) {
+                    Text(l.onlineRematchUnavailable).font(.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
             if let replay = model.replay, replay.frames.indices.contains(model.replayFrameIndex) {
                 replayView(replay, battle: battle)
             } else if model.historyBusy {

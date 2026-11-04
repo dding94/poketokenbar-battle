@@ -68,6 +68,16 @@ struct OnlineBattleLobby: View {
             .buttonStyle(.plain).disabled(model.isBusy)
             .accessibilityIdentifier("online.history.open")
             .practiceCard()
+            Button { model.send(.showStandings) } label: {
+                HStack {
+                    Label(l.onlineStandings, systemImage: "list.number")
+                    Spacer(minLength: 4)
+                    Image(systemName: "chevron.right").font(.caption)
+                }
+            }
+            .buttonStyle(.plain).disabled(model.isBusy)
+            .accessibilityIdentifier("online.standings.open")
+            .practiceCard()
         }
     }
     private func opponentName(_ battle: OnlineBattleView) -> String {

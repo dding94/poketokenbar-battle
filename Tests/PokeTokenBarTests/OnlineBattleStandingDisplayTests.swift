@@ -9,6 +9,7 @@ final class OnlineBattleStandingDisplayTests: XCTestCase {
 
     func testWinRateShowsOneDecimalAfterFiveConfirmedGamesIncludingDraws() {
         XCTAssertEqual(OnlineBattleStandingDisplay.winRate(row(wins: 2, losses: 2, draws: 0, rate: nil)), "-")
+        XCTAssertEqual(OnlineBattleStandingDisplay.winRate(row(wins: 2, losses: 2, draws: 0, rate: 0.5)), "-")
         XCTAssertEqual(OnlineBattleStandingDisplay.winRate(row(wins: 2, losses: 2, draws: 1, rate: 0.4)), "40.0%")
         XCTAssertEqual(OnlineBattleStandingDisplay.winRate(row(wins: 1, losses: 4, draws: 1, rate: 1.0 / 6.0)), "16.7%")
     }

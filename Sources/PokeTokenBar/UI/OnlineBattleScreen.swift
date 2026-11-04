@@ -36,7 +36,7 @@ struct OnlineBattleScreen: View {
     var speciesNameStore: PokemonNameDisplayStore = .shared
     let onClose: () -> Void
 
-    var showsGroupBack: Bool { !model.showsHistory && [.room, .arena, .verifying].contains(model.phase) }
+    var showsGroupBack: Bool { !model.showsHistory && !model.showsStandings && model.rematchSourceID == nil && [.room, .arena, .verifying].contains(model.phase) }
     func returnToGroup() { model.send(.backToLobby) }
 
     var body: some View {
@@ -89,7 +89,11 @@ struct OnlineBattleScreen: View {
     }
 
     @ViewBuilder private var stage: some View {
-        if model.showsHistory {
+        if model.rematchSourceID != nil {
+            OnlineBattleRematchPreparation(model: model, l: l, artwork: artwork)
+        } else if model.showsStandings {
+            OnlineBattleStandingsScreen(model: model, l: l)
+        } else if model.showsHistory {
             OnlineBattleHistory(model: model, l: l, artwork: artwork,
                                 speciesNameProvider: speciesNameProvider, speciesNameStore: speciesNameStore)
         } else {
@@ -116,6 +120,16 @@ struct OnlineBattleScreen: View {
                     Label(result.hpApplied ? l.onlineHPApplied : l.onlineNoEffects,
                           systemImage: result.hpApplied ? "heart.fill" : "shield")
                         .font(.caption).foregroundStyle(.secondary)
+                }
+                if let room = model.room, room.state == .completed,
+                   room.side(for: model.account?.trainer.trainerId ?? "") != nil {
+                    Button(l.onlineRematch) { model.send(.prepareRematch(room.battleId)) }
+                        .disabled(!model.canRematch(room))
+                        .accessibilityIdentifier("online.result.rematch")
+                    if !model.canRematch(room) {
+                        Text(l.onlineRematchUnavailable).font(.caption).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
                 Button(l.onlineDone) { model.send(.dismissResult) }
                     .buttonStyle(.borderedProminent).disabled(model.isBusy)
