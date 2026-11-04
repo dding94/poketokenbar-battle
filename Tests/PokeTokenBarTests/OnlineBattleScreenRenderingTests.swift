@@ -17,12 +17,13 @@ final class OnlineBattleScreenRenderingTests: XCTestCase {
               publicInfo: .init(speciesNum: 25, species: "Pikachu", level: 50, types: ["Electric"],
                                 stats: ["hp": 110, "atk": 75, "def": 60, "spa": 70, "spd": 70, "spe": 110]))
     }
-    static func room(state: OnlineBattleState = .running, mode: OnlineBattleMode = .manual, confirmed: Bool = true) -> OnlineBattleView {
+    static func room(state: OnlineBattleState = .running, mode: OnlineBattleMode = .manual, confirmed: Bool = true,
+                     id: String = "synthetic-battle", createdAt: Double = 0) -> OnlineBattleView {
         let snapshot = snapshot()
-        return .init(battleId: "synthetic-battle", state: state, revision: 1, mode: mode,
+        return .init(battleId: id, state: state, revision: 1, mode: mode,
                      p1: .init(trainerId: "synthetic-me", snapshot: .init(snapshot: snapshot, hp: 88), publicInfo: nil, hpPercent: nil),
                      p2: .init(trainerId: "synthetic-foe", snapshot: nil, publicInfo: snapshot.publicInfo, hpPercent: 90),
-                     createdAt: 0, expiresAt: 100, startedAt: 0, reportedAt: nil, confirmed: confirmed,
+                     createdAt: createdAt, expiresAt: 100, startedAt: 0, reportedAt: nil, confirmed: confirmed,
                      config: nil, roundSeq: 1, deadline: nil, ownChoice: nil, journal: [], result: nil, reason: nil, rematchOf: nil)
     }
     static func model() -> OnlineBattlePresentation {
@@ -122,5 +123,17 @@ final class OnlineBattleScreenRenderingTests: XCTestCase {
         model.members = (0..<18).map { .init(trainerId: "synthetic-\($0)", displayEmail: String(repeating: "long", count: 14) + "@example.invalid",
                                                    role: .member, status: .active, joinedAt: 0, online: $0 % 2 == 0) }
         _ = try await capture(await host(model), named: "online-synthetic-long-lobby.png")
+    }
+    func testHistoryIsDistinctFromLobbyAndNeverShowsLiveArena() async throws {
+        let model = Self.model(); model.phase = .lobby
+        model.battles = [Self.room(state: .completed, id: "completed"), Self.room(state: .void, id: "void")]
+        let host = await host(model)
+        let lobby = try await capture(host, named: "online-synthetic-before-history.png")
+        model.showsHistory = true
+        let history = try await capture(host, named: "online-synthetic-history.png")
+        XCTAssertNotEqual(lobby, history, "The archive must have a distinct screen")
+        Self.arena(model)
+        let whileLive = try await capture(host, named: "online-synthetic-history-while-live.png")
+        XCTAssertEqual(history, whileLive, "A live update must not replace the selected archive screen")
     }
 }
