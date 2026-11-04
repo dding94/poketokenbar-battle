@@ -47,10 +47,50 @@ private actor NativeHTTP: OnlineBattleHTTPTransport {
         return response
     }
 }
+private final class NativePingClock: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: Double = 0
+    func now() -> Double { lock.withLock { value } }
+    func advance(_ seconds: Double) { lock.withLock { value += seconds } }
+}
+/// Forwards every real frame unchanged; records whether the heartbeat leaked into the text protocol.
+private final class NativeTracedSocket: OnlineBattleSocket, @unchecked Sendable {
+    let events: AsyncStream<OnlineBattleSocketEvent>
+    private let raw: any OnlineBattleSocket
+    private let lock = NSLock()
+    private var textPongs = 0
+    private var successfulPings = 0
+    private var receiver: Task<Void, Never>?
+    init(_ raw: any OnlineBattleSocket) {
+        self.raw = raw
+        let stream = AsyncStream<OnlineBattleSocketEvent>.makeStream(); events = stream.stream
+        receiver = Task { [weak self] in
+            for await event in raw.events {
+                if event == .text("pong") { self?.lock.withLock { self?.textPongs += 1 } }
+                stream.continuation.yield(event)
+            }
+            stream.continuation.finish()
+        }
+    }
+    func counts() -> (textPongs: Int, successfulPings: Int) { lock.withLock { (textPongs, successfulPings) } }
+    func sendPing() async throws {
+        try await raw.sendPing()
+        lock.withLock { successfulPings += 1 }
+    }
+    func close() async { await raw.close(); receiver?.cancel() }
+}
+private actor NativeSocketProbe {
+    private var sockets: [NativeTracedSocket] = []
+    func append(_ socket: NativeTracedSocket) { sockets.append(socket) }
+    func first() -> NativeTracedSocket? { sockets.first }
+}
 private struct NativeSocketDriver: OnlineBattleSocketDriver {
     let endpoint: NativeEndpoint
+    var probe: NativeSocketProbe? = nil
     func connect(_ request: URLRequest) async throws -> any OnlineBattleSocket {
-        try await OnlineBattleURLSessionSocketDriver().connect(endpoint.rewrite(request))
+        let socket = try await OnlineBattleURLSessionSocketDriver().connect(endpoint.rewrite(request))
+        guard let probe else { return socket }
+        let traced = NativeTracedSocket(socket); await probe.append(traced); return traced
     }
 }
 private actor NativeCredentials: OnlineBattleCredentialStoring {
@@ -188,9 +228,43 @@ final class OnlineBattleNativeAcceptanceTests: XCTestCase {
         XCTFail("Native match did not finish within the 200-round rule")
         throw OnlineBattleFailure.invalidResponse
     }
+    private func protocolHeartbeatAndReconnect(_ grant: OnlineBattleGrant) async throws {
+        let clock = NativePingClock(), probe = NativeSocketProbe()
+        let connection = OnlineBattleConnection(driver: NativeSocketDriver(endpoint: endpoint, probe: probe),
+            clock: .init(now: { clock.now() }), jitter: { $0 }, automaticTicks: false)
+        connections.append(connection)
+        await connection.configure(origin: try OnlineBattleOrigin(NativeEndpoint.productOrigin), accessKey: grant.accessKey)
+        for _ in 0..<200 {
+            if await connection.snapshot().state == .connected { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let before = await connection.snapshot()
+        XCTAssertEqual(before.state, .connected)
+        let traced = await probe.first()
+        let socket = try XCTUnwrap(traced)
+        clock.advance(29); await connection.tick(); XCTAssertEqual(socket.counts().successfulPings, 0)
+        clock.advance(1); await connection.tick()
+        XCTAssertEqual(socket.counts().successfulPings, 1, "A protocol ping must receive its actual control-frame pong")
+        // A legacy text ping causes a text pong on the actual Worker; a control frame never does.
+        try await Task.sleep(for: .milliseconds(200))
+        XCTAssertEqual(socket.counts().textPongs, 0, "Heartbeat must bypass the Worker's text message handler")
+        await socket.close(); clock.advance(30); await connection.tick()
+        var state = await connection.snapshot()
+        XCTAssertEqual(state.state, .retryWaiting, "Failed real ping must enter the existing reconnect policy")
+        clock.advance(1); await connection.tick()
+        for _ in 0..<200 {
+            if await connection.snapshot().state == .connected { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        state = await connection.snapshot()
+        XCTAssertEqual(state.state, .connected); XCTAssertGreaterThan(state.generation, before.generation)
+        XCTAssertNotEqual(state.connectionId, before.connectionId)
+        await connection.stop()
+    }
     func testNativeManualAndAutomaticReportsPrivacyReplayAndRematch() async throws {
         let pair = try await pair(), snapshots = try snapshots()
         XCTAssertThrowsError(try OnlineBattleOrigin(endpoint.url.absoluteString), "Product HTTPS policy must remain intact")
+        try await protocolHeartbeatAndReconnect(pair.grants[0])
         for mode in [OnlineBattleMode.manual, .auto] {
             let initial = try await running(pair, mode: mode, snapshots: snapshots)
             let (terminal, report) = try await terminal(initial, pair: pair)
