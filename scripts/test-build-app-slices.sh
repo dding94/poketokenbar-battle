@@ -58,7 +58,12 @@ for layout in shared distinct; do
     repo="$TEST_DIR/$layout"
     mkdir -p "$repo/scripts" "$repo/assets" "$repo/engine/dist" "$repo/tmp"
     cp "$ROOT/scripts/build-app.sh" "$repo/scripts/build-app.sh"
-    touch "$repo/assets/AppIcon.icns" "$repo/engine/dist/battle-engine.js" "$repo/engine/LICENSE.pokemon-showdown" "$repo/scripts/battle.entitlements"
+    cp "$ROOT/scripts/package-battle-engines.sh" "$repo/scripts/package-battle-engines.sh"
+    mkdir -p "$repo/Sources/PokeTokenBar/Core" "$repo/engine/archive"
+    cp "$ROOT/Sources/PokeTokenBar/Core/BattleEngineArchive.swift" "$ROOT/Sources/PokeTokenBar/Core/BattleEngineManifest.swift" "$repo/Sources/PokeTokenBar/Core/"
+    cp "$ROOT/engine/dist/battle-engine.js" "$repo/engine/dist/battle-engine.js"
+    cp "$ROOT"/engine/archive/*.js "$repo/engine/archive/"
+    touch "$repo/assets/AppIcon.icns" "$repo/engine/LICENSE.pokemon-showdown" "$repo/scripts/battle.entitlements"
     if ! PATH="$TEST_DIR/bin:$PATH" FIXTURE_REPO="$repo" OUTPUT_LAYOUT="$layout" FAKE_LOG="$repo/calls.log" \
          TMPDIR="$repo/tmp" PTB_SKIP_INSTALL=1 PTB_NATIVE_ARCH_ONLY=0 PTB_REQUIRE_STABLE_SIGN=0 \
          bash "$repo/scripts/build-app.sh" > "$repo/build.log" 2>&1; then

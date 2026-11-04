@@ -13,7 +13,6 @@ EXEC_NAME="PokeTokenBarBattle"
 BUNDLE_ID="io.github.dding94.poketokenbar-battle"
 LOGIN_LABEL="io.github.dding94.poketokenbar-battle.login"
 PRODUCT="PokeTokenBar"   # SwiftPM 실행 파일 이름(번들 안에서는 EXEC_NAME 으로 바꿔 넣는다)
-ENGINE_BUNDLE="engine/dist/battle-engine.js"
 ENTITLEMENTS="scripts/battle.entitlements"
 BUILD_DIR="build"
 APP="$BUILD_DIR/$APP_NAME.app"
@@ -57,13 +56,8 @@ echo "   archs: $(lipo -archs "$APP/Contents/MacOS/$EXEC_NAME")"
 # 심볼 strip — 릴리스 바이너리 1.84MB → 0.80MB(-57%). codesign 전에 수행(서명 무효화 방지).
 strip -rSTx "$APP/Contents/MacOS/$EXEC_NAME" 2>/dev/null || strip -rSx "$APP/Contents/MacOS/$EXEC_NAME"
 cp assets/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
-# 전투 엔진 번들(engine/ 에서 빌드해 커밋한 단일 JS). 없으면 배틀 화면이 엔진 없음 오류를 보여 준다.
-if [[ -f "$ENGINE_BUNDLE" ]]; then
-    cp "$ENGINE_BUNDLE" "$APP/Contents/Resources/battle-engine.js"
-    cp engine/LICENSE.pokemon-showdown "$APP/Contents/Resources/LICENSE.pokemon-showdown"
-else
-    echo "   ⚠ $ENGINE_BUNDLE 없음 — 배틀 기능 없이 조립합니다 (cd engine && npm ci && npm run build)."
-fi
+# Current and historical engines must match the immutable trust registry before signing.
+bash scripts/package-battle-engines.sh "$APP/Contents/Resources"
 
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>

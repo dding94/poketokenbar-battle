@@ -9,14 +9,15 @@ enum OnlineBattleHistoryText {
 
     private static func line(_ raw: String, localSide: OnlineBattleSide) -> String? {
         let fields = raw.components(separatedBy: "|")
-        guard fields.count >= 3, fields[0].isEmpty else { return nil }
+        guard fields.count >= 2, fields[0].isEmpty else { return nil }
+        if fields[1] == "tie" { return "무승부 · 배틀을 마쳤습니다." }
+        guard fields.count >= 3 else { return nil }
         let kind = fields[1], value = fields[2]
         let detail = fields.count > 3 ? fields[3] : ""
         if kind == "turn" {
             guard let turn = Int(value), (1...200).contains(turn) else { return nil }
             return "── \(turn)턴 ──"
         }
-        if kind == "tie" { return "무승부 · 배틀을 마쳤습니다." }
         if kind == "win", let side = OnlineBattleSide(rawValue: value) {
             return "\(actor(side, localSide)) 승리 · 배틀을 마쳤습니다."
         }
@@ -56,7 +57,7 @@ enum OnlineBattleHistoryText {
                 effect = name(detail, category: "효과", translations: ["confusion": "혼란", "substitute": "대타출동", "flinch": "풀죽음"])
             }
             return "\(subject) · \(effect) \(kind == "-end" ? "종료" : "발동")"
-        default: return nil
+        default: return kind.hasPrefix("-") ? "전투 효과가 처리되었습니다." : nil
         }
     }
 

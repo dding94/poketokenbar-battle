@@ -16,7 +16,7 @@ struct OnlineBattleReplay {
 
     init(battle: OnlineBattleView, localTrainerID: String,
          engineFactory: ((String) throws -> BattleEngine)? = nil) throws {
-        guard battle.state == .completed, let config = battle.config, battle.result != nil,
+        guard battle.state == .completed, let config = battle.config, battle.result != nil, battle.startedAt != nil,
               !battle.journal.isEmpty, battle.p1.snapshot != nil, battle.p2.snapshot != nil else {
             throw Failure.incompleteRecord
         }

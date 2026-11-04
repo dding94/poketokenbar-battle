@@ -18,6 +18,26 @@ Showdown 상태 직렬화가 생성자 이름을 참조한다. 학습·합법성
 명시적으로 전달받은 기술로 전투한다. 제거 전후 2,200판 결과가 같은지 검사했다.
 `PTB_FULL_ENGINE=1 npm run corpus:generate`로 전체 데이터 비교용 번들을 만들 수 있다.
 
+
+## 보관 엔진과 경기 다시보기
+
+`archive/<SHA-256>.js`는 재생에 쓰는 원본 바이트이며 삭제하거나 덮어쓰지 않는다.
+`Sources/PokeTokenBar/Core/BattleEngineArchive.swift`의 리터럴 신뢰 목록에 해시와 엔진·어댑터·규칙·정책·중계 버전을 함께 고정한다.
+서버가 보내는 경로나 원격 다운로드를 사용하지 않으며, 해당 버전이 없거나 검증이 실패하면 기록 요약만 유지한다.
+상세 로그의 90일 보관 여부나 신청 `expiresAt`은 입력 재생을 막는 조건이 아니다.
+
+엔진을 교체할 때는 기존 신뢰 항목과 `archive/` 바이트를 유지한 상태로 다음 순서를 따른다.
+
+1. 기존처럼 `npm run build`로 새 `dist/`와 현재 엔진용 Swift manifest를 만든다. 이 빌드 스크립트는 `archive/`와 보관 신뢰 목록을 수정하지 않는다.
+2. 새 SHA-256 파일 이름으로 현재 번들을 `archive/`에 **추가**한다. 같은 해시의 파일이 이미 있으면 바이트를 대조하고 유지한다.
+3. 새 엔진의 버전을 확인하고 Swift 신뢰 목록에 항목을 **추가**한다. 이전 항목을 현재 manifest 참조로 바꾸거나 삭제하지 않는다.
+4. `bash scripts/test-battle-engine-archive.sh`, `bash scripts/test-build-app-slices.sh`와 `BattleEngineArchiveTests`, `OnlineBattleReplayTests`, `OnlineBattleResolverTests`를 실행한다(저장소 루트 기준).
+
+앱 조립은 `scripts/package-battle-engines.sh`로 모든 신뢰 항목의 바이트와 현재 엔진 해시를 검사한다.
+누락·변조·현재 엔진의 미등록은 조립 실패다. 현재 엔진은 `battle-engine.js` 하나만 넣고 과거 엔진은
+`battle-engines/<SHA-256>.js`에 넣어 중복을 피한다. 이 조립 단계는 기존 보관 파일을 갱신하지 않는다.
+다시보기는 양쪽 진영의 입력을 별도 엔진에서 재생하고 최종 보고를 대조하며 저장 데이터나 보상은 변경하지 않는다.
+
 입출력은 동기 JSON 문자열이다. `createBattle(JSON.stringify(config))`가 반환한 id 역시
 `request(JSON.stringify(id), JSON.stringify('p1'))`처럼 JSON 인자로 전달한다.
 `inputLog`는 `{version:2,policyVersion:"auto-v2",config,choices:[{side,choice}]}` 객체다. `replay`는 이 구조와
