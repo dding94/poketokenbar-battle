@@ -99,7 +99,7 @@ final class OnlineBattleSession {
         for resolver in resolvers.values { resolver.close() }; resolvers = [:]; views = [:]; historyViews = [:]
         selectedBattleID = nil; resultByBattleID = [:]; prefersLobby = false; checkedDeadlines = [:]; nextRecoveryRead = nil
         presentation.account = nil; presentation.members = []; presentation.battles = []
-        resetExtras(); clearHistory(); presentation.liveLogs = []
+        resetBattleRuntime(); resetExtras(); clearHistory(); presentation.liveLogs = []
         presentation.room = nil; presentation.arena = nil; presentation.request = nil
         presentation.recoveryCode = nil; presentation.result = nil; presentation.canRetryCredentialSave = false
         presentation.canStart = false; presentation.isBusy = false; presentation.phase = .setup
@@ -144,7 +144,7 @@ final class OnlineBattleSession {
             settings = next; bootstrapped = false
             presentation.serverAddress = next.serverURL ?? ""
             presentation.account = nil; presentation.members = []; presentation.battles = []
-            resetExtras(); clearHistory(); presentation.liveLogs = []
+            resetBattleRuntime(); resetExtras(); clearHistory(); presentation.liveLogs = []
             presentation.room = nil; presentation.arena = nil; presentation.request = nil
             presentation.result = nil; presentation.recoveryCode = nil; presentation.notice = nil
             presentation.canRetryCredentialSave = false; presentation.canStart = false
@@ -275,8 +275,8 @@ final class OnlineBattleSession {
                     if seq <= room.journal.count || notice.deadline == room.deadline { return }
                 }
                 if room.mode == .manual, seq == room.roundSeq + 1, seq == resolver.processedRoundSeq + 1,
-                   let deadline = notice.deadline, deadline.isFinite, deadline > clock.now() * 1000,
-                   deadline <= clock.now() * 1000 + 30_000 {
+                   let deadline = notice.deadline, deadline.isFinite, deadline <= 9_007_199_254_740_991,
+                   let releasedAt = room.journal.last?.releasedAt, deadline > releasedAt {
                     views[id] = room.relayView(roundSeq: seq, deadline: deadline, ownChoice: nil, journal: room.journal)
                     cancelFallback(id); publish(); return
                 }
@@ -357,7 +357,7 @@ final class OnlineBattleSession {
             selectedBattleID = nil; prefersLobby = false; checkedDeadlines = [:]; nextRecoveryRead = nil
             prepared = [:]; acknowledgedStarts = []; submittedReports = []; challengeIntent = nil
             presentation.account = nil; presentation.members = []; presentation.battles = []
-            resetExtras(); clearHistory(); presentation.liveLogs = []
+            resetBattleRuntime(); resetExtras(); clearHistory(); presentation.liveLogs = []
             presentation.room = nil; presentation.arena = nil; presentation.request = nil
             presentation.result = nil; presentation.recoveryCode = nil; presentation.canStart = false
             presentation.phase = .setup
@@ -729,9 +729,11 @@ final class OnlineBattleSession {
         standingsTask?.cancel(); standingsTask = nil; standingsAgain = false
         presentation.standingsLoading = false
     }
-    private func resetExtras() {
+    private func resetBattleRuntime() {
         fallbackTasks.values.forEach { $0.cancel() }; fallbackTasks = [:]; fallback = [:]
         advancing = []; reporting = []; battleReads = []; battleReadAgain = []; battleRecovery = [:]
+    }
+    private func resetExtras() {
         invalidateStandingsRead()
         presentation.showsStandings = false; presentation.standings = nil; presentation.standingsError = nil
         presentation.rematchSourceID = nil; rematchFromHistory = false
@@ -973,7 +975,7 @@ final class OnlineBattleSession {
         guard epoch == generation else { return }
         authenticated = false; reconciled = false
         presentation.canStart = false; presentation.phase = .setup; presentation.account = nil
-        resetExtras(); clearHistory(); historyViews = [:]; presentation.battles = []; presentation.liveLogs = []
+        resetBattleRuntime(); resetExtras(); clearHistory(); historyViews = [:]; presentation.battles = []; presentation.liveLogs = []
         presentation.connectionStatus = "접속키가 만료되었어요. 복구코드로 다시 연결해 주세요"
         ticker?.cancel(); ticker = nil
         await api?.setAccessKey(nil)
