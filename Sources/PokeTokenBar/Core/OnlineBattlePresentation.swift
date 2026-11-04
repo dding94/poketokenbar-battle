@@ -14,6 +14,14 @@ final class OnlineBattlePresentation {
     var account: OnlineBattleAccount?
     var members: [OnlineBattleMember] = []
     var battles: [OnlineBattleView] = []
+    /// Archive navigation is independent of the live room and arena.
+    var showsHistory = false
+    var selectedHistoryBattle: OnlineBattleView?
+    var replay: OnlineBattleReplay?
+    var replayFrameIndex = 0
+    var historyBusy = false
+    var historyError: String?
+    var liveLogs: [String] = []
     var roster: [PracticeCandidate] = []
     var entryHP: [String: Int] = [:]
     var blockedEntryIDs: Set<String> = []
@@ -57,7 +65,7 @@ final class OnlineBattlePresentation {
     var canConfirm: Bool { !isBusy && room?.state == .accepted && localSide == .p1 && room?.confirmed == false }
     var canPrepare: Bool { !isBusy && canStart && room?.confirmed == true && [.accepted, .ready].contains(room?.state) }
     func canChooseMove(_ slot: Int) -> Bool {
-        phase == .arena && room?.state == .running && room?.mode == .manual && !isBusy && !choiceSubmitted &&
+        !showsHistory && phase == .arena && room?.state == .running && room?.mode == .manual && !isBusy && !choiceSubmitted &&
         request?.kind == "move" && request?.moves.contains { $0.slot == slot && !$0.disabled && $0.pp > 0 } == true
     }
     func send(_ action: OnlineBattleUIAction) {
@@ -67,6 +75,22 @@ final class OnlineBattlePresentation {
             break
         case .backToLobby:
             break
+        case .showHistory:
+            guard phase == .lobby, !isBusy else { return }
+            showsHistory = true
+        case .openReplay(let id):
+            guard showsHistory, !historyBusy,
+                  let battle = battles.first(where: { $0.battleId == id && !$0.state.isActive }) else { return }
+            selectedHistoryBattle = battle
+        case .seekReplay(let index):
+            guard showsHistory, let replay, replay.frames.indices.contains(index) else { return }
+            replayFrameIndex = index
+        case .closeReplay:
+            guard showsHistory else { return }
+            selectedHistoryBattle = nil
+            replay = nil
+            replayFrameIndex = 0
+            historyError = nil
         case .selectEntry(let id):
             guard let entry = roster.first(where: { $0.id == id }), entryIsEligible(entry) else { return }
             selectedEntryID = id
@@ -91,7 +115,7 @@ final class OnlineBattlePresentation {
         case .acknowledgeRecoveryCode:
             guard recoveryCode != nil else { return }
             recoveryCode = nil
-        case .openBattle(let id): guard !isBusy, battles.contains(where: { $0.battleId == id }) else { return }
+        case .openBattle(let id): guard !showsHistory, !isBusy, battles.contains(where: { $0.battleId == id && $0.state.isActive }) else { return }
         case .refresh, .dismissResult: guard !isBusy else { return }
         }
         onAction(action)
@@ -115,5 +139,6 @@ enum OnlineBattleUIAction {
     case setPopoverVisible(Bool)
     case selectEntry(String), selectOpponent(String), setMode(OnlineBattleMode)
     case challenge, openBattle(String), accept, confirm, prepareBattle, decline, cancel
+    case showHistory, openReplay(String), seekReplay(Int), closeReplay
     case chooseMove(Int), dismissResult, backToLobby
 }
