@@ -1,6 +1,6 @@
 # PokeTokenBar Battle — AI 작업 지침
 
-이 저장소는 `dding94/poketokenbar-battle` 개인 프로젝트다. 기준은 upstream PokeTokenBar `v2.5.6`이며, 로컬 연습전과 온라인 배틀(PR 12까지)은 구현·자동 검증했다. 실제 두 맥 인수·운영 배포·공개 릴리스는 PR 13에서 진행 중이며 현재 근거는 AI_HANDOFF를 따른다.
+이 저장소는 `dding94/poketokenbar-battle` 개인 프로젝트다. 기준은 upstream PokeTokenBar `v2.5.6`이며, 로컬 연습전과 온라인 배틀(PR 12까지)은 구현·자동 검증했다. 2.6.0 자체 서명 테스트판과 개인 Homebrew cask를 공개했다. 실제 두 맥 인수·운영 배포·정식 릴리스 인수는 PR 13에서 진행 중이며 현재 근거는 AI_HANDOFF를 따른다.
 
 ## 읽는 순서와 기준
 

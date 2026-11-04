@@ -1,8 +1,17 @@
 # 다음 AI를 위한 작업 인계
 
-최종 갱신: 2026-11-04. **PR 13 구현·독립 리뷰·100경기 로컬 저장 실측·최종 CI·개발 번들 검증 완료. 사용자 승인 후 개발 Worker도 최신 코드로 배포했다. 실제 앱 설치본은 PR 07 닉네임 버전 그대로다. PR 13 전체는 미완료이며 실제 두 맥 E2E는 사용자 요청으로 미실행이다. 아래 초기 stub·배포 전 표현은 당시 기록이다.**
+최종 갱신: 2026-11-04. **PR 13 구현·독립 리뷰·100경기 로컬 저장 실측·최종 CI·개발 번들 검증 완료. 사용자 승인 후 개발 Worker도 최신 코드로 배포했다. 사용자 승인 후 2.6.0 자체 서명 테스트판·Homebrew cask도 공개했다. 이 맥의 실제 /Applications 설치본은 PR 07 닉네임 버전 그대로다. PR 13 전체는 미완료이며 실제 두 맥 E2E는 사용자 요청으로 미실행이다. 아래 초기 stub·배포 전 표현은 당시 기록이다.**
 
-### 진행 중: 2.6.0 테스트판 배포 준비 (2026-11-04)
+### 마지막 완료: 2.6.0 테스트판 공개 (2026-11-04)
+
+- 사용자 승인: 2.6.0 무료 자체 서명 테스트판, 포크 인증서 생성·신뢰, 기존 개인 tap 새 cask. 자동 승인 검토의 main 변경 거절 뒤 사용자가 main 반영·푸시를 별도 명시 승인했다. 검증된 작업은 fast-forward로 반영했다.
+- 릴리스 소스/태그: `08559d3626bd451a4967fd77673b972a111ff55e`. [최종 CI 41792440514](https://github.com/dding94/poketokenbar-battle/actions/runs/41792440514) 8개 작업 성공, watch 종료 0. 앱 2,166건 실행·2,150 통과·16 opt-in skip·실패 0, 네이티브 3건 실제 통과·skip 0, union 정확히 한 번. 서버 41파일 367건·릴리스 Python 46건 통과·실패/skip 0. macOS 15/26 각각 경계 369건·Node 49건·2,200판 불일치/재생/상태 실패 0, cap draw 200판. 경계 검사는 앱과 중복이므로 합산하지 않는다.
+- `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer CLANG_MODULE_CACHE_PATH=<임시 경로> PTB_CI_RUN_ID=41792440514 PTB_NOTES_FILE=<임시 노트> PTB_CONTRIBUTORS_FILE=<임시 명단> CODESIGN_IDENTITY='PokeTokenBar Battle Local' PTB_EXPECTED_LEAF=<승인된 공개 지문> ./scripts/release.sh --prepare-build 2.6.0`: 종료 0. 설치 없이 universal·각 slice minOS 15·strict signature·공개 인증서 지문·JIT·포장 엔진 해시·빌드 전후 동일 소스를 검증했다. Xcode의 x86_64 SDK 경고는 있었지만 실제 Mach-O minos는 양쪽 15.0이었다.
+- [테스트 릴리스](https://github.com/dding94/poketokenbar-battle/releases/tag/v2.6.0): `gh release create ... --target <위 SHA> --prerelease --latest=false --notes-file <파일>` 종료 0. ZIP `build/release/PokeTokenBarBattle.zip` SHA256 `08a92c13134ef6fe6355a1732a1f76dfc2910ceb62be56b2e3a843c0eb833e90`, 6,531,279B. 공개 curl 다운로드/해시 비교 종료 0, GitHub 자산 digest 일치, prerelease true·태그 대상 SHA 일치. 자체 서명이며 Apple 공증은 없다. 실기 미검증을 통과로 보고하지 않는다.
+- 개인 tap 새 cask Contents API 생성 종료 0, 커밋 `cbd02010fac599515a715c5158cc4ba13a484938`. Homebrew 7.0.10에서 `brew info --cask --json=v2 dding94/tap/poke-token-bar-battle`의 버전/URL/SHA 확인, `brew install --cask --appdir=<임시 폴더> dding94/tap/poke-token-bar-battle` 종료 0. 설치 앱의 release bundle 검사 종료 0. 앱은 실행하지 않았다. 정리에서 NO_INSTALL_FROM_API 설정이 불필요한 core clone을 유발해 해당 정리/자식 다운로드를 종료하고 기본 API 방식으로 재시도, `brew uninstall --cask dding94/tap/poke-token-bar-battle` 종료 0으로 임시 앱을 제거했다. 첫 정리는 종료 1이었고 재시도 후 임시 앱/cask 등록과 추가 core 디렉터리 부재를 확인했다. 기존 앱/실제 세이브는 건드리지 않았다. macOS 최소 버전 문자열 문법의 Homebrew deprecation 경고는 후속 템플릿/cask 갱신 과제로 남긴다(설치 실패 아님).
+- 한국어 `INSTALL-ko.txt` 업로드·노트 갱신 종료 0. 서버 주소·초대코드는 공개하지 않으며 호스트가 별도로 전달한다. 다음은 실제 두 맥 실행·정식전, Free 부하/CPU·복구, 기본 경로 설치/업그레이드 인수다. PR 13 전체는 미완료다. 현재 작업 브랜치는 main이고, 이후 기록용 문서 커밋은 릴리스 태그의 바이너리 소스를 바꾸지 않는다.
+
+### 이전 진행 기록: 2.6.0 테스트판 배포 준비 (2026-11-04)
 
 사용자가 다른 사람의 Homebrew 설치 시험을 위해 무료 자체 서명 `2.6.0` 테스트판 공개를 승인했다. 인증서는 생성/등록 후 첫 신뢰 설정에서 유효하지 않아 완료로 세지 않았으며, 설명 뒤 사용자 재승인에 따라 기존 인증서를 재사용해 trust를 완료했다(재실행 종료 0, 유효 codesigning identity 확인). 비밀키 원문은 읽거나 출력하지 않았다. 공개 대상은 포크 GitHub prerelease와 기존 개인 tap의 새 cask이며 설치·실제 데이터 시험은 별도다. 실제 게시/다운로드/격리 설치 결과는 완료 후 추가한다. 서명 설정 실패 종료 코드 수정은 RED 7건 중 2건 단언 실패(종료 1) → GREEN 7건 통과·skip 0, 변형 2건 실패 후 원복했다. 독립 리뷰 P1/P2 없음. `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_release*.py' -v`는 42건 통과·실패/skip 0·종료 0, bash 구문·release check-only·diff 검사 종료 0. 공개 Git 기록에서 기준 v2.5.6 이후 작성자는 dding94만 확인했고 병합 PR은 없어 외부 기여자 없음으로 노트를 준비했다.
 
@@ -501,8 +510,8 @@ PR 05 실측의 재접속 표본 0·전수 CPU·계정 DO 오류 원인·회사 
 ```text
 이 저장소의 AGENTS.md와 docs/AI_HANDOFF.md, docs/BATTLE_PLAN.md를 읽어줘.
 feat/local-practice-battle 브랜치의 현재 상태를 확인하고,
-PR 13 최종 CI(41784448755, 소스 fe4b9e2)와 개발 Worker 배포 기록을 확인하고 남은 인수·무료 운영 실측/복구·릴리스 준비를 진행해줘.
-개발 Worker는 PR 13 코드지만 설치된 앱은 PR 07이다. 최신 개발 ZIP은 build/PokeTokenBar-Battle-PR13.zip이다.
+2.6.0 테스트판(소스 08559d3, 최종 CI 41792440514)·Homebrew 공개와 개발 Worker 배포 기록을 확인하고 남은 실제 두 맥·무료 운영 실측/복구·정식 릴리스 인수를 진행해줘.
+개발 Worker는 PR 13 코드이며 실제 /Applications 설치 앱은 PR 07이다. 배포용 ZIP은 build/release/PokeTokenBarBattle.zip이고 공개 v2.6.0 Release 및 Homebrew에서 받을 수 있다.
 실제 두 맥 시험은 사용자 요청으로 미실행이다. 이미 승인·완료된 개발 배포를 반복하지 말고, 추가 배포·앱 설치·실기 시험·공개 릴리스는 구체적인 준비 뒤 별도 승인을 받아줘.
 월 0원 조건과 로그인 화면 없는 초대코드 + 닉네임 방식을 유지해줘.
 ```

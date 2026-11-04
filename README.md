@@ -2,7 +2,7 @@
 
 회사 동료끼리 기존에 키운 포켓몬으로 1:1 배틀을 하고, 진 쪽 포켓몬은 기절하며 이긴 쪽은 성장 경험치를 받는 macOS 앱 확장 프로젝트입니다. 배틀로 포켓몬을 빼앗지 않습니다.
 
-**현재 상태: 로컬 연습전과 온라인 정식전·경기 기록/다시보기·그룹 전적판까지 구현하고 자동 검증했습니다. PR 13에서 무료 운영 비용·인수·릴리스 준비를 진행 중입니다. 최신 앱과 서버의 설치/배포 여부는 [AI_HANDOFF](docs/AI_HANDOFF.md)를 확인하세요. 실제 두 맥 인수와 공개 릴리스는 아직 완료하지 않았습니다.**
+**현재 상태: 로컬 연습전과 온라인 정식전·경기 기록/다시보기·그룹 전적판까지 구현하고 자동 검증했습니다. PR 13에서 무료 운영 비용·인수·릴리스 준비를 진행 중입니다. 최신 앱과 서버의 설치/배포 여부는 [AI_HANDOFF](docs/AI_HANDOFF.md)를 확인하세요. 2.6.0 테스트판은 공개했으며 실제 두 맥 인수와 정식 릴리스는 아직 완료하지 않았습니다.**
 
 ## 다른 AI가 작업을 시작할 때
 
@@ -48,7 +48,20 @@ PR 00~07·11~12의 구현·자동 검증을 마쳤습니다(PR 08~10 폐기). �
 
 ## 검증과 배포 상태
 
-자체 서명 **2.6.0 테스트판**과 개인 Homebrew cask를 준비하고 있습니다. 게시·다운로드 확인 뒤 설치 명령을 추가합니다. Apple 공증과 실제 두 맥 인수 검증은 미완료입니다. PR 13의 ad-hoc 개발 ZIP과 이번 자체 서명 테스트판은 구분합니다. 설치 없는 로컬 준비는 `./scripts/release.sh --check-only`, 노트/버전 검토는 `--prepare <version>`이며 자세한 경계와 백업 절차는 [RELEASE.md](RELEASE.md)를 따릅니다. 실제 서명 빌드·설치·외부 게시에는 별도 확인이 필요합니다.
+자체 서명 **[2.6.0 테스트판](https://github.com/dding94/poketokenbar-battle/releases/tag/v2.6.0)**을 공개했습니다. **macOS 15 이상**, Apple Silicon·Intel을 지원합니다.
+
+```bash
+brew install --cask dding94/tap/poke-token-bar-battle
+open -a "PokeTokenBar Battle"
+```
+
+업데이트는 `brew update` 후 `brew upgrade --cask poke-token-bar-battle`입니다. 수동 설치한 포크가 이미 있으면 먼저 앱과 포크 세이브를 백업하세요. 강제 덮어쓰기는 하지 마세요.
+
+Apple 공증된 앱은 아닙니다. 첫 실행이 차단되면 [Apple 안내](https://support.apple.com/en-gb/102445)에 따라 시스템 설정 → 개인정보 보호 및 보안에서 이 앱의 실행을 허용할 수 있습니다. 받는 맥에 인증서를 따로 설치하거나 Gatekeeper를 끄지 않습니다. 회사 정책으로 실행이 제한될 수 있습니다.
+
+온라인 배틀 화면에서 방장이 별도로 보낸 HTTPS 서버 주소를 입력하고 **서버 주소 적용**을 누른 뒤 초대코드·닉네임으로 **그룹 참여**를 누르세요. Keychain 접근 비활성화 설정이 켜져 있으면 온라인 연결이 중단됩니다. 서버 주소·초대코드는 공개 파일에 넣지 않습니다. [한국어 설치·시험 안내 파일](https://github.com/dding94/poketokenbar-battle/releases/download/v2.6.0/INSTALL-ko.txt)도 제공합니다.
+
+공개 ZIP의 SHA-256과 Homebrew 임시 폴더 설치·서명 검증을 확인했습니다. 앱을 실행한 두 맥 시험·실제 기본 경로 업그레이드·Free 운영 부하/복구는 미검증이며 PR 13 전체 완료는 아닙니다. 자세한 준비·백업 절차는 [RELEASE.md](RELEASE.md)를 따릅니다.
 
 `npm test --prefix engine`과 `cd engine && npm run corpus && npm run compatibility`로 엔진을 검증합니다. Node와 JavaScriptCore의 같은 2,200판을 로컬 macOS 26.5 및 CI macOS 15·26에서 실행했습니다. 정책 auto-v2(standard는 v1과 같음)는 불일치·재생·상태 복원 실패 0건입니다. BW2 541개 기술 호출 검사는 모든 조건별 효과 조합을 증명하지 않습니다.
 

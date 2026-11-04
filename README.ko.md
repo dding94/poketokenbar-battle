@@ -1,4 +1,4 @@
-> **Battle 포크 안내:** 이 저장소는 `dding94/poketokenbar-battle`이며 최소 macOS 15입니다. 아래 기존 육성 앱 소개는 upstream에서 가져온 설명입니다. 온라인 기능의 최신 구현/검증 상태는 [AI_HANDOFF](docs/AI_HANDOFF.md), 설치·공개 경계는 [RELEASE.md](RELEASE.md)를 따릅니다. 공개 배포/두 맥 검증은 아직 완료되지 않았습니다.
+> **Battle 포크 안내:** 이 저장소는 `dding94/poketokenbar-battle`이며 최소 macOS 15입니다. 아래 기존 육성 앱 소개는 upstream에서 가져온 설명입니다. 온라인 기능의 최신 구현/검증 상태는 [AI_HANDOFF](docs/AI_HANDOFF.md), 설치·공개 경계는 [RELEASE.md](RELEASE.md)를 따릅니다. 2.6.0 테스트판을 공개했으며 실제 두 맥 검증은 아직 완료되지 않았습니다.
 
 <div align="center">
 
@@ -217,7 +217,20 @@ Pi는 모델 여러 개를 세션 로그 하나로 흘려보낼 수 있습니다
 
 ## 설치와 릴리스 준비
 
-포크 최소 지원은 **macOS 15+**, Apple Silicon과 Intel입니다. 자체 서명 **2.6.0 테스트판**과 개인 Homebrew cask를 준비 중이며 게시 확인 뒤 설치 명령을 제공합니다. Apple 공증·실제 두 맥 검증은 미완료입니다. 첫 실행 때 macOS의 실행 허용이 필요할 수 있습니다. [RELEASE.md](RELEASE.md)를 확인하세요.
+자체 서명 **[2.6.0 테스트판](https://github.com/dding94/poketokenbar-battle/releases/tag/v2.6.0)**을 공개했습니다. **macOS 15 이상**, Apple Silicon·Intel을 지원합니다.
+
+```bash
+brew install --cask dding94/tap/poke-token-bar-battle
+open -a "PokeTokenBar Battle"
+```
+
+업데이트는 `brew update` 후 `brew upgrade --cask poke-token-bar-battle`입니다. 수동 설치한 포크가 이미 있으면 먼저 앱과 포크 세이브를 백업하세요. 강제 덮어쓰기는 하지 마세요.
+
+Apple 공증된 앱은 아닙니다. 첫 실행이 차단되면 [Apple 안내](https://support.apple.com/en-gb/102445)에 따라 시스템 설정 → 개인정보 보호 및 보안에서 이 앱의 실행을 허용할 수 있습니다. 받는 맥에 인증서를 따로 설치하거나 Gatekeeper를 끄지 않습니다. 회사 정책으로 실행이 제한될 수 있습니다.
+
+온라인 배틀 화면에서 방장이 별도로 보낸 HTTPS 서버 주소를 입력하고 **서버 주소 적용**을 누른 뒤 초대코드·닉네임으로 **그룹 참여**를 누르세요. Keychain 접근 비활성화 설정이 켜져 있으면 온라인 연결이 중단됩니다. 서버 주소·초대코드는 공개 파일에 넣지 않습니다. [한국어 설치·시험 안내 파일](https://github.com/dding94/poketokenbar-battle/releases/download/v2.6.0/INSTALL-ko.txt)도 제공합니다.
+
+공개 ZIP의 SHA-256과 Homebrew 임시 폴더 설치·서명 검증을 확인했습니다. 앱을 실행한 두 맥 시험·실제 기본 경로 업그레이드·Free 운영 부하/복구는 미검증이며 PR 13 전체 완료는 아닙니다. 자세한 준비·백업 절차는 [RELEASE.md](RELEASE.md)를 따릅니다.
 
 설치 없이 소스 번들만 만들려면:
 

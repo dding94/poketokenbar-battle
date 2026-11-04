@@ -1,4 +1,4 @@
-> **Battle フォーク:** このリポジトリは `dding94/poketokenbar-battle`、必要環境は macOS 15 以降です。以下の育成アプリの紹介は upstream 由来です。オンライン機能の現在の実装・検証状況は [AI_HANDOFF](docs/AI_HANDOFF.md)、インストール・公開の境界は [RELEASE.md](RELEASE.md) を参照してください。公開配布と2台のMacによる検証は未完了です。
+> **Battle フォーク:** このリポジトリは `dding94/poketokenbar-battle`、必要環境は macOS 15 以降です。以下の育成アプリの紹介は upstream 由来です。オンライン機能の現在の実装・検証状況は [AI_HANDOFF](docs/AI_HANDOFF.md)、インストール・公開の境界は [RELEASE.md](RELEASE.md) を参照してください。2.6.0テスト版を公開しました。2台のMacによる実機検証は未完了です。
 
 <div align="center">
 
@@ -217,7 +217,18 @@ Pi は複数のモデルを一つのセッションログに流すことがあ�
 
 ## インストールとリリース準備
 
-必要環境は **macOS 15+**、Apple Silicon または Intel です。自己署名の **2.6.0 テスト版**と個人 Homebrew cask を準備中です。公開確認後にインストールコマンドを案内します。Apple 公証と2台のMacによる検証は未完了で、初回起動時にmacOSの許可が必要な場合があります。[RELEASE.md](RELEASE.md) を参照してください。
+自己署名の **[2.6.0テスト版](https://github.com/dding94/poketokenbar-battle/releases/tag/v2.6.0)** を公開しました。macOS 15以降、Apple Silicon・Intelに対応します。
+
+```bash
+brew install --cask dding94/tap/poke-token-bar-battle
+open -a "PokeTokenBar Battle"
+```
+
+更新は `brew update` の後に `brew upgrade --cask poke-token-bar-battle` を実行します。手動インストール済みの場合はアプリとフォークのセーブを先にバックアップしてください。Apple公証はありません。初回起動が制限された場合は[Appleの案内](https://support.apple.com/en-gb/102445)に従って設定から許可してください。証明書の追加やGatekeeperの無効化は不要です。管理されたMacでは利用が制限される場合があります。
+
+オンライン対戦画面でホストから別途届くHTTPSサーバーURLを適用し、招待コードとニックネームでグループに参加してください。Keychainアクセス無効化中は接続できません。サーバーURL・招待コードは公開しません。
+
+公開ZIPのハッシュと一時フォルダーへのHomebrewインストール・署名を確認しました。2台のMac、実際のアップグレード、Free環境の負荷・復旧は未検証です。[RELEASE.md](RELEASE.md)を参照してください。
 
 インストールせずソースからバンドルを作る場合:
 
