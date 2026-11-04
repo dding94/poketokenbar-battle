@@ -74,7 +74,7 @@ for layout in shared distinct; do
     grep -qx 'combined:arm64 x86_64' "$repo/calls.log"
     [[ "$(cat "$repo/build/PokeTokenBar Battle.app/Contents/MacOS/PokeTokenBarBattle")" == 'arm64 x86_64' ]]
     grep -q '<key>CFBundleShortVersionString</key><string>9.8.7</string>' "$repo/build/PokeTokenBar Battle.app/Contents/Info.plist"
-    grep -qx 'VERSION="2.5.6"' "$repo/scripts/build-app.sh"
+    cmp "$ROOT/scripts/build-app.sh" "$repo/scripts/build-app.sh"
     ! grep -Eq '^pkill |/Applications' "$repo/calls.log"
     [[ -z "$(ls -A "$repo/tmp")" ]] || { echo 'FAIL: temporary slices were not removed' >&2; exit 1; }
     echo "PASS: $layout outputs preserve both slices, skip installation, and clean temporary files"
