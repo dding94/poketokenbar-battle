@@ -267,6 +267,18 @@ final class OnlineBattleSessionTests: XCTestCase {
         XCTAssertNil(session.presentation.selectedHistoryBattle)
         XCTAssertFalse(session.presentation.showsHistory)
     }
+    func testHistoryCancelledDeclinedAndExpiredRoomsHaveSummaryWithoutReplay() async throws {
+        for state in ["CANCELLED", "DECLINED", "EXPIRED"] {
+            let room = try changed(battle(), ["state": state, "config": NSNull(), "result": NSNull(), "journal": [], "roundSeq": 0])
+            let (session, _, _, effects) = try await setup([room])
+            await session.bootstrap()
+            await session.perform(.openReplay(room.battleId))
+            XCTAssertEqual(session.presentation.selectedHistoryBattle?.battleId, room.battleId)
+            XCTAssertNil(session.presentation.replay)
+            XCTAssertTrue(session.presentation.historyError?.contains("시작 전에 종료") == true)
+            XCTAssertEqual(effects.effectCalls, 0)
+        }
+    }
     func testHistoryVoidKeepsSummaryWithoutReplayingAndUnknownIDCannotSelect() async throws {
         let room = try changed(battle(), ["state": "VOID", "result": NSNull()])
         let (session, http, _, effects) = try await setup([room])

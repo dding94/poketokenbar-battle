@@ -30,4 +30,17 @@ final class OnlineBattleHistoryTextTests: XCTestCase {
         XCTAssertEqual(OnlineBattleHistoryText.logs(["|-future-private-tag|p1a: name|SECRET"], localSide: .p1), ["전투 효과가 처리되었습니다."])
     }
 
+    func testRecoveryEffectivenessAndStatChangesHaveKoreanMessages() {
+        let raw = ["|-heal|p1a: private|100/120", "|-curestatus|p2a: private|par",
+                   "|-supereffective|p2a: private", "|-resisted|p1a: private",
+                   "|-unboost|p2a: private|spe|1", "|-boost|p1a: private|atk|2",
+                   "|-status|p2a: private|new-status", "|-boost|p1a: private|new-stat|1"]
+        XCTAssertEqual(OnlineBattleHistoryText.logs(raw, localSide: .p1), [
+            "내 포켓몬 · 체력을 회복했습니다 (HP 100/120).", "상대 포켓몬 · 상태이상이 회복됐습니다.",
+            "효과가 굉장합니다!", "효과가 별로입니다.", "상대 포켓몬 · 스피드 하락", "내 포켓몬 · 공격 상승",
+            "상대 포켓몬 · 상태이상 상태가 되었습니다.", "내 포켓몬 · 능력치 상승"
+        ])
+        XCTAssertTrue(OnlineBattleHistoryText.logs(["malformed", "|", "|metadata|p1a: private|secret"], localSide: .p1).isEmpty)
+    }
+
 }

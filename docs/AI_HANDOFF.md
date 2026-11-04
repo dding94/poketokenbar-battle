@@ -8,7 +8,15 @@
 
 시작 상태: `feat/local-practice-battle`은 origin과 동일하며 기존 미커밋 `AI_HANDOFF.md`의 합성 fixture 준비 기록을 보존했다. 초대코드 발급은 사용자가 완료를 알렸고 실제 가입·경기는 확인하지 않았다. 사용자는 구버전 엔진을 앱에 함께 보관하는 방식을 승인했다(2026-11-04). 구현 계약은 BATTLE_PLAN 부록 F에 먼저 기록했다. Core 재생/엔진 보관과 UI를 분리해 진행하고 라이브 세션 연결은 운영자가 통합한다.
 
-PR 11 사전 조사: 기존 `OnlineBattleAPI.listBattles()`가 서버 페이지를 모두 읽으며 `battle(id:)`도 있다. `OnlineBattleSession.process`는 COMPLETED 효과 적용과 VOID 잠금 해제를 수행하므로 기록 탐색/재생에서 호출하지 않는다. 재생 상태를 라이브 화면 갱신과 분리하고 `OnlineBattleResolver`의 journal 재생·viewer 로그를 재사용한다. 현재 로그는 UI에 연결되지 않았으며 `PracticeEventParser`는 미지원 줄을 버리므로 미번역 대체 표시를 별도로 검증해야 한다. 서버 `expiresAt`은 신청 만료이며 기록 보관 만료로 표시하지 않는다. 조사만 완료했고 PR 11 기능 테스트·코드 구현은 아직 없다. 이번 상태 문서 변경은 `git diff --check` 종료 0; 새 테스트 실행 0건이며 통과로 세지 않는다.
+PR 11 구현·독립 리뷰 완료, 최종 CI/공용 번들 검증 진행 중. 구버전 엔진의 바이트/버전을 고정해 앱에 보관하고 현재 엔진은 중복 포장하지 않는다. 종료 경기 요약, 장면별 다시보기, 한국어 로그, p2 관점/기술·특성 공개, 엔진 없음/손상 안내를 추가했다. 읽기 전용 기록 색인·재생 프레임은 라이브 방/정산과 분리했다. 서버 API·스키마·실제 저장소는 바꾸지 않았다.
+
+- 계약 `c908885` → Core RED `f861ca4`(12건·단언 실패 31), Session RED `131b729`(5건·단언 실패 10), UI RED `ec6e8ba`(1건·단언 실패 2) → GREEN/리뷰 수정. Session 첫 RED는 API stub을 임시로 함께 컴파일했고 정식 stub 커밋은 테스트 직후 통합했다. 컴파일 실패/환경 제한 실행 0건은 RED로 세지 않았다.
+- 최종 로컬 명령: 명령별 `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`, 임시 `PTB_STATE_DIR`/`CLANG_MODULE_CACHE_PATH`에서 `swift test --disable-sandbox --scratch-path /private/tmp/ptb-pr07-clean-build --jobs 2 --enable-code-coverage --filter 'OnlineBattle|BattleEngineTests|BattleEngineArchiveTests|SaveTransferTests|PracticeStakesStoreTests|SaveSnapshot|PracticeLaunchTests|LocalizedUILiteralTests'`. **종료 0, 267건 통과·실패/skip 0**. `check-test-filter.sh` 종료 0. 진행 중 로그를 먼저 검사한 필터 확인은 종료 1이었으며 완료 로그로 다시 검사했다. 로컬 OCR은 실행하지 않았다.
+- `llvm-cov show --show-regions`에서 새 핵심 분기를 직접 확인했고 빠졌던 회복/상성 문구·시작 전 종료·201행 입력 거절 테스트를 보강했다. 기본 Bundle.main 기반 replay factory와 정상 resolver가 nil view를 주는 방어 분기는 로컬 미실행이다. 리소스 조회/해시 검증은 주입한 임시 번들 경로에서 별도로 검증했다.
+- 가드 제거/원복: Core 엔진 식별·결과 대조·체크섬 각 1건 테스트에서 단언 실패 2/3/1, Session 숨은 라이브 행동 1건·단언 실패 1, UI 공개 필터 제거 2건·단언 실패 7(각 종료 1). 현재 manifest만 미래 값으로 바꾼 실험에서 과거 보관 엔진 재생/확정 검증은 성공하고 라이브 사용은 거절됐다(1건 종료 0). 실제 서로 다른 과거 버전 모두를 검증한 것은 아니다.
+- 독립 리뷰 지적: 엔진 미지원 미적용 경기 때문에 기록 전체가 숨는 문제와 재생 카드 slug 누락. 회귀 RED 후 수정했고 최종 리뷰에 남은 지적은 없다(리뷰어 별도 테스트 실행 없음). 수정 중 무조건 화면 재발행으로 기존 복구 테스트 단언 2건이 실패했고 인증/계정 가드로 고쳤다. 키 폐기 뒤 늦은 응답의 목록 재발행도 RED 1건·단언 실패 1 후 수정했다. 원인/스윕은 defect-log.
+- `bash scripts/test-battle-engine-archive.sh` 4개 시나리오, `bash scripts/test-build-app-slices.sh` 2개 레이아웃, 관련 `bash -n`·workflow YAML 파싱·`git diff --check` 모두 종료 0. 보관 바이트는 해시를 위해 그대로 두고 generated 속성을 부여했다.
+- 합성 SwiftUI 전후/기록/재생 이미지는 `build/pr11/screenshots/`에 생성·시각 검토했다. 실제 스프라이트/메타데이터 다운로드는 하지 않았고 일부 이름은 영어 대체 표시다. 실제 앱 클릭/두 맥 증거가 아니다. 설치/개발 Worker 추가 배포는 하지 않았다. 공용 번들 첫 시도는 SwiftPM 실행 제한으로 종료 1·테스트 0건이었고 허용된 빌드 재시도 중이다.
 
 ### 전달 전 후속 수정(2026-11-02)
 

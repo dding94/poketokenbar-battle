@@ -126,4 +126,16 @@ final class OnlineBattleReplayTests: XCTestCase {
         }
     }
 
+    @MainActor func testOversizedJournalIsRejectedBeforeLoadingAnyEngine() throws {
+        let source = try fixtures()[0].battle
+        let row = try XCTUnwrap((JSONSerialization.jsonObject(with: BattleJSON.encoder().encode(source.journal)) as? [Any])?.first)
+        let oversized = try changed(source) { $0["journal"] = Array(repeating: row, count: 201) }
+        var loads = 0
+        XCTAssertThrowsError(try OnlineBattleReplay(battle: oversized, localTrainerID: "trainer-one", engineFactory: { hash in
+            loads += 1
+            return try self.engine(hash)
+        })) { XCTAssertEqual($0 as? OnlineBattleReplay.Failure, .verificationFailed) }
+        XCTAssertEqual(loads, 0)
+    }
+
 }
