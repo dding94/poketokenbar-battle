@@ -1175,7 +1175,7 @@ API(`/v1`, JSON 본문, 응답은 `cache-control: no-store`):
 - journalHash 정규 바이트: `JSON.stringify(["relay-v1",battleId,readyToken,journal.map(r => [r.roundSeq,token(r.p1),token(r.p2)])])`의 UTF-8을 SHA-256한다. token은 move이면 `["move",slot]`, 그 밖에는 `["timeout"]` 또는 `["policy"]`다. 라운드는 순번 오름차순이고 releasedAt은 해시에서 제외한다. 서버는 이 직렬화 계약을 제공하되 앱 보고끼리 비교한다.
 - 앱 resolver(PR 07): 공개 pair를 항상 p1→p2 순서로 적용한다. timeout/policy는 동일 상태의 `autoChoice` 결과를 사용한다. forced는 엔진이 요구하는 강제 행동으로 처리한다. 숨은 기술 봉인 등으로 명시 선택이 거절되면 갱신된 request에서 자동 선택으로 결정적으로 재시도하며 최대 5회로 제한한다. 실패하면 결과를 확정하지 않는다. 엔진 inputLog에는 실제 승인된 슬롯이 남고 서버 journal에는 원래 pair가 남는다.
 - 다음 라운드는 참가자 한 명이 공개 pair를 계산한 뒤 advance해야 열린다. 같은 processedRoundSeq의 재시도나 뒤늦은 상대 advance가 새 라운드를 중복 생성하지 않는다. 두 앱이 모두 꺼지면 공개된 pair에서 기다리고 시작 후 72시간 기한을 따른다. 서버가 전투 종료나 다음 상태를 추정하지 않는다. 200번 이후 advance는 거절하고 종료 보고를 기다린다.
-- `battle_changed` 알림은 `{v:1,type,battleId,state,revision}`으로 참가자에게만, `battle_round`는 공개 pair를 두 참가자에게만 보낸다. 첫 선택에는 알림이 없다. 알림이 유실돼도 HTTP 조회로 복원한다. VOID의 불일치 사실은 같은 그룹에 `{v:1,type:"battle_void",battleId,reason:"result_mismatch"}`만 알린다(키·이메일·보고 원문 없음).
+- `battle_changed` 알림은 `{v:1,type,battleId,state,revision,roundSeq,deadline}`으로 참가자에게만, `battle_round`는 공개 pair를 두 참가자에게만 보낸다. `roundSeq`·`deadline`은 PR 13에서 추가한 공개 정보이며 RUNNING이 아니면 deadline은 null이다. 이전 서버의 필드 누락은 HTTP 조회로 대체한다(H.6). 첫 선택에는 알림이 없다. 알림이 유실돼도 HTTP 조회로 복원한다. VOID의 불일치 사실은 같은 그룹에 `{v:1,type:"battle_void",battleId,reason:"result_mismatch"}`만 알린다(키·이메일·보고 원문 없음).
 
 ### D.6 결과·원자성·탈퇴
 
