@@ -124,8 +124,8 @@ fi
 
 # CI is the full-suite criterion. Do not run local OCR or an unisolated/opt-out native test gate.
 # This selector is verified against GitHub's run/jobs/logs API; it is never a manual assertion.
-python3 scripts/release-ci.py "${PTB_CI_RUN_ID:-}"
 CI_HEAD=$(git rev-parse HEAD)
+python3 scripts/release-ci.py "${PTB_CI_RUN_ID:-}"
 
 # Public identity metadata only; no certificate creation or secret lookup.
 SIGN_IDENTITY="${CODESIGN_IDENTITY:-PokeTokenBar Battle Local}"
@@ -143,10 +143,8 @@ PTB_SKIP_INSTALL=1 PTB_NATIVE_ARCH_ONLY=0 PTB_REQUIRE_STABLE_SIGN=1 \
   PTB_RELEASE_VERSION="$VERSION" CODESIGN_IDENTITY="$SIGN_IDENTITY" ./scripts/build-app.sh
 APP="build/$APP_NAME.app"
 python3 scripts/release-validate.py bundle . "$APP" "$VERSION" "$EXPECTED_LEAF"
-# Build outputs are ignored, but any tracked source change invalidates exact-HEAD evidence.
-[[ "$(git rev-parse HEAD)" == "$CI_HEAD" && -z "$(git status --porcelain --untracked-files=no)" ]] || {
-  echo 'Source changed during build; CI evidence no longer matches' >&2; exit 1;
-}
+# Reuse the preflight boundary: newly added source is just as unverified as a tracked edit.
+python3 scripts/release-ci.py --check-source "$CI_HEAD"
 ZIP="build/release/$EXEC_NAME.zip"
 ditto -c -k --keepParent "$APP" "$ZIP"
 ZIP_SHA=$(shasum -a 256 "$ZIP" | awk '{print $1}')

@@ -120,7 +120,10 @@ def verify(run_id):
 
 if __name__ == '__main__':
     try:
-        require(len(sys.argv) == 2, 'Use release-ci.py PTB_CI_RUN_ID')
-        verify(sys.argv[1])
+        if len(sys.argv) == 3 and sys.argv[1] == '--check-source':
+            require(clean_head() == sys.argv[2], 'Source HEAD changed during build')
+        else:
+            require(len(sys.argv) == 2, 'Use release-ci.py PTB_CI_RUN_ID | --check-source EXPECTED_HEAD')
+            verify(sys.argv[1])
     except (ValueError, KeyError, TypeError, OSError, subprocess.SubprocessError) as error:
         sys.exit(f'Release CI: {error}')
