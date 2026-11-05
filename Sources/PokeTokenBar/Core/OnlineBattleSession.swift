@@ -235,7 +235,9 @@ final class OnlineBattleSession {
         let deadline: Double?
         let pair: OnlineBattlePair?
         let hasDeadline: Bool
-        private enum CodingKeys: String, CodingKey { case type, state, revision, roundSeq, deadline, pair }
+        /// True only when the server says the other seat's first choice for this round is in; absent or anything else is false.
+        let opponentSubmitted: Bool
+        private enum CodingKeys: String, CodingKey { case type, state, revision, roundSeq, deadline, pair, opponentSubmitted }
         init(from decoder: Decoder) throws {
             let box = try decoder.container(keyedBy: CodingKeys.self)
             type = try box.decode(String.self, forKey: .type)
@@ -245,6 +247,7 @@ final class OnlineBattleSession {
             deadline = try box.decodeIfPresent(Double.self, forKey: .deadline)
             pair = try box.decodeIfPresent(OnlineBattlePair.self, forKey: .pair)
             hasDeadline = box.contains(.deadline)
+            opponentSubmitted = (try? box.decodeIfPresent(Bool.self, forKey: .opponentSubmitted)) == true
         }
     }
     private func consumeNotification(_ payload: Data, battleID id: String, account: OnlineBattleAccount, epoch: UInt64) async {
@@ -295,12 +298,23 @@ final class OnlineBattleSession {
                 // Earlier open/closed messages can arrive behind our own newer HTTP response.
                 if seq < room.roundSeq { return }
                 if seq == room.roundSeq {
-                    if seq <= room.journal.count || notice.deadline == room.deadline { return }
+                    if seq <= room.journal.count { return }
+                    if notice.deadline == room.deadline {
+                        // The first-choice signal: same round and deadline, one more fact. No read is needed to show it.
+                        if notice.opponentSubmitted, room.mode == .manual, room.deadline != nil, room.opponentSubmitted != true {
+                            var marked = room; marked.opponentSubmitted = true
+                            views[id] = marked; publish()
+                        }
+                        return
+                    }
                 }
                 if room.mode == .manual, seq == room.roundSeq + 1, seq == resolver.processedRoundSeq + 1,
                    let deadline = notice.deadline, deadline.isFinite, deadline <= 9_007_199_254_740_991,
                    let releasedAt = room.journal.last?.releasedAt, deadline > releasedAt {
-                    views[id] = room.relayView(roundSeq: seq, deadline: deadline, ownChoice: nil, journal: room.journal)
+                    var opened = room.relayView(roundSeq: seq, deadline: deadline, ownChoice: nil, journal: room.journal)
+                    // relayView starts a round with no signal; a first-choice notice that outran its open notice carries it.
+                    if notice.opponentSubmitted { opened.opponentSubmitted = true }
+                    views[id] = opened
                     cancelFallback(id); publish(); return
                 }
             }
