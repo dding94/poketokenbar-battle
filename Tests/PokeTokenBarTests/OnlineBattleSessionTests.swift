@@ -273,7 +273,7 @@ final class OnlineBattleSessionTests: XCTestCase {
         let (session, http, _, _) = try await setup([source], trainer: "trainer-two")
         let member = OnlineBattleMember(trainerId: "trainer-one", displayEmail: "opponent@example.invalid", role: .member, status: .active, joinedAt: 0, online: false)
         await http.route("/v1/group", try JSONEncoder().encode(OnlineBattleGroupMembers(group: account.group, members: [member])))
-        await session.bootstrap(); await session.perform(.prepareRematch(source.battleId))
+        await session.bootstrap(); await session.perform(.openBattle(source.battleId)); await session.perform(.prepareRematch(source.battleId))
         XCTAssertEqual(session.presentation.rematchOpponent?.trainerId, "trainer-one")
         XCTAssertEqual(session.presentation.rematchMode, source.mode)
         XCTAssertTrue(session.presentation.canSubmitRematch)
@@ -283,7 +283,7 @@ final class OnlineBattleSessionTests: XCTestCase {
         let source = try battle(), pending = try changed(rematchPending(battle()), ["rematchOf": "bt_other_source"])
         let (session, http, _, _) = try await setup([source])
         try await activeOpponent(http)
-        await session.bootstrap(); await session.perform(.prepareRematch(source.battleId))
+        await session.bootstrap(); await session.perform(.openBattle(source.battleId)); await session.perform(.prepareRematch(source.battleId))
         session.presentation.selectedEntryID = "instance-one"
         await session.perform(.submitRematch)
         await http.route("/v1/battles", try JSONEncoder().encode(OnlineBattlePage(battles: [source, pending], before: nil)))
@@ -350,7 +350,7 @@ final class OnlineBattleSessionTests: XCTestCase {
         let pending = try rematchPending(source)
         let (session, http, _, effects) = try await setup([source])
         try await activeOpponent(http)
-        await session.bootstrap(); await session.perform(.prepareRematch(source.battleId))
+        await session.bootstrap(); await session.perform(.openBattle(source.battleId)); await session.perform(.prepareRematch(source.battleId))
         session.presentation.selectedEntryID = "instance-one"
         let path = "/v1/battles/\(source.battleId)/rematch"
         await http.queue(path, [.init(status: 503, body: Data()), try response(pending)])
@@ -373,7 +373,7 @@ final class OnlineBattleSessionTests: XCTestCase {
         let pending = try rematchPending(source)
         let (session, http, _, effects) = try await setup([source])
         try await activeOpponent(http)
-        await session.bootstrap(); await session.perform(.prepareRematch(source.battleId))
+        await session.bootstrap(); await session.perform(.openBattle(source.battleId)); await session.perform(.prepareRematch(source.battleId))
         session.presentation.selectedEntryID = "instance-one"
         await session.perform(.submitRematch) // Lost response; the server created the room.
         await http.route("/v1/battles", try JSONEncoder().encode(OnlineBattlePage(battles: [source, pending], before: nil)))
@@ -388,7 +388,7 @@ final class OnlineBattleSessionTests: XCTestCase {
         let source = try battle(), pending = try rematchPending(battle())
         let (session, http, _, effects) = try await setup([source])
         try await activeOpponent(http)
-        await session.bootstrap(); await session.perform(.prepareRematch(source.battleId))
+        await session.bootstrap(); await session.perform(.openBattle(source.battleId)); await session.perform(.prepareRematch(source.battleId))
         session.presentation.selectedEntryID = "instance-one"
         await session.perform(.submitRematch)
         await http.route("/v1/battles", try JSONEncoder().encode(OnlineBattlePage(battles: [source, pending], before: nil)))
@@ -406,7 +406,7 @@ final class OnlineBattleSessionTests: XCTestCase {
             let source = try battle(), pending = try rematchPending(battle())
             let (session, http, _, effects) = try await setup([source])
             try await activeOpponent(http)
-            await session.bootstrap(); await session.perform(.prepareRematch(source.battleId))
+            await session.bootstrap(); await session.perform(.openBattle(source.battleId)); await session.perform(.prepareRematch(source.battleId))
             session.presentation.selectedEntryID = "instance-one"
             await session.perform(.submitRematch)
             effects.setHealthShare(0.5, of: "instance-one")
@@ -425,7 +425,7 @@ final class OnlineBattleSessionTests: XCTestCase {
         let source = try battle(), pending = try rematchPending(battle())
         let (session, http, _, _) = try await setup([source])
         try await activeOpponent(http)
-        await session.bootstrap(); await session.perform(.prepareRematch(source.battleId))
+        await session.bootstrap(); await session.perform(.openBattle(source.battleId)); await session.perform(.prepareRematch(source.battleId))
         session.presentation.selectedEntryID = "instance-one"
         await http.suspendNext("/v1/battles/\(source.battleId)/rematch")
         let submit = Task { await session.perform(.submitRematch) }
@@ -473,7 +473,7 @@ final class OnlineBattleSessionTests: XCTestCase {
         let source = try battle()
         let (session, http, _, effects) = try await setup([source])
         try await activeOpponent(http)
-        await session.bootstrap()
+        await session.bootstrap(); await session.perform(.openBattle(source.battleId))
         XCTAssertTrue(session.presentation.canRematch(source))
         for candidate in session.presentation.roster { effects.setHealthShare(0, of: candidate.id) }
         await session.perform(.prepareRematch(source.battleId))
@@ -499,7 +499,7 @@ final class OnlineBattleSessionTests: XCTestCase {
         let pending = try rematchPending(source)
         let (session, http, _, effects) = try await setup([source])
         try await activeOpponent(http)
-        await session.bootstrap(); await session.perform(.prepareRematch(source.battleId))
+        await session.bootstrap(); await session.perform(.openBattle(source.battleId)); await session.perform(.prepareRematch(source.battleId))
         session.presentation.selectedEntryID = "instance-one"
         let cancelled = try changed(pending, ["state": "CANCELLED"])
         await http.route("/v1/battles/bt_rematch/cancel", try JSONEncoder().encode(cancelled))
@@ -835,7 +835,7 @@ final class OnlineBattleSessionTests: XCTestCase {
     func testCompletedJournalIsVerifiedBeforeApplyingAndDuplicateRefreshDoesNotPayAgain() async throws {
         let room = try battle()
         let (session, _, _, effects) = try await setup([room])
-        await session.bootstrap(); await session.refresh()
+        await session.bootstrap(); await session.refresh(); await session.perform(.openBattle(room.battleId))
         XCTAssertEqual(effects.applications, 1)
         XCTAssertEqual(effects.state.onlineBattleReceipts.first?.localInstanceID, "instance-one")
         XCTAssertEqual(session.presentation.result?.xpAwarded, 0, "no current growth recipient")
@@ -1214,6 +1214,8 @@ final class OnlineBattleSessionTests: XCTestCase {
         let (session, _, _, _) = try await setup([room], effects: effects); await session.bootstrap()
         XCTAssertTrue(effects.state.onlineBattleHolds.isEmpty)
         XCTAssertEqual(effects.applications, 0)
+        XCTAssertNil(session.presentation.result, "It ended while the app was off, so it waits in the history")
+        await session.perform(.openBattle(room.battleId))
         XCTAssertTrue(session.presentation.result?.isVoid == true)
     }
     func testCompletedCannotBeDowngradedByDelayedRunningView() async throws {

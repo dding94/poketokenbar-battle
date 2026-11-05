@@ -719,7 +719,8 @@ final class OnlineBattleSession {
         // It also outranks a waiting room, but never takes the screen from another match or its result.
         if let pinned = pinnedBattleID.flatMap({ views[$0] }),
            inPlay == nil || ![.pending, .accepted, .ready, .declined, .cancelled, .expired].contains(pinned.state) { return pinned }
-        return inPlay ?? live.first(where: { $0.state.isActive }) ?? live.first
+        // A finished room is shown only as the pinned one above: a match watched ending here, not an old one found at launch.
+        return inPlay ?? live.first(where: { $0.state.isActive })
     }
     private func publish() {
         syncStages()
