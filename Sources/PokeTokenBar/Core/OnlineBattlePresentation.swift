@@ -9,6 +9,8 @@ final class OnlineBattlePresentation {
     var phase: Phase = .setup
     var connectionStatus = ""
     var notice: String?
+    /// macOS notification guidance owned by the online notifier; nil when nothing needs saying.
+    var notificationHint: OnlineNotificationHint?
     var isBusy = false
     var serverAddress = ""
     /// True when the build fixed the server address (T08); T09 hides manual address entry.

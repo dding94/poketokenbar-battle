@@ -54,6 +54,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         route(navigation)
     }
 
+    /// Route for a clicked online notification: the online screen, on top of the reset to Home.
+    static func openOnlineScreen(_ navigation: PopoverNavigation) {}
+
     /// 메뉴바 첫 줄 끝에 연습전 배지를 붙인다. 줄이 없으면 배지만 한 줄로 둔다.
     nonisolated static func menuLines(_ lines: [String], badge: String?) -> [String] {
         guard let badge else { return lines }

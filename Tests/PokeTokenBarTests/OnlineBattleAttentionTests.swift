@@ -280,9 +280,9 @@ final class OnlineBattleAttentionTests: XCTestCase {
 
     // MARK: Notification eligibility
 
-    func testOnlyFourKindsCanBecomeANotification() {
+    func testOnlyFiveKindsCanBecomeANotification() {
         XCTAssertEqual(Set(OnlineAttentionKind.allCases.compactMap { $0.notifiable?.rawValue }),
-                       ["incomingChallenge", "challengeAccepted", "finalConfirmed", "myTurn"])
+                       ["incomingChallenge", "challengeAccepted", "finalConfirmed", "myTurn", "rematchRequested"])
         XCTAssertEqual(OnlineAttentionKind.allCases.count, 7)
         for kind in OnlineAttentionKind.allCases {
             let attention = OnlineAttention(kind: kind, battleId: "bt", revision: 1, roundSeq: 0, opponentName: nil, deadline: nil)
@@ -290,10 +290,13 @@ final class OnlineBattleAttentionTests: XCTestCase {
         }
     }
 
-    func testInAppKindsAreRaisedWithoutANotice() {
+    func testARematchRequestIsRaisedWithANotice() {
         let rematch = OnlineAttentionCalculator.evaluate(input(presentation([battle(.pending, mine: .p2, rematchOf: "bt-old")])), seen: .init())
         XCTAssertEqual(rematch.raised.map(\.kind), [.rematchRequested])
-        XCTAssertEqual(rematch.notices, [])
+        XCTAssertEqual(rematch.notices.map(\.kind), [.rematchRequested])
+    }
+
+    func testInAppKindsAreRaisedWithoutANotice() {
         let model = presentation([])
         display(model, battle(.completed, confirmed: true), phase: .result, result: true)
         let result = OnlineAttentionCalculator.evaluate(input(model), seen: .init())
@@ -401,6 +404,14 @@ final class OnlineBattleAttentionTests: XCTestCase {
         XCTAssertEqual(incoming.body, "연습친구님이 대결을 신청했어요")
         let turn = l.onlineAttentionNotificationCopy(OnlineAttentionNotice(attention(.myTurn, seconds: 30))!, now: Self.now)
         XCTAssertTrue(turn.body.contains("30초 안에 기술을 고르세요"), turn.body)
+    }
+
+    func testRematchNotificationNamesTheOpponentInBothLanguages() throws {
+        let notice = try XCTUnwrap(OnlineAttentionNotice(attention(.rematchRequested)))
+        XCTAssertEqual(L(.ko).onlineAttentionNotificationCopy(notice, now: Self.now).body, "연습친구님이 다시 겨루자고 해요")
+        XCTAssertEqual(L(.en).onlineAttentionNotificationCopy(notice, now: Self.now).body, "연습친구 wants a rematch")
+        XCTAssertNotEqual(L(.ko).onlineAttentionNotificationCopy(notice, now: Self.now).title,
+                          L(.ko).onlineAttentionNotificationCopy(try XCTUnwrap(OnlineAttentionNotice(attention(.incomingChallenge))), now: Self.now).title)
     }
 
     func testMyTurnStatesTheTimeLeftRoundedUp() {

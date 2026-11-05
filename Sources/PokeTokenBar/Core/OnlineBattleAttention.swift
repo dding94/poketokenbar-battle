@@ -17,7 +17,7 @@ enum OnlineAttentionKind: String, Codable, CaseIterable, Sendable {
 }
 
 /// The only kinds that may become a macOS notification. Every other kind is in-app only.
-enum OnlineAttentionNotifiableKind: String, Sendable { case myTurn, challengeAccepted, incomingChallenge, finalConfirmed }
+enum OnlineAttentionNotifiableKind: String, Sendable { case myTurn, challengeAccepted, incomingChallenge, finalConfirmed, rematchRequested }
 
 /// Identity of one occurrence: the same battle and stage is announced once, whatever the revision.
 struct OnlineAttentionKey: Codable, Hashable, Sendable {

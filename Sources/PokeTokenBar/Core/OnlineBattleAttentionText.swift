@@ -63,12 +63,16 @@ extension L {
         case .finalConfirmed:
             return .init(title: online("대결 확정", "Battle confirmed"),
                          body: online("\(name)님과의 대결이 확정됐어요. 전투 준비를 눌러 주세요", "Your battle with \(name) is confirmed. Select Ready for battle"))
+        case .rematchRequested:
+            return .init(title: "", body: "")
         case .myTurn:
             let seconds = onlineAttentionSeconds(attention, now: now)
             return .init(title: online("내 차례예요", "Your turn"),
                          body: online("\(name)님과의 대전: \(seconds)초 안에 기술을 고르세요", "Battle with \(name): choose a move within \(seconds)s"))
         }
     }
+
+    func onlineNotificationHint(_ hint: OnlineNotificationHint) -> String { "" }
 
     private func onlineAttentionSeconds(_ attention: OnlineAttention, now: Date) -> Int {
         max(1, Int((attention.deadline ?? now).timeIntervalSince(now).rounded(.up)))
