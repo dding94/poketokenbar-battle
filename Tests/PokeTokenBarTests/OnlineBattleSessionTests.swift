@@ -1788,6 +1788,20 @@ final class OnlineBattleSessionTests: XCTestCase {
         await session.refresh()
         XCTAssertNil(session.presentation.notice, "Announced once")
     }
+    func testAcceptRaceAgainstAPeerCancelKeepsTheNamedNoticeThroughARefresh() async throws {
+        let pending = try pendingRoom()
+        let gone = try changed(pending, ["state": "CANCELLED", "revision": pending.revision + 1])
+        let (session, http, _, _) = try await setup([pending], trainer: "trainer-two"); try await namedOpponent(http, trainer: "trainer-two")
+        await session.bootstrap()
+        let page = { (room: OnlineBattleView) throws -> OnlineBattleHTTPResponse in .init(status: 200, body: try JSONEncoder().encode(OnlineBattlePage(battles: [room], before: nil))) }
+        await http.queue("/v1/battles", [try page(pending), try page(gone)])
+        await http.queue("POST /v1/battles/\(pending.battleId)/accept", [.init(status: 409, body: errorBody("invalid_state"))])
+        await session.perform(.accept)
+        let notice = try XCTUnwrap(session.presentation.notice)
+        XCTAssertTrue(notice.contains("하늘") && notice.contains("취소"), notice)
+        await session.refresh()
+        XCTAssertEqual(session.presentation.notice, notice, "The generic fallback must not replace the named notice, and a refresh must not wipe it")
+    }
     func testEndingsAlreadyInHistoryAtLaunchDoNotRaiseNotices() async throws {
         let rooms = try ["DECLINED", "CANCELLED", "EXPIRED"].enumerated().map { index, state in
             try changed(battle(), ["state": state, "config": NSNull(), "result": NSNull(), "journal": [], "roundSeq": 0, "battleId": "bt_old\(index)"])
