@@ -10,6 +10,7 @@ describe("lockstep relay", () => {
     const f = await running(mode), id = f.view.battleId;
     if (mode === "manual") expect((await action(f.p1, id, "choices", { roundSeq: 1, choice: "move 3" })).status).toBe(200);
     const before = (await getBattle(f.p2, id)).body;
+    if (mode === "manual") expect(await f.b.socket.next()).toMatchObject({ type: "battle_changed", opponentSubmitted: true }); // the first choice's signal
     await f.a.socket.sync(); await f.b.socket.sync();
     await runInDurableObject(leagueStub(), (_i, state) => state.storage.sql.exec("CREATE TRIGGER fail_relay_room BEFORE UPDATE ON battle_rooms BEGIN SELECT RAISE(ABORT, 'test_fault'); END"));
     const publish = () => mode === "manual" ? action(f.p2, id, "choices", { roundSeq: 1, choice: "move 2" }) : action(f.p2, id, "advance", { processedRoundSeq: 1 });

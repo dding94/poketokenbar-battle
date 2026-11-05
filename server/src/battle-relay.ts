@@ -1,5 +1,5 @@
 import { packPair } from "./battle-packing";
-import type { BattleEffect } from "./battle-effects";
+import { choiceSubmitted, type BattleEffect } from "./battle-effects";
 import { BattleStore, TURN_MS, type Battle, type Pair, type RelayToken, type Round } from "./battle-store";
 import { fail, ok, type Result } from "./contract";
 import type { Side } from "./battle-input";
@@ -26,7 +26,8 @@ export class BattleRelay {
     round[side] = slot;
     if (round.p1 !== null && round.p2 !== null) { this.release(b, round, now, after); return ok(true); }
     b.relay.current![side] = slot;
-    return ok(true); // Persist privately, without notification or peer submission signal.
+    after.push(choiceSubmitted(b, side)); // Only first stores reach here: retries returned above, a second choice released.
+    return ok(true);
   }
   advance(b: Battle, seq: number, now: number, after: BattleEffect[]): Result<boolean> {
     if (b.state !== "RUNNING") return fail("invalid_state");
