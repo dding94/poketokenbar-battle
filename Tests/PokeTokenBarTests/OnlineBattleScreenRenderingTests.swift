@@ -150,9 +150,15 @@ final class OnlineBattleScreenRenderingTests: XCTestCase {
     }
     private func clickPasteButton(in host: NSView) throws {
         let window = try XCTUnwrap(host.window)
-        // SwiftUI content buttons are not NSButtons here, so use synthetic native mouse events at the first
-        // setup action (it sits right under the headline); no OCR or system input access.
-        let point = host.convert(NSPoint(x: 80, y: host.isFlipped ? 88 : host.bounds.height - 88), to: nil)
+        // The first setup action sits right under the headline; no OCR or system input access.
+        let hostPoint = NSPoint(x: 80, y: host.isFlipped ? 88 : host.bounds.height - 88)
+        // Where this button is an NSButton, a mouse-down starts a tracking loop that waits for a mouse-up, and a
+        // synchronous sendEvent can never deliver it: the test would hang. Press that one directly.
+        var hit = host.hitTest(host.convert(hostPoint, to: host.superview))
+        while let current = hit, !(current is NSButton) { hit = current.superview }
+        if let button = hit as? NSButton { button.performClick(nil); return }
+        // Other systems draw it without an NSButton, so native mouse events are the way in.
+        let point = host.convert(hostPoint, to: nil)
         for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
             let event = try XCTUnwrap(NSEvent.mouseEvent(with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
                                                        windowNumber: window.windowNumber, context: nil, eventNumber: 1, clickCount: 1, pressure: 1))
