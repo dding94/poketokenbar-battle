@@ -20,7 +20,7 @@ struct OnlineBattleRoomGuide: View {
                 .padding(8)
                 .background(RoundedRectangle(cornerRadius: 8).fill(Color.accentColor.opacity(progress.turn == .mine ? 0.14 : 0.06)))
                 .accessibilityIdentifier("online.room.guide")
-            if model.room?.state == .pending && model.localSide == .p1 { requestSent }
+            if model.requestRemaining(now: .now) != nil { requestStatus }
         }
     }
 
@@ -45,14 +45,26 @@ struct OnlineBattleRoomGuide: View {
         }
     }
 
-    /// Minute-level wording, so a slow tick is enough and no animation runs.
-    private var requestSent: some View {
+    /// What the challenger can know (sent, waiting, how long ago) and when the room expires. The
+    /// expiry applies to every step before the match. Minute-level wording, so a slow tick is enough.
+    private var requestStatus: some View {
         TimelineView(.periodic(from: .now, by: 15)) { context in
             VStack(alignment: .leading, spacing: 2) {
-                Label(l.onlineRequestSent(opponent: model.roomOpponentName), systemImage: "paperplane")
-                    .font(.caption)
-                Text(l.onlineRequestAge(seconds: Int(model.requestAge(now: context.date) ?? 0)))
-                    .font(.caption2).foregroundStyle(.secondary)
+                if model.room?.state == .pending && model.localSide == .p1 {
+                    Label(l.onlineRequestSent(opponent: model.roomOpponentName), systemImage: "paperplane")
+                        .font(.caption)
+                    Text(l.onlineAwaitingResponse(opponent: model.roomOpponentName))
+                        .font(.caption2).foregroundStyle(.secondary)
+                        .accessibilityIdentifier("online.room.awaiting")
+                    Text(l.onlineRequestAge(seconds: Int(model.requestAge(now: context.date) ?? 0)))
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+                if let remaining = model.requestRemaining(now: context.date), let expiresAt = model.room?.expiresAt {
+                    Label(l.onlineRequestExpiry(remaining: remaining, expiresAt: Date(timeIntervalSince1970: expiresAt / 1000)),
+                          systemImage: "clock")
+                        .font(.caption2).foregroundStyle(.secondary)
+                        .accessibilityIdentifier("online.room.expiry")
+                }
             }
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)

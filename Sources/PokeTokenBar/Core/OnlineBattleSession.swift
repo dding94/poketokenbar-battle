@@ -433,7 +433,9 @@ final class OnlineBattleSession {
             for room in battles where !room.state.isActive && room.side(for: account.trainer.trainerId) != nil {
                 historyViews[room.battleId] = room
             }
-            presentation.notice = nil; try rebuildRoster()
+            // An ended-challenge notice stays until the person closes it; error notices are re-evaluated.
+            if !presentation.noticeSurvivesRefresh { presentation.notice = nil }
+            try rebuildRoster()
             // Old unapplied completions are reconciled before accepting new entries or acquiring newer holds.
             for room in battles.sorted(by: { ($0.state == .completed ? 0 : 1, $0.createdAt) < ($1.state == .completed ? 0 : 1, $1.createdAt) }) {
                 try current(epoch)
@@ -475,6 +477,7 @@ final class OnlineBattleSession {
         // An automatic battle has at most 200 public pairs. Each response must make progress.
         for _ in 0..<202 {
             try current(epoch)
+            let previousView = views[room.battleId]
             guard accepts(room) else { return }
             guard let side = room.side(for: account.trainer.trainerId) else { throw OnlineBattleFailure.invalidResponse }
             views[room.battleId] = room
@@ -485,6 +488,7 @@ final class OnlineBattleSession {
             if [.void, .cancelled, .declined, .expired].contains(room.state) {
                 try effects.releaseOnlineBattle(key: key)
                 resolvers.removeValue(forKey: room.battleId)?.close()
+                presentation.announceEnded(room, previous: previousView?.state, l: localization())
                 if room.state == .void {
                     resultByBattleID[room.battleId] = .init(title: "경기 무효", detail: "체력과 경험치는 바뀌지 않았어요.", xpAwarded: 0, hpApplied: false, isVoid: true)
                 }
@@ -813,6 +817,7 @@ final class OnlineBattleSession {
     private func cancelChangedRematch(_ room: OnlineBattleView, account: OnlineBattleAccount,
                                       api: OnlineBattleAPI, epoch: UInt64) async throws {
         guard [.pending, .accepted, .ready].contains(room.state) else { throw OnlineBattleFailure.invalidRequest }
+        presentation.suppressEndedNotice(for: room.battleId)
         let cancelled = try await api.cancel(id: room.battleId, revision: room.revision); try current(epoch)
         try await process(cancelled, account: account, api: api, epoch: epoch)
         challengeIntent = nil
@@ -916,6 +921,7 @@ final class OnlineBattleSession {
             try current(epoch)
             // A local evolution, heal, or practice entry during the request invalidates consent.
             guard (try? selectedSnapshot(allow: receiptKey(result, account: account), id: snapshot.instanceId)) == snapshot else {
+                presentation.suppressEndedNotice(for: result.battleId)
                 let cancelled = try await api.cancel(id: result.battleId, revision: result.revision); try current(epoch)
                 try await process(cancelled, account: account, api: api, epoch: epoch)
                 throw OnlineBattleFailure.invalidRequest
@@ -946,6 +952,7 @@ final class OnlineBattleSession {
                 }
                 try current(epoch)
                 guard (try? selectedSnapshot(allow: receiptKey(result, account: account), id: snapshot.instanceId)) == snapshot else {
+                    presentation.suppressEndedNotice(for: result.battleId)
                     let cancelled = try await api.cancel(id: result.battleId, revision: result.revision); try current(epoch)
                     try await process(cancelled, account: account, api: api, epoch: epoch)
                     throw OnlineBattleFailure.invalidRequest
@@ -956,9 +963,11 @@ final class OnlineBattleSession {
                 result = try await api.confirm(id: room.battleId, revision: room.revision)
             case .decline:
                 guard room.state == .pending, room.side(for: account.trainer.trainerId) == .p2 else { throw OnlineBattleFailure.invalidRequest }
+                presentation.suppressEndedNotice(for: room.battleId)
                 result = try await api.decline(id: room.battleId, revision: room.revision)
             case .cancel:
                 guard [.pending, .accepted, .ready].contains(room.state) else { throw OnlineBattleFailure.invalidRequest }
+                presentation.suppressEndedNotice(for: room.battleId)
                 result = try await api.cancel(id: room.battleId, revision: room.revision)
             case .prepareBattle:
                 guard let connection else { throw OnlineBattleFailure.invalidRequest }
@@ -1033,9 +1042,10 @@ final class OnlineBattleSession {
         } else if error as? OnlineBattleFailure == .credentialsDisabled {
             presentation.notice = l.onlineErrorKeySaveDisabled
         } else if error as? OnlineBattleFailure == .peerCancelled {
-            presentation.notice = l.onlineErrorPeerCancelled
+            // The re-read inside the action already announced it with the opponent's name.
+            if !presentation.noticeSurvivesRefresh { presentation.notice = l.onlineErrorPeerCancelled }
         } else if error as? OnlineBattleFailure == .peerExpired {
-            presentation.notice = l.onlineErrorPeerExpired
+            if !presentation.noticeSurvivesRefresh { presentation.notice = l.onlineErrorPeerExpired }
         } else if error as? OnlineBattleFailure == .invalidRequest {
             presentation.notice = l.onlineErrorEntryChanged
         } else if error is OnlineBattleResolver.Failure {

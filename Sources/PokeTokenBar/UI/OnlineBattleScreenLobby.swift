@@ -175,7 +175,10 @@ struct OnlineBattleRoom: View {
                 HStack {
                     Button(l.onlineAccept) { model.send(.accept) }.buttonStyle(.borderedProminent).disabled(!model.canAccept)
                         .accessibilityIdentifier("online.accept")
-                    Button(l.onlineDecline) { model.send(.decline) }.disabled(model.isBusy)
+                    if model.roomExits.contains(.decline) {
+                        Button(l.onlineDecline) { model.send(.decline) }.disabled(model.isBusy)
+                            .accessibilityIdentifier("online.decline")
+                    }
                 }
                 OnlineBattleBlockReason(block: model.acceptBlock, l: l, identifier: "online.accept.reason")
             } else if room.state == .accepted && model.localSide == .p1 && !room.confirmed {
@@ -190,8 +193,14 @@ struct OnlineBattleRoom: View {
             } else if model.roomProgress == nil {
                 Text(l.onlineWaiting).font(.caption).foregroundStyle(.secondary)
             }
-            if [.pending, .accepted, .ready].contains(room.state) {
+            // Only the challenger sees "cancel request"; the receiver declines, or cancels the battle after accepting.
+            if model.roomExits.contains(.cancelRequest) {
                 Button(l.onlineCancel) { model.send(.cancel) }.disabled(model.isBusy)
+                    .accessibilityIdentifier("online.cancel")
+            }
+            if model.roomExits.contains(.cancelBattle) {
+                Button(l.onlineCancelBattle) { model.send(.cancel) }.disabled(model.isBusy)
+                    .accessibilityIdentifier("online.cancelBattle")
             }
         }
     }

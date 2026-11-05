@@ -1783,7 +1783,7 @@ final class OnlineBattleSessionTests: XCTestCase {
         let first = try XCTUnwrap(session.presentation.notice)
         await session.refresh(); await session.refresh()
         XCTAssertEqual(session.presentation.notice, first, "A background refresh must not wipe an unread notice")
-        await session.perform(.dismissNotice)
+        session.presentation.send(.dismissNotice)
         XCTAssertNil(session.presentation.notice)
         await session.refresh()
         XCTAssertNil(session.presentation.notice, "Announced once")

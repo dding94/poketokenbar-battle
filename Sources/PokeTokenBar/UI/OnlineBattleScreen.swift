@@ -44,8 +44,7 @@ struct OnlineBattleScreen: View {
                             .accessibilityIdentifier("online.notificationHint")
                     }
                     if let notice = model.notice {
-                        Text(notice).font(.caption).foregroundStyle(.orange)
-                            .fixedSize(horizontal: false, vertical: true).practiceCard()
+                        OnlineBattleNoticeBanner(text: notice, l: l) { model.send(.dismissNotice) }
                     }
                     if model.canRetryCredentialSave {
                         Button(l.onlineRetrySave) { model.send(.retryCredentialSave) }
@@ -86,11 +85,19 @@ struct OnlineBattleScreen: View {
         case .arena: OnlineBattleArena(model: model, l: l, artwork: artwork, speciesNameProvider: speciesNameProvider, speciesNameStore: speciesNameStore)
         case .verifying:
             VStack(alignment: .leading, spacing: 10) {
-                Label(l.onlineVerifying, systemImage: "checkmark.shield").font(.headline)
+                HStack(spacing: 8) {
+                    Label(l.onlineVerifying, systemImage: "checkmark.shield").font(.headline)
+                    ProgressView().controlSize(.small)
+                }
                 Text(l.onlineVerifyingHint).font(.callout)
                     .fixedSize(horizontal: false, vertical: true)
-                Button(l.onlineRefresh) { model.send(.refresh) }.disabled(model.isBusy)
-            }.practiceCard()
+                Text(l.onlineVerifyingAuto).font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("online.verifying.auto")
+                // Updates arrive on their own; refreshing is only a manual shortcut.
+                Button(l.onlineRefresh) { model.send(.refresh) }
+                    .buttonStyle(.borderless).font(.caption).disabled(model.isBusy)
+            }.frame(maxWidth: .infinity, alignment: .leading).practiceCard()
         case .result:
             VStack(alignment: .leading, spacing: 12) {
                 Image(systemName: model.result?.isVoid == true ? "minus.circle" : "flag.checkered")

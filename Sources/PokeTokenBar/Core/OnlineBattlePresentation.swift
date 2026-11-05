@@ -123,6 +123,8 @@ final class OnlineBattlePresentation {
         case .setPopoverVisible:
             break
         case .dismissNotice:
+            // Pure presentation: closing a banner never reaches the session or the server.
+            notice = nil; stickyNotice = nil
             return
         case .backToLobby:
             break
