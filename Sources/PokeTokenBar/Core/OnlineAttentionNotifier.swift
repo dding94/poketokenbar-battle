@@ -146,7 +146,12 @@ final class SystemOnlineNotificationCenter: OnlineNotificationCenter {
     private var center: UNUserNotificationCenter { UNUserNotificationCenter.current() }
 
     func permission() async -> OnlineNotificationPermission {
-        switch await center.notificationSettings().authorizationStatus {
+        // The settings object is not Sendable, so only its status crosses back (Swift 6.1 rejects the async form).
+        let center = center
+        let status = await withCheckedContinuation { (continuation: CheckedContinuation<UNAuthorizationStatus, Never>) in
+            center.getNotificationSettings { continuation.resume(returning: $0.authorizationStatus) }
+        }
+        switch status {
         case .notDetermined: .notDetermined
         case .denied: .denied
         case .authorized, .provisional, .ephemeral: .allowed
