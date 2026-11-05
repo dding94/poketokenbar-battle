@@ -115,11 +115,14 @@ final class OnlineBattlePresentation {
     /// The click that sent a choice, kept with its round so a later round never inherits the mark.
     private struct LocalChoice { let battleID: String; let roundSeq: Int; let slot: Int }
     private var localChoice: LocalChoice?
-    /// Set once my own choice is in a manual round; nil before that, so the moves stay uncluttered.
+    /// Said in a live manual round once the other seat's choice is in (whether or not mine is) or mine is in;
+    /// nil before that, so the moves stay uncluttered. A choice that is in wins over any presence.
     /// A foe flagged offline is stated as fact only while the socket is up. Presence is not refreshed while
     /// polling, so there the flag may be old and the wording is hedged. An old "online" is never taken as proof.
     var opponentWait: OpponentWait? {
-        guard phase == .arena, let room, room.state == .running, room.mode == .manual, choiceSubmitted else { return nil }
+        guard phase == .arena, let room, room.state == .running, room.mode == .manual else { return nil }
+        if room.opponentSubmitted == true { return .submitted }
+        guard choiceSubmitted else { return nil }
         let foe = localSide == .p1 ? room.p2.trainerId : room.p1.trainerId
         guard members.first(where: { $0.trainerId == foe })?.online == false else { return .choosing }
         return connectionStatus == L.onlineConnectedStatus ? .offline : .offlineMaybe

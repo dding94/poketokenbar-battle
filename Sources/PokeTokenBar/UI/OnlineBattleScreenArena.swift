@@ -181,16 +181,13 @@ struct OnlineBattleArena: View {
             switch footer {
             case .sent:
                 Label(l.onlineChoiceDone, systemImage: "checkmark.circle").font(.callout.weight(.semibold)).fixedSize()
-                if let wait = model.opponentWait {
-                    // One line under the board's fixed height; the grid below keeps the picked card marked.
-                    Text(l.onlineOpponentWait(wait)).font(.caption)
-                        .foregroundStyle(wait == .choosing ? Color.secondary : Color.orange)
-                        .lineLimit(2).minimumScaleFactor(0.85)
-                        .accessibilityIdentifier("online.opponentWait")
-                }
+                // One line inside the board's fixed height; the grid below keeps the picked card marked.
+                waitLine
             case .moves:
                 Text(playing ? l.practicePlayingTurn : l.practiceWhatNext)
                     .font(.callout.weight(.semibold)).foregroundStyle(playing ? Color.secondary : Color.primary)
+                // Only the fact that the other side is done shows while I still choose; it never says what they chose.
+                if model.opponentWait == .submitted { waitLine }
             case .automatic:
                 Text(playing ? l.practicePlayingTurn : l.practiceAutoPlaying).font(.callout.weight(.semibold)).foregroundStyle(.secondary)
             case .waiting:
@@ -203,11 +200,22 @@ struct OnlineBattleArena: View {
                 Button(l.practiceSkip) { model.send(.skipStage) }
                     .buttonStyle(.borderless).font(.caption)
                     .accessibilityIdentifier("online.skip")
-            } else if footer == .moves {
+            } else if footer == .moves, model.opponentWait != .submitted {
+                // The key hint is the first thing to go when the other side's news needs the room.
                 Text(l.practiceKeyHint).font(.caption2).foregroundStyle(.secondary)
             }
         }
         .frame(minHeight: 20)
+    }
+
+    /// What the other side is doing: quiet while they think, accented when they are done, orange when they are gone.
+    @ViewBuilder private var waitLine: some View {
+        if let wait = model.opponentWait {
+            Text(l.onlineOpponentWait(wait)).font(.caption)
+                .foregroundStyle(wait == .choosing ? Color.secondary : wait == .submitted ? Color.accentColor : Color.orange)
+                .lineLimit(2).minimumScaleFactor(0.85).layoutPriority(1)
+                .accessibilityIdentifier("online.opponentWait")
+        }
     }
 
     private var footerRegion: some View {
