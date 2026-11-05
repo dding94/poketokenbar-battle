@@ -24,7 +24,7 @@ Node 24.14.0, from the repository root:
 ```sh
 npm ci --prefix server
 npm run typecheck --prefix server
-npm test --prefix server   # vitest inside workerd via @cloudflare/vitest-plugin
+npm test --prefix server   # vitest inside workerd via @cloudflare/vitest-plugin, then node --test for scripts/
 ```
 
 Tests use obviously fake secret bindings defined in `vitest.config.ts`. There are two Vitest
@@ -42,6 +42,72 @@ Free plan and register the workers.dev subdomain, deploy once
 (`npx wrangler deploy --env dev`), then set `OPERATOR_SECRET` and `CODE_PEPPER` with
 `npx wrangler secret put <NAME> --env dev`, then measure. Secret values are never written to
 the repository. Workers Logs/observability stays explicitly off in both environments.
+
+## First group for a new environment
+
+A new environment has no group, and the app cannot create one. Order of steps (the user does
+the first three; agents never deploy or handle secret values):
+
+1. Deploy the Worker (`npx wrangler deploy`, with the user).
+2. Set the secrets `CODE_PEPPER` and `OPERATOR_SECRET` (`npx wrangler secret put <NAME>`).
+3. Run `scripts/bootstrap-group.mjs`. It creates the group and prints the group id, the host
+   trainer id and the host's recovery code once. It never prints the access key or the operator
+   secret, writes no file and sends the secret only in the request body.
+4. Paste the recovery code into the app's recovery field to connect as host.
+
+```sh
+read -rs OPERATOR_SECRET; export OPERATOR_SECRET
+node server/scripts/bootstrap-group.mjs https://<worker-host> "<group name>" "<host nickname>"
+unset OPERATOR_SECRET
+```
+
+The URL must be https (`http://localhost` is allowed for local runs). Server errors print the
+error code and, for the ones an operator can run into, what to do about it. Run it once per
+environment: every run creates another group.
+
+The script checks these before it sends anything, with the same rules as the server:
+
+- `OPERATOR_SECRET` has at least 32 characters. The server turns its operator routes off
+  (`operator_disabled`) when its own value is shorter, so generate a long one for
+  `wrangler secret put` and use the same value here.
+- The host nickname has 1 to 254 characters after trimming, with no spaces and no invisible
+  characters. It is not an email address, though the API still calls the field `displayEmail`.
+  Quote it on the command line only if your shell needs that; a space inside is refused.
+- The group name has 1 to 40 characters and no control characters. Spaces are fine.
+
+## What the app cannot do yet
+
+The app has no screen for leaving a group or for handing the host role to someone else. The
+server has both routes (`POST /v1/leave`, `POST /v1/host/transfer`), but nothing in the app
+calls them. A member can only be removed by the host, in the host panel. The host cannot leave
+at all (`host_must_transfer`).
+
+### A host who lost both the access key and the recovery code
+
+The app cannot get them back, because only the host can issue reconnect codes in the app. The
+operator can issue one for the group's current host. This needs the group id, which
+`bootstrap-group.mjs` printed when the group was created, and `OPERATOR_SECRET`:
+
+```sh
+read -rs OPERATOR_SECRET; export OPERATOR_SECRET
+node --input-type=module -e '
+const [baseUrl, groupId] = process.argv.slice(1);
+const res = await fetch(`${baseUrl}/v1/operator/host-reconnect`, {
+  method: "POST", redirect: "error",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify({ operatorSecret: process.env.OPERATOR_SECRET, groupId }),
+});
+const body = await res.json();
+console.log(res.ok ? `RECONNECT CODE: ${body.reconnectCode}` : `server error: ${body.error?.code}`);
+' https://<worker-host> <group id>
+unset OPERATOR_SECRET
+```
+
+The host enters the code in the app under "Reconnect your account" > "Host reconnect code". It
+works once and expires after a day. It replaces the host's access key and recovery code, and the app shows
+the new recovery code once. The old key and recovery code stop working, so run this only after
+making sure the request really comes from the host. If the group id is lost too, a member's
+`GET /v1/me` response contains it; the app does not show it.
 
 ## Measurement script
 

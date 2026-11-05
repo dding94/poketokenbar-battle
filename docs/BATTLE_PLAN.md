@@ -1,7 +1,8 @@
 # PokeTokenBar 사내 1:1 배틀 — 작업계획서 / Strategy Checklist
 
 - 작성일: 2026-10-28 · 개정: 2026-10-29 (전투 계산을 서버에서 양쪽 앱으로 이동), 2026-10-30 (포켓몬을 빼앗지 않는 규칙, 온라인 대전 재설계)
-- 상태: **PR 00~07·11~12 구현·자동 검증 완료, PR 08~10 폐기. PR 13 인수·무료 한도 보완·릴리스 준비 중. 2.6.0 자체 서명 테스트판·Homebrew는 공개했으며, 실제 두 맥·운영 배포·정식 릴리스 인수는 미검증/미실행이며 상세는 AI_HANDOFF를 따른다.**
+- 상태: **PR 00~07·11~12 구현·자동 검증 완료, PR 08~10 폐기. PR 13 인수·무료 한도 보완은 2.6.0 테스트판으로 이어졌고, PR 14 구현은 끝나 2.7.0 공개를 앞두고 있다. 2.6.0 자체 서명 테스트판·Homebrew는 공개했으며, 실제 두 맥·정식 릴리스 인수는 미검증/미실행이며 상세는 AI_HANDOFF를 따른다.**
+- PR 14(2026-11-05): 첫 실사용 피드백 개선(온라인 흐름, 알림, 대전감, 서버 주소 내장, 방장 패널, 앱 이름 PokeTokenBattle)을 구현·자동 검증했고 운영 Worker를 배포했다. 공개 버전은 2.7.0을 제안하며 **아직 공개하지 않았다.** 사용자 결정: CI는 마지막 한 번, 공개 전 두 맥 시험 없이 배포한 뒤 실전에서 확인한다(T24 표는 공개 뒤 확인 목록). 실제 두 맥·실제 알림·팝오버 고정·슬립 복귀·VoiceOver는 공개 시점 미검증이다. 공개 전 남은 일과 후속 확인은 [AI_HANDOFF](AI_HANDOFF.md) 최상단, 결정과 작업 지시서는 [reference/pr14-online-ux-plan.md](reference/pr14-online-ux-plan.md)를 따른다. 이 문서의 "저장소·앱 번들에 주소를 넣지 않는다" 규칙은 유지하며 주소는 빌드 입력으로만 넣는다.
 - 기준 앱: PokeTokenBar `v2.5.6`, macOS 14 이상, Swift 6 / SwiftUI. 포크는 2026-10-30부터 macOS 15 이상이다(GitHub macOS 14 러너 종료, 결정성 검사는 macOS 15·26).
 - 목적: 회사 동료들이 기존에 키운 포켓몬으로 1:1 배틀(직접 조작 또는 자동)을 한다. 진 쪽 포켓몬은 기절하고 이긴 쪽은 성장 경험치를 받는다(2026-10-30 변경, 아래 상자).
 
@@ -1199,13 +1200,13 @@ API(`/v1`, JSON 본문, 응답은 `cache-control: no-store`):
 
 ### D.5 라운드·동시 공개·재생
 
-- 엔진 내부 턴과 별개로 서버 `roundSeq`를 1부터 단조 증가시키며 최대 200이다. RUNNING 직후 1번 라운드를 연다. manual 마감은 서버 시계 +30초다. 첫 선택은 SQL에 저장하되 상대에게 선택·제출 여부·알림을 보내지 않는다. 둘째 선택이 들어오면 같은 트랜잭션에서 pair를 한 번만 공개한다.
+- 엔진 내부 턴과 별개로 서버 `roundSeq`를 1부터 단조 증가시키며 최대 200이다. RUNNING 직후 1번 라운드를 연다. manual 마감은 서버 시계 +30초다. 첫 선택은 SQL에 저장하되 상대에게 선택 내용(슬롯)은 어떤 형태로도 보내지 않는다. 다만 선택했다는 사실만은 상대에게 알린다(PR 14 D7): HTTP view의 `opponentSubmitted` 불리언과, 라운드의 첫 선택이 처음 저장될 때 상대 한 명에게 한 번 가는 `battle_changed`의 같은 필드가 그것이다. 둘째 선택이 들어오면 같은 트랜잭션에서 pair를 한 번만 공개한다.
 - 마감 때 비어 있는 진영은 `{kind:"timeout"}`으로 확정한다. 명시 선택은 `{kind:"move",slot:1~4}`다. auto 방식은 양쪽 `{kind:"policy"}`를 즉시 공개하며 선택 제출을 거절한다. 이 세 종류 이외의 journal 내용은 없다. timeout/policy는 서버만 생성한다. 입력 선택 문자열을 실행하거나 BattleStream에 직접 전달하지 않는다.
 - 공개 pair는 `{roundSeq,p1,p2,releasedAt}`로 영구 보관한다. `relay-v1` journal은 engine `inputLog v2`와 구분한다. 재접속 GET은 불변 config·공개 pair 전체·현재 라운드와 기한·자신의 미공개 선택·확정 결과를 반환한다. 상대의 미공개 선택과 보고 내용은 제외한다.
 - journalHash 정규 바이트: `JSON.stringify(["relay-v1",battleId,readyToken,journal.map(r => [r.roundSeq,token(r.p1),token(r.p2)])])`의 UTF-8을 SHA-256한다. token은 move이면 `["move",slot]`, 그 밖에는 `["timeout"]` 또는 `["policy"]`다. 라운드는 순번 오름차순이고 releasedAt은 해시에서 제외한다. 서버는 이 직렬화 계약을 제공하되 앱 보고끼리 비교한다.
 - 앱 resolver(PR 07): 공개 pair를 항상 p1→p2 순서로 적용한다. timeout/policy는 동일 상태의 `autoChoice` 결과를 사용한다. forced는 엔진이 요구하는 강제 행동으로 처리한다. 숨은 기술 봉인 등으로 명시 선택이 거절되면 갱신된 request에서 자동 선택으로 결정적으로 재시도하며 최대 5회로 제한한다. 실패하면 결과를 확정하지 않는다. 엔진 inputLog에는 실제 승인된 슬롯이 남고 서버 journal에는 원래 pair가 남는다.
 - 다음 라운드는 참가자 한 명이 공개 pair를 계산한 뒤 advance해야 열린다. 같은 processedRoundSeq의 재시도나 뒤늦은 상대 advance가 새 라운드를 중복 생성하지 않는다. 두 앱이 모두 꺼지면 공개된 pair에서 기다리고 시작 후 72시간 기한을 따른다. 서버가 전투 종료나 다음 상태를 추정하지 않는다. 200번 이후 advance는 거절하고 종료 보고를 기다린다.
-- `battle_changed` 알림은 `{v:1,type,battleId,state,revision,roundSeq,deadline}`으로 참가자에게만, `battle_round`는 공개 pair를 두 참가자에게만 보낸다. `roundSeq`·`deadline`은 PR 13에서 추가한 공개 정보이며 RUNNING이 아니면 deadline은 null이다. 이전 서버의 필드 누락은 HTTP 조회로 대체한다(H.6). 첫 선택에는 알림이 없다. 알림이 유실돼도 HTTP 조회로 복원한다. VOID의 불일치 사실은 같은 그룹에 `{v:1,type:"battle_void",battleId,reason:"result_mismatch"}`만 알린다(키·이메일·보고 원문 없음).
+- `battle_changed` 알림은 `{v:1,type,battleId,state,revision,roundSeq,deadline}`으로 참가자에게만, `battle_round`는 공개 pair를 두 참가자에게만 보낸다. `roundSeq`·`deadline`은 PR 13에서 추가한 공개 정보이며 RUNNING이 아니면 deadline은 null이다. 이전 서버의 필드 누락은 HTTP 조회로 대체한다(H.6). 라운드의 첫 선택이 처음 저장될 때만 선택하지 않은 상대 한 명에게 같은 revision·roundSeq·deadline·state의 `battle_changed`에 `opponentSubmitted:true`를 더해 한 번 보낸다(새 메시지 type은 없다). 슬롯·선택 내용·선택한 사람은 담지 않고, 선택한 본인에게는 보내지 않으며, 같은 선택의 재시도와 둘째 선택(이때는 `battle_round`가 간다)과 자동전에는 보내지 않는다. 앱은 같은 라운드·같은 deadline이면 HTTP 조회 없이 화면만 바꾸고, 배포된 2.6.0은 이 알림을 같은 deadline의 중복으로 조용히 넘긴다. 알림이 유실돼도 HTTP 조회로 복원한다. VOID의 불일치 사실은 같은 그룹에 `{v:1,type:"battle_void",battleId,reason:"result_mismatch"}`만 알린다(키·이메일·보고 원문 없음).
 
 ### D.6 결과·원자성·탈퇴
 
@@ -1231,10 +1232,13 @@ API(`/v1`, JSON 본문, 응답은 `cache-control: no-store`):
 
 ### E.1 경계와 설정
 
+- **2026-11-05 입력 편의 개선:** 팝오버 닫힘/화면 재생성 뒤에도 미적용 서버 주소·초대코드·닉네임과 복구/재연결 입력 초안을 앱 수명 상태에 보관한다. 초대/복구/재연결 코드는 디스크·세이브·로그에 저장하지 않는다. 서버 주소는 기존처럼 명시적 적용 성공 후 로컬 설정에 저장해 재실행 시 복원한다. 사용자 클릭으로만 클립보드의 서버 주소+초대코드 안내를 함께 붙여넣고, 모호하거나 잘못된 내용은 기존 초안을 덮어쓰지 않는다. 붙여넣기는 서버 적용/가입을 자동 실행하지 않으며 적용 주소 일치 가드는 유지한다. 2026-11-05 정책 변경으로 운영 주소는 저장소가 아니라 빌드 입력에서만 앱에 넣는다(아래 서버 주소 정책).
+
 - 2026-11-02 후속: 사용자 승인에 따라 가입 UI는 닉네임으로 받는다(위 변경 승인). 서버 주소 적용→초대코드/닉네임 입력 순서와 비활성 사유를 화면에 표시한다. 입력 중 서버 주소가 적용된 주소와 다르면 가입/복구를 막아 이전 서버에 요청하지 않는다. 배포 대상은 기존 개발 Worker와 전달 전 테스트 앱이다.
 
 - 앱 수명의 MainActor 온라인 세션이 화면 상태·동의·엔진을 소유한다. HTTP/WS·자격 증명은 주입 가능한 경계로 분리하며 UI는 키 원문이나 HTTP 본문을 취급하지 않는다. 팝오버가 닫혀도 진행 중 정식전의 30초 서버 시계는 멈추지 않는다. 화면 재생만 멈출 수 있다.
-- 서버 주소는 온라인 화면에서 입력하고 해당 상태 폴더의 로컬 설정에 저장한다. 저장소·앱 번들에는 실제 개발 주소를 넣지 않는다. HTTPS origin만 허용하고 userinfo·query·fragment를 거절한다. 테스트의 명시적 loopback HTTP 허용은 제품 기본값과 분리한다. 인증 헤더가 다른 origin으로 전달되는 redirect를 허용하지 않는다.
+- 서버 주소는 온라인 화면에서 입력하고 해당 상태 폴더의 로컬 설정에 저장한다. **서버 주소 정책(2026-11-05, T08):** 저장소에는 실제 주소를 넣지 않고 앱 번들에는 넣는다. 주소는 비밀이 아니며 보호는 초대코드와 시도 제한이 맡는다. `scripts/build-app.sh`가 커밋되지 않는 환경변수 `PTB_BATTLE_SERVER_URL`을 검증해 서명 전에 Info.plist 키 `PTBBattleServerURL`로 넣는다. 값이 https origin이 아니면(경로·질의·사용자 정보·http 포함) 컴파일 전에 빌드가 실패하고, 값이 없는 빌드(CI 등)는 수동 입력을 유지한다. 앱은 내장 값이 있으면 저장된 `serverURL`보다 우선해 쓰고(저장 파일은 건드리지 않는다), 내장 값이 유효하지 않으면 무시한다. `release-validate.py source`는 저장소 파일에 실제로 보이는 workers.dev 주소(문서용 자리표시자 `example`·`secret-sub`·`subdomain` 제외)가 있으면 릴리스를 막고, 그때 주소 문자열은 출력하지 않는다.
+- **주소를 바꾸면 재가입이 필요하다:** 접속키의 Keychain 항목은 프로필 ID와 정규화된 origin 해시에 묶여 있다. 내장 주소가 기존 저장 주소와 같은 origin이면(대소문자·끝 슬래시·`:443` 표기 차이 포함) 같은 항목을 그대로 읽어 키가 끊기지 않는다. 다른 주소로 바꾸면(예: 개발 Worker에서 운영 Worker로 이전) 이전 주소의 키는 새 범위에서 보이지 않으므로 사용자는 새 서버에 다시 가입하거나 복구해야 하고, 이전 키는 Keychain에 남는다(삭제하지 않는다). HTTPS origin만 허용하고 userinfo·query·fragment를 거절한다. 테스트의 명시적 loopback HTTP 허용은 제품 기본값과 분리한다. 인증 헤더가 다른 origin으로 전달되는 redirect를 허용하지 않는다.
 - 상태 폴더별 난수 프로필 ID와 정규화된 서버 origin의 해시로 Keychain 항목을 구분한다. 프로필 ID·주소 설정은 세이브 내보내기와 분리한다. 서버 변경은 이전 연결/요청을 무효화하고 새 범위로 다시 준비한다. 닉네임은 표시명이며 인증 키가 아니다.
 - 키는 포크 전용 Keychain 항목에만 영속 저장한다. 세이브·로그·오류·화면 이미지에 접속키/복구코드를 넣지 않는다. 가입/복구/재연결 성공 때 받은 복구코드는 사용자가 보관하도록 해당 흐름에서만 보여 준다. 실제 Keychain 접근 대신 대역으로 테스트한다. 기존 사용량 공급자의 Keychain 정책은 변경하지 않는다.
 - **사용자 결정(2026-11-02):** 기존 `disableKeychainAccess`를 배틀 키에도 적용한다. 켜는 즉시 진행 중 연결·요청을 무효화하고 키 조회·저장과 온라인 통신을 중단한다. 이 설정 전환 자체로 Keychain의 키를 삭제하지 않으며, 다시 허용하면 기존 키로 복원한다. 비활성 중에는 결과 효과를 적용하지 않고 허용 후 서버에서 다시 검증한다. 키 저장 실패는 성공으로 취급하지 않으며 새 가입 요청을 자동 재실행하지 않는다. 가입·복구·재연결은 멱등 요청이 아니므로 응답 유실 시 복구 안내를 제공한다.
@@ -1350,12 +1354,12 @@ API(`/v1`, JSON 본문, 응답은 `cache-control: no-store`):
 PR 13 릴리스 준비 인터페이스: `release.sh --check-only`는 점검 실패를 종료 코드로 반환하고, `--prepare <version>`은 로컬 검토 산출물만 만든다. `--prepare-build <version>`은 별도 서명 준비 뒤 설치 없는 공용 번들을 만든다. 두 준비 경로는 추적 VERSION·Git 상태·외부 서비스를 변경하지 않는다. `<version>` 게시 경로의 별도 승인·main/서명/격리 조건은 유지한다.
 
 - 빌드 준비·게시 경로에서는 로컬 전체 XCTest/OCR를 실행하지 않는다. `PTB_CI_RUN_ID`는 확인할 실행의 숫자 ID일 뿐 승인/성공 우회값이 아니다. 읽기 전용 GitHub 조회로 포크 저장소·CI workflow·현재 HEAD·완료/성공을 확인하고, 추적 소스 변경이 있으면 거절한다. changes, 앱 두 갈래, test-union, secret-scan, server, macOS 15/26 결정성 작업과 필수 단계가 모두 성공해야 한다. 부분 실행·누락·skip·조회 실패는 빌드 전 실패한다.
-- rest 로그에서 네이티브 인수 검사 세 건의 실제 통과와 wrapper의 `required=3 passed=3 skipped=0`을 확인한다. 기존 선택적 테스트 skip은 별도 미검증이며 통과 수에 합치지 않는다. `--prepare`는 계속 오프라인 검토 전용이고 빌드 준비의 CI 확인은 키 생성·로그인·원격 변경을 하지 않는다.
+- rest 로그에서 네이티브 인수 검사 여섯 건의 실제 통과와 wrapper의 `required=6 passed=6 skipped=0`을 확인한다(개수는 `scripts/release-ci.py`의 `NATIVE_TESTS`가 정하고, `test_release_workflow.py`가 실행기·Swift 테스트 파일과 대조한다). 기존 선택적 테스트 skip은 별도 미검증이며 통과 수에 합치지 않는다. `--prepare`는 계속 오프라인 검토 전용이고 빌드 준비의 CI 확인은 키 생성·로그인·원격 변경을 하지 않는다.
 
 ### H.5 하루 100판 목표를 유지하는 저장 구조 개선
 
 - **사용자 결정:** 1차 개선 뒤에도 긴 경기 100판/일이 한도를 넘으므로 경기 상한·보관 축소 대신 저장 구조를 더 개선한다. 200턴 100판의 쓰기·읽기·요청과 1년 보관량을 각각 검증하며, 저장 쓰기만 줄었다고 무료 운영 전체를 통과 처리하지 않는다. 실제 앱의 알림 후 GET·양쪽 advance·재시도·ping과 같은 계정의 다른 서비스는 별도 부하를 숨기지 않는다.
-- schema 4는 방 JSON에 공개 relay를 압축 보관한다. 완료 턴은 `[p1Code,p2Code,releasedAt-startedAt]` 튜플이며 seq는 배열 위치+1이다. code 0은 timeout, 1~4는 move, 5는 policy다. 진행 턴의 deadline·양쪽 미공개 선택은 별도로 보관한다. 외부 응답의 config·journal·pair·releasedAt·ownChoice·페이지 순서·토큰 허용 범위는 그대로 재구성한다. 첫 선택은 상대에게 노출하지 않으며 terminal 이후의 동일 선택 재시도와 미공개 턴을 남긴 VOID의 응답도 기존과 같다.
+- schema 4는 방 JSON에 공개 relay를 압축 보관한다. 완료 턴은 `[p1Code,p2Code,releasedAt-startedAt]` 튜플이며 seq는 배열 위치+1이다. code 0은 timeout, 1~4는 move, 5는 policy다. 진행 턴의 deadline·양쪽 미공개 선택은 별도로 보관한다. 외부 응답의 config·journal·pair·releasedAt·ownChoice·페이지 순서·토큰 허용 범위는 그대로 재구성한다. 첫 선택의 내용은 상대에게 노출하지 않으며(선택했다는 사실만 D7의 `opponentSubmitted`로 알린다) terminal 이후의 동일 선택 재시도와 미공개 턴을 남긴 VOID의 응답도 기존과 같다.
 - 첫 선택, 둘째 선택+pair, advance는 각각 방 data 단일 UPDATE로 저장하며 변경 없는 재시도는 쓰지 않는다. 기존 색인 deadline에는 도전/경기/보고의 lifecycle 기한을 두고, 실제 턴 기한은 비색인 turn_deadline에 같은 UPDATE로 쓴다. RUNNING 후보를 찾는 seq 부분 색인을 두되 매 턴 state/lifecycle deadline을 다시 쓰지 않는다. 전역 due/min은 SQL의 lifecycle 및 진행 턴 기한으로 계산한다.
 - SQL 알람 metadata 쓰기를 없애고 Cloudflare runtime의 영속 alarm을 재사용한다. 생성자의 `blockConcurrencyWhile` 안에서 `getAlarm()`과 SQL의 실제 기한을 읽고 인스턴스에는 runtime alarm의 mirror만 둔다. 예약이 없거나 SQL min보다 늦으면 생성자에서 즉시 예약하지 않고 보수적 하한 0·repairPending으로 표시한다. 첫 실제 이벤트가 alarm이면 소비 처리 후 한 번만 예약하고, 일반 tx는 finish가 복구한다. tx를 우회하는 fetch·standings·WebSocket message/close/error 진입점도 pending 복구를 처리한다. **SQL min이 미래인 cold early alarm에도 같은 규칙을 적용한다.** 기존 예약이 이르면 그대로 유지하고 새 기한이 더 이른 경우에만 당긴다. 이른 알람은 방/metadata를 쓰지 않고 실제 다음 기한으로 다시 예약한다. 메모리는 영속 원본이 아니며 재생성/hibernation 뒤에도 SQL와 runtime alarm으로 복원한다. SQL transaction 안에는 await를 추가하지 않는다.
 - 한 요청은 하나의 `now`로 만료와 동작을 판정한다. 기존 alarm이 미래이면 만료 대상이 없다는 하한으로만 사용한다. 커밋된 변경의 더 이른 기한 힌트를 예약에 반영하고, 알람 소비·늦은 요청·재생성 때 SQL의 실제 min을 다시 계산한다. 실패 응답(`Result.fail`)에도 먼저 커밋된 만료/시도 제한 변경은 유지하며 실제 예외 rollback 때만 힌트를 버린다. 소비된 알람의 SQL rollback 또는 사후 min 조회 실패는 mirror를 하한 0으로 무효화해 runtime 재시도 전 늦은 HTTP도 만료를 집행한다. 예약 직전 mirror를 동기 갱신해 Promise 완료 역전으로 늦은 시각이 덮어쓰지 못하게 한다. 예약 실패는 인스턴스를 폐기하고 다음 생성자에서 복원한다.

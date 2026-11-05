@@ -10,6 +10,7 @@ describe("lockstep relay", () => {
     const f = await running(mode), id = f.view.battleId;
     if (mode === "manual") expect((await action(f.p1, id, "choices", { roundSeq: 1, choice: "move 3" })).status).toBe(200);
     const before = (await getBattle(f.p2, id)).body;
+    if (mode === "manual") expect(await f.b.socket.next()).toMatchObject({ type: "battle_changed", opponentSubmitted: true }); // the first choice's signal
     await f.a.socket.sync(); await f.b.socket.sync();
     await runInDurableObject(leagueStub(), (_i, state) => state.storage.sql.exec("CREATE TRIGGER fail_relay_room BEFORE UPDATE ON battle_rooms BEGIN SELECT RAISE(ABORT, 'test_fault'); END"));
     const publish = () => mode === "manual" ? action(f.p2, id, "choices", { roundSeq: 1, choice: "move 2" }) : action(f.p2, id, "advance", { processedRoundSeq: 1 });
@@ -21,18 +22,26 @@ describe("lockstep relay", () => {
     expect(retry.body.journal).toHaveLength(mode === "manual" ? 1 : 2);
     const duplicate = await publish(); expect(duplicate.status).toBe(200); expect(duplicate.body).toEqual(retry.body);
   });
-  it("opens round1 and never exposes the first choice or submission signal to its opponent", async () => {
+  it("opens round1 and shows its opponent only that a first choice is in, never which one, over HTTP and the socket", async () => {
     const f = await running(); const id = f.view.battleId;
     expect(f.view.roundSeq).toBe(1); expect(f.view.deadline).toBe(f.view.startedAt + 30000);
-    const before = (await getBattle(f.p2, id)).body;
+    const before = (await getBattle(f.p2, id)).body; expect(before.opponentSubmitted).toBe(false);
     const one = await action(f.p1, id, "choices", { roundSeq: 1, choice: "move 3" }); expect(one.status).toBe(200); expect(one.body.ownChoice).toBe("move 3");
-    expect((await getBattle(f.p2, id)).body).toEqual(before); await f.a.socket.sync(); await f.b.socket.sync();
+    expect(one.body.opponentSubmitted).toBe(false);
+    const seen = (await getBattle(f.p2, id)).body;
+    expect(seen).toEqual({ ...before, opponentSubmitted: true }); expect(JSON.stringify(seen)).not.toContain("move 3");
+    // Over the socket too, the opponent learns only that it is in: one frame, existing type, no slot; the chooser gets none.
+    const signal = await f.b.socket.next(); await f.b.socket.sync(); await f.a.socket.sync();
+    expect(Object.keys(signal).sort()).toEqual(["v", "type", "battleId", "state", "revision", "roundSeq", "deadline", "opponentSubmitted"].sort());
+    expect(signal).toMatchObject({ type: "battle_changed", battleId: id, roundSeq: 1, opponentSubmitted: true, deadline: seen.deadline }); expect(JSON.stringify(signal)).not.toContain("move");
     const retry = await action(f.p1, id, "choices", { roundSeq: 1, choice: "move 3" }); expect(retry.body).toEqual(one.body);
+    await f.a.socket.sync(); await f.b.socket.sync(); // a retry sends nothing
     expectError(await action(f.p1, id, "choices", { roundSeq: 1, choice: "move 2" }), 409, "choice_conflict");
     const two = await action(f.p2, id, "choices", { roundSeq: 1, choice: "move 2" }); expect(two.status).toBe(200);
     expect(two.body.journal).toEqual([{ roundSeq: 1, p1: { kind: "move", slot: 3 }, p2: { kind: "move", slot: 2 }, releasedAt: expect.any(Number) }]);
     for (const socket of [f.a.socket, f.b.socket]) expect((await socket.until(m => m.type === "battle_round")).pair).toEqual(two.body.journal[0]);
-    const view = (await getBattle(f.p1, id)).body; expect(view.ownChoice).toBeNull();
+    const view = (await getBattle(f.p1, id)).body; expect(view.ownChoice).toBeNull(); expect(view.opponentSubmitted).toBe(false);
+    expect((await getBattle(f.p2, id)).body.opponentSubmitted).toBe(false);
     expect((await action(f.p1, id, "choices", { roundSeq: 1, choice: "move 3" })).body.journal).toHaveLength(1);
   });
   it("restores private own choice, config and journal after hibernation and reconnect", async () => {

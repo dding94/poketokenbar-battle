@@ -126,4 +126,92 @@ final class OnlineBattleCredentialsTests: XCTestCase {
             XCTAssertThrowsError(try OnlineBattleSettings.load(from: folder))
         } catch { XCTFail("Expected successful fixture operation; received \(error)") }
     }
+    // MARK: T08 — build-time embedded server address
+    private func settingsFolder(stored: String?) throws -> URL {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        var settings = try OnlineBattleSettings.load(from: folder)
+        if let stored { try settings.setServer(stored); try settings.save(to: folder) }
+        return folder
+    }
+    private func storedJSONServer(_ folder: URL) throws -> String? {
+        let data = try Data(contentsOf: folder.appendingPathComponent("online-battle-settings.json"))
+        return (try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any]))["serverURL"] as? String
+    }
+    private func account(_ settings: OnlineBattleSettings) throws -> String {
+        OnlineBattleCredentialScope(profileID: settings.profileID, origin: try OnlineBattleOrigin(try XCTUnwrap(settings.serverURL))).account
+    }
+    func testEmbeddedAddressOverridesStoredAddressWithoutRewritingTheStoredFile() throws {
+        let folder = try settingsFolder(stored: "https://stored.example.test")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let settings = try OnlineBattleSettings.load(from: folder, embeddedServerURL: "https://embedded.example.test")
+        XCTAssertEqual(settings.serverURL, "https://embedded.example.test")
+        XCTAssertTrue(settings.serverIsEmbedded)
+        XCTAssertEqual(settings.storedServerURL, "https://stored.example.test")
+        try settings.save(to: folder)
+        XCTAssertEqual(try storedJSONServer(folder), "https://stored.example.test")
+        let manual = try OnlineBattleSettings.load(from: folder, embeddedServerURL: nil)
+        XCTAssertEqual(manual.serverURL, "https://stored.example.test")
+    }
+    func testWithoutEmbeddedAddressStoredAddressStaysManual() throws {
+        let folder = try settingsFolder(stored: "https://stored.example.test")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let settings = try OnlineBattleSettings.load(from: folder, embeddedServerURL: nil)
+        XCTAssertEqual(settings.serverURL, "https://stored.example.test")
+        XCTAssertFalse(settings.serverIsEmbedded)
+        var editable = settings
+        XCTAssertNoThrow(try editable.setServer("https://other.example.test"))
+        XCTAssertEqual(editable.serverURL, "https://other.example.test")
+    }
+    func testEmbeddedAddressWithNoStoredAddressIsUsedAndNotPersisted() throws {
+        let folder = try settingsFolder(stored: nil)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let settings = try OnlineBattleSettings.load(from: folder, embeddedServerURL: "https://example.test/")
+        XCTAssertEqual(settings.serverURL, "https://example.test")
+        XCTAssertTrue(settings.serverIsEmbedded)
+        try settings.save(to: folder)
+        XCTAssertNil(try storedJSONServer(folder))
+    }
+    func testEmbeddedAddressSameAsStoredKeepsTheExistingKeychainScope() throws {
+        let folder = try settingsFolder(stored: "https://example.test")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let stored = try OnlineBattleSettings.load(from: folder, embeddedServerURL: nil)
+        // Different spellings of the same origin must normalize to the same hash, or the saved key is orphaned.
+        for spelling in ["https://example.test", "https://example.test/", "HTTPS://Example.TEST:443/"] {
+            let embedded = try OnlineBattleSettings.load(from: folder, embeddedServerURL: spelling)
+            XCTAssertTrue(embedded.serverIsEmbedded, spelling)
+            XCTAssertEqual(embedded.profileID, stored.profileID)
+            XCTAssertEqual(try account(embedded), try account(stored), spelling)
+        }
+        let different = try OnlineBattleSettings.load(from: folder, embeddedServerURL: "https://other.example.test")
+        XCTAssertNotEqual(try account(different), try account(stored))
+    }
+    func testInvalidEmbeddedValuesAreIgnoredAndManualEntryRemains() throws {
+        let folder = try settingsFolder(stored: "https://stored.example.test")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        for bad in ["", "   ", "http://example.test", "https://example.test/path", "https://example.test?x=1",
+                    "https://user@example.test", "$(PTB_BATTLE_SERVER_URL)", "not a url"] {
+            let settings = try OnlineBattleSettings.load(from: folder, embeddedServerURL: bad)
+            XCTAssertFalse(settings.serverIsEmbedded, bad)
+            XCTAssertEqual(settings.serverURL, "https://stored.example.test", bad)
+        }
+    }
+    func testEmbeddedAddressRejectsManualServerChanges() throws {
+        let folder = try settingsFolder(stored: nil)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        var settings = try OnlineBattleSettings.load(from: folder, embeddedServerURL: "https://example.test")
+        XCTAssertThrowsError(try settings.setServer("https://other.example.test")) {
+            XCTAssertEqual($0 as? OnlineBattleFailure, .invalidSettings)
+        }
+        XCTAssertEqual(settings.serverURL, "https://example.test")
+    }
+    func testEmbeddedServerReadsOnlyTheInfoPlistStringKey() {
+        XCTAssertEqual(OnlineBattleEmbeddedServer.infoKey, "PTBBattleServerURL")
+        XCTAssertEqual(OnlineBattleEmbeddedServer.address(infoDictionary: ["PTBBattleServerURL": "https://example.test/"]), "https://example.test")
+        XCTAssertNil(OnlineBattleEmbeddedServer.address(infoDictionary: nil))
+        XCTAssertNil(OnlineBattleEmbeddedServer.address(infoDictionary: [:]))
+        XCTAssertNil(OnlineBattleEmbeddedServer.address(infoDictionary: ["PTBBattleServerURL": 7]))
+        XCTAssertNil(OnlineBattleEmbeddedServer.address(infoDictionary: ["PTBBattleServerURL": ""]))
+        XCTAssertNil(OnlineBattleEmbeddedServer.address(infoDictionary: ["PTBBattleServerURL": "http://example.test"]))
+        XCTAssertNil(OnlineBattleEmbeddedServer.configured, "The test host bundle must carry no embedded address")
+    }
 }

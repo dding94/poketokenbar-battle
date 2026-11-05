@@ -1,6 +1,7 @@
 import AppKit
 import QuartzCore
 import SwiftUI
+import UserNotifications
 
 @main
 @MainActor
@@ -15,7 +16,7 @@ struct PokeTokenBarApp: App {
 }
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNotificationCenterDelegate {
     private var statusItem: NSStatusItem!
     private let popover = NSPopover()
     private var outsideClickMonitor = OutsideClickMonitor()
@@ -27,7 +28,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private var practice: PracticeSession!
     private var onlineAccessObservation: OnlineBattleAccessObservation?
     private var online: OnlineBattleSession?
+    private var onlineReconnectSignals: OnlineReconnectSignals?
     private var onlinePresentation = OnlineBattlePresentation()
+    private var onlineAttention = OnlineAttentionSource(presentation: OnlineBattlePresentation())
+    /// Nil outside a bundled app, where UNUserNotificationCenter cannot be used.
+    private var onlineNotifier: OnlineAttentionNotifier?
+    private var appliedOnlineMark: OnlineMenuMark?
+    private var onlineMarkTimer: Timer?
     var onOpenPractice: (() -> Void)?
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
@@ -44,12 +51,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     }
 
     /// 팝오버를 열 때의 화면 결정 — Home 으로 reset 한 뒤 진행 중인 연습이 있으면 연습 화면, 그다음 `route`.
-    static func applyOpenRoute(to navigation: PopoverNavigation, practiceActive: Bool,
+    /// 처리할 온라인 사건이나 진행 중인 경기(`onlineActive`)는 그 위에서 온라인 화면으로 복귀한다. 단, `route` 가 설정·도감처럼
+    /// 다른 화면을 골랐으면 그 선택을 덮지 않는다(온라인 화면이 먼저 그려져 가리기 때문).
+    static func applyOpenRoute(to navigation: PopoverNavigation, practiceActive: Bool, onlineActive: Bool = false,
                                route: (PopoverNavigation) -> Void) {
         navigation.reset()
         navigation.showingPractice = practiceActive   // reset() 이 이 플래그를 지우는지에 기대지 않는다
         route(navigation)
+        let routedElsewhere = navigation.showSettings || navigation.showingRecap || navigation.tab != .home
+            || navigation.dexDetailCollectionID != nil
+        if onlineActive, !routedElsewhere { navigation.showingOnlineBattle = true }
     }
+
+    /// After `applyOpenRoute`: moves to the event only if the online screen won, so a menu destination moves nothing.
+    static func followOpenRoute(_ battleId: String?, navigation: PopoverNavigation, model: OnlineBattlePresentation, l: L) {
+        guard navigation.showingOnlineBattle, let battleId else { return }
+        navigation.openOnlineEvent(battleId, model: model, l: l)
+    }
+
+    /// Route for a clicked online notification: the online screen, on top of the reset to Home.
+    static func openOnlineScreen(_ navigation: PopoverNavigation) { navigation.showingOnlineBattle = true }
 
     /// 메뉴바 첫 줄 끝에 연습전 배지를 붙인다. 줄이 없으면 배지만 한 줄로 둔다.
     nonisolated static func menuLines(_ lines: [String], badge: String?) -> [String] {
@@ -69,18 +90,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     nonisolated static let faintedMark = "\u{271A}"
 
     /// The first line's suffix: the practice badge and the fainted mark, in that order; nil when neither.
-    nonisolated static func menuBadge(practice: String?, fainted: Bool) -> String? {
-        let parts = [practice, fainted ? faintedMark : nil].compactMap { $0 }
+    nonisolated static func menuBadge(practice: String?, fainted: Bool, online: String? = nil) -> String? {
+        let parts = [practice, fainted ? faintedMark : nil, online].compactMap { $0 }
         return parts.isEmpty ? nil : parts.joined(separator: " ")
     }
 
     /// The tooltip with the practice line and, while the current Pokémon (`faintedName`) is fainted, how to heal it.
     nonisolated static func menuToolTip(base: String?, badge: String?, resultReady: Bool, faintedName: String?,
-                                        l: L) -> String? {
+                                        onlineLine: String? = nil, l: L) -> String? {
         var lines: [String] = []
         if let base, !base.isEmpty { lines.append(base) }
         if badge != nil { lines.append(resultReady ? l.practiceStatusResult : l.practiceStatusRunning) }
         if let faintedName { lines.append(l.menuFaintedLine(faintedName)) }
+        if let onlineLine { lines.append(onlineLine) }
         // Nothing to add keeps the base as it was, an empty one included.
         return lines.isEmpty ? base : lines.joined(separator: "\n")
     }
@@ -149,6 +171,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         // 포크는 원본 앱 폴더를 옮기거나 쓰지 않는다(원본의 TokenMac → PokeTokenBar 이관도 원본 몫).
         // 첫 실행에만 원본 세이브를 포크 폴더로 복사해 온다.
         Self.importUpstreamSaveIfNeeded()
+        LoginItem.reconcileRegisteredPathAtLaunch()   // 앱 폴더 이름/위치가 바뀐 설치본의 로그인 에이전트 경로 재등록
         LoginItem.migrateFromLegacyLoginItemIfNeeded()   // 로그인아이템 → KeepAlive 에이전트(크래시 자동 재실행)
         store = UsageStore()
         companion = CompanionStore()
@@ -182,7 +205,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             setStatusImage(egg, cgFrame: Self.cgFrame(from: egg))   // 초기 알도 같은 경로로(불변식)
         }
 
-        popover.behavior = .transient
+        popover.behavior = .transient   // entry/waiting/battle steps switch to .applicationDefined, see applyPinning
+        navigation.closePopover = { [weak self] in self?.popover.performClose(nil) }
         popover.delegate = self   // didShow: outside-click monitor; didClose: 호스팅 해제 + 모니터 제거
 
         observeStore()
@@ -191,6 +215,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         observePowerState()
         observePractice()
         observeCurrentHealth()
+        observeOnlineMark()
+        observeOnlinePinning()
         observeOnlineAccess()
         applyState()
         if Self.launchRequestsPractice(arguments: CommandLine.arguments) {
@@ -254,7 +280,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private func prepareOnlineBattle() {
         do {
             let directory = AppStatePaths.directory()
-            let settings = try OnlineBattleSettings.load(from: directory)
+            let settings = try OnlineBattleSettings.load(from: directory, embeddedServerURL: OnlineBattleEmbeddedServer.configured)
             let engineURL = Bundle.main.url(forResource: "battle-engine", withExtension: "js")
             let session = OnlineBattleSession(settings: settings,
                 credentials: OnlineBattleCredentials(gate: .init(allowsAccess: { !KeychainAccessGate.isDisabled })),
@@ -264,12 +290,66 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
                     return try BattleEngine(url: engineURL)
                 }, connectionFactory: { OnlineBattleConnection(observer: $0) },
                 saveSettings: { try $0.save(to: directory) }, enabled: !store.disableKeychainAccess,
-                accessAllowed: { !KeychainAccessGate.isDisabled })
+                accessAllowed: { !KeychainAccessGate.isDisabled },
+                localization: { [companion = companion!] in companion.l })
+            session.onSetupCodeUsed = { OnlineBattleClipboard.forget($0) }
             online = session; onlinePresentation = session.presentation
+            onlineAttention = OnlineAttentionSource(presentation: session.presentation,
+                                                    preparedBattleIDs: { [weak session] in session?.preparedBattleIDs() ?? [] },
+                                                    stagingHeldBattleIDs: { [weak session] in session?.stagingHeldBattleIDs() ?? [] },
+                                                    noChoiceBattleIDs: { [weak session] in session?.noChoiceBattleIDs() ?? [] })
+            prepareOnlineNotifier(presentation: session.presentation, directory: directory)
+            let signals = OnlineReconnectSignals { [weak session] reason in await session?.reconnectHint(reason) }
+            signals.start()
+            onlineReconnectSignals = signals
             Task { await session.bootstrap() }
         } catch {
             onlinePresentation.notice = "온라인 설정을 읽지 못했어요. 저장 폴더를 확인해 주세요."
         }
+    }
+
+    /// The notifier is the second channel behind the menu-bar mark; the delegate routes clicks and says what an active app shows.
+    /// It is set up with the session so a notification that launched the app is delivered after it.
+    private func prepareOnlineNotifier(presentation: OnlineBattlePresentation, directory: URL) {
+        guard AppEnv.isBundledApp else { return }
+        UNUserNotificationCenter.current().delegate = self
+        onlineNotifier = OnlineAttentionNotifier(
+            center: SystemOnlineNotificationCenter(), store: OnlineAttentionStateFile(directory: directory),
+            l: { [companion = companion!] in companion.l },
+            setHint: { [presentation] hint in presentation.notificationHint = hint },
+            syncEnded: { [presentation, companion = companion!] unread, read in presentation.syncEnded(unread: unread, read: read, l: companion.l) })
+    }
+
+    /// Feeds the same input the menu-bar mark reads to the notifier. Tasks run in order up to their first
+    /// suspension, and the notifier updates its record before suspending, so bursts cannot double-announce.
+    /// `popoverJustShown` covers the open itself, where the activation requested just before `show` may not have landed yet.
+    private func deliverOnlineAttention(popoverJustShown: Bool = false) {
+        guard let notifier = onlineNotifier else { return }
+        let input = onlineAttention.input(onlineScreenShowing: popover.isShown && navigation.showingOnlineBattle)
+        let open = popoverJustShown || OnlinePopoverPinning.showsAttentionInstead(popoverShown: popover.isShown, appActive: NSApp.isActive)
+        Task { await notifier.handle(input, popoverOpen: open) }
+    }
+
+    /// A clicked notification opens the popover on that battle, whichever screen it was on.
+    private func openOnlineBattle(_ battleId: String) {
+        if popover.isShown {
+            navigation.openOnlineEvent(battleId, model: onlinePresentation, l: companion.l)
+            NSApp.activate(ignoringOtherApps: true)
+        } else {
+            showPopover(following: battleId, route: Self.openOnlineScreen)
+        }
+    }
+
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
+        guard response.actionIdentifier == UNNotificationDefaultActionIdentifier,
+              let battleId = OnlineAttentionNotifier.battleId(fromUserInfo: response.notification.request.content.userInfo) else { return }
+        await MainActor.run { openOnlineBattle(battleId) }
+    }
+
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
+        let battleId = OnlineAttentionNotifier.battleId(fromUserInfo: notification.request.content.userInfo)
+        let inFront = await MainActor.run { OnlinePopoverPinning.showsAttentionInstead(popoverShown: popover.isShown, appActive: NSApp.isActive) }
+        return OnlineNotificationForeground.options(battleId: battleId, attentionInFront: inFront)
     }
 
     private func observeOnlineAccess() {
@@ -308,6 +388,64 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         }
     }
 
+    /// Online mark: any presentation change that moves the mark redraws the menu bar, and a timer covers the two
+    /// moments the clock alone changes it (a turn reaching ten seconds, and its deadline).
+    private func observeOnlineMark() {
+        withObservationTracking {
+            _ = onlineAttention.menuMark(l: companion.l)
+        } onChange: { [weak self] in
+            Task { @MainActor in
+                guard let self else { return }
+                if self.onlineAttention.menuMark(l: self.companion.l) != self.appliedOnlineMark { self.applyState() }
+                self.deliverOnlineAttention()
+                self.scheduleOnlineMarkTimer()
+                self.observeOnlineMark()
+            }
+        }
+        scheduleOnlineMarkTimer()
+    }
+
+    /// The pinned section follows the phase and whether the online screen is showing. It only ever changes how an
+    /// already open popover reacts to outside clicks; nothing here shows or closes it.
+    private func observeOnlinePinning() {
+        withObservationTracking {
+            _ = OnlinePopoverPinning.isPinned(onlinePresentation, onlineScreenShowing: navigation.showingOnlineBattle)
+        } onChange: { [weak self] in
+            Task { @MainActor in
+                guard let self else { return }
+                self.applyPinning(popoverOpen: self.popover.isShown)
+                self.deliverOnlineAttention()   // reaching the lobby reads an ended request
+                self.observeOnlinePinning()
+            }
+        }
+    }
+
+    /// Pinned = `.applicationDefined` and no outside-click monitor; otherwise `.transient` plus the monitor.
+    /// Leaving the pinned section only relaxes the behavior; it never closes the popover.
+    private func applyPinning(popoverOpen: Bool) {
+        let pinned = popoverOpen && OnlinePopoverPinning.isPinned(onlinePresentation, onlineScreenShowing: navigation.showingOnlineBattle)
+        if onlinePresentation.popoverPinned != pinned { onlinePresentation.popoverPinned = pinned }
+        let behavior: NSPopover.Behavior = pinned ? .applicationDefined : .transient
+        if popover.behavior != behavior { popover.behavior = behavior }
+        guard popover.isShown else { return }
+        if pinned { stopOutsideClickMonitor() } else { startOutsideClickMonitor() }
+    }
+
+    private func scheduleOnlineMarkTimer() {
+        onlineMarkTimer?.invalidate()
+        onlineMarkTimer = nil
+        guard let next = onlineAttention.nextMarkChange() else { return }
+        // A hair late, so the clock is past the boundary when the mark is recomputed.
+        onlineMarkTimer = Timer.scheduledTimer(withTimeInterval: max(0.1, next.timeIntervalSinceNow + 0.05), repeats: false) { [weak self] _ in
+            Task { @MainActor in
+                guard let self else { return }
+                if self.onlineAttention.menuMark(l: self.companion.l) != self.appliedOnlineMark { self.applyState() }
+                self.deliverOnlineAttention()
+                self.scheduleOnlineMarkTimer()
+            }
+        }
+    }
+
     /// 저전력 모드 토글을 즉시 반영 — 유효 하한(`menuFrameFloor`)이 바뀌면 `menuSpriteKey` 가
     /// 달라져 `ensureMenuAnimation()` 이 재구성한다(선택이 powerSaver 면 하한 불변 → 재구성 없음,
     /// 이미 그 프레임률이라 옳다). 플로팅 펫은 자체 관측(`FloatingPetController`)으로 따로 처리.
@@ -331,10 +469,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         // 현재 포켓몬이 기절했으면(PR 03C) 회복할 때까지 첫 줄 끝 표식 + 툴팁 한 줄 + (그 포켓몬을 보여 줄 때) 흐린 스프라이트.
         let faint = currentFaintLook
         appliedFaintLook = faint
-        Self.applyMenuText(Self.menuLines(store.menuLines, badge: Self.menuBadge(practice: badge, fainted: faint.fainted)),
-                           to: button, colors: store.menuLimitColorRuns())
+        let onlineMark = onlineAttention.menuMark(l: companion.l)
+        appliedOnlineMark = onlineMark
+        Self.applyMenuText(Self.menuLines(store.menuLines, badge: Self.menuBadge(practice: badge, fainted: faint.fainted, online: onlineMark?.text)),
+                           to: button, colors: store.menuLimitColorRuns(), onlineMark: onlineMark)
         button.toolTip = Self.menuToolTip(base: store.menuToolTip, badge: badge, resultReady: !practice.resultSeen,
-                                          faintedName: faint.fainted ? companion.displayName : nil, l: companion.l)
+                                          faintedName: faint.fainted ? companion.displayName : nil,
+                                          onlineLine: onlineMark?.tooltip, l: companion.l)
         CATransaction.begin()
         CATransaction.setDisableActions(true)   // 레이어 속성 변경도 전환 애니메이션 없이(setStatusImage 와 같은 규칙)
         spriteLayer.opacity = Self.statusSpriteOpacity(fainted: faint.fainted, showsCurrent: faint.showsCurrent)
@@ -356,7 +497,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     /// 줄 수에 맞춰 폰트를 자동 축소해 N줄이 메뉴바 높이에 클리핑 없이 들어오게 한다. 한도 항목 색
     /// (`colors`) 외에는 색을 지정하지 않아 메뉴바 명암(라이트/다크)·비활성(appearsDisabled) 상태에 자동 적응한다.
     private static func applyMenuText(_ lines: [String], to button: NSStatusBarButton,
-                                      colors: [UsageStore.MenuLimitColorRun]) {
+                                      colors: [UsageStore.MenuLimitColorRun], onlineMark: OnlineMenuMark? = nil) {
         if lines.count >= 2 {
             // NSStatusBarButton 은 멀티라인 title 을 세로 중앙에 두지 않고 위로 치우쳐 그린다(측정:
             // titleRect.y 가 음수 → 상단 클리핑 + 하단 여백, 사용자 지적). 그래서 baselineOffset 을
@@ -377,6 +518,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
                     string: lines.joined(separator: "\n"),
                     attributes: [.font: font, .paragraphStyle: para, .baselineOffset: offset])
                 MenuLimitColoring.apply(colors, to: title)
+                MenuOnlineMarkColoring.apply(onlineMark, to: title)
                 return title
             }
             let bounds = button.bounds
@@ -393,11 +535,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             // 1줄로 되돌릴 때 이전 attributedTitle 이 남지 않게 먼저 비운다.
             button.attributedTitle = NSAttributedString(string: "")
             let title = lines.first ?? ""
-            if !colors.isEmpty, !title.isEmpty {
+            if (!colors.isEmpty || MenuOnlineMarkColoring.color(for: onlineMark?.tone ?? .ongoing) != nil), !title.isEmpty {
                 let colored = NSMutableAttributedString(
                     string: " " + title,
                     attributes: [.font: button.font ?? NSFont.menuBarFont(ofSize: 0)])
                 MenuLimitColoring.apply(colors, to: colored)
+                MenuOnlineMarkColoring.apply(onlineMark, to: colored)
                 button.attributedTitle = colored
             } else {
                 button.title = title.isEmpty ? "" : " " + title
@@ -724,7 +867,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         popover.contentViewController = NSHostingController(
             rootView: PopoverView()
                 .environment(store).environment(companion).environment(updater).environment(navigation)
-                .environment(practice).environment(onlinePresentation))
+                .environment(practice).environment(onlinePresentation).environment(onlineAttention))
     }
 
     @objc private func statusItemClicked() {
@@ -770,10 +913,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     }
 
     /// `route` runs after the reset to Home, so a menu item can land on a specific screen.
-    private func showPopover(route: (PopoverNavigation) -> Void = { _ in }) {
+    /// `following` is a clicked notification's battle; otherwise an opening goes where `openRoute` says.
+    private func showPopover(following battleId: String? = nil, route: (PopoverNavigation) -> Void = { _ in }) {
         guard let button = statusItem.button, !popover.isShown else { return }
-        // 닫혔다 열리면 항상 Home 으로 (설정 화면 잔류 방지) — 진행 중인 연습만 그 자리로 복귀
-        Self.applyOpenRoute(to: navigation, practiceActive: practice.isActive, route: route)
+        // 닫혔다 열리면 항상 Home 으로 (설정 화면 잔류 방지) — 진행 중인 연습과 처리할 온라인 사건만 그 자리로 복귀
+        let target = onlineAttention.openRoute()
+        Self.applyOpenRoute(to: navigation, practiceActive: practice.isActive, onlineActive: target != nil, route: route)
+        Self.followOpenRoute(battleId ?? target?.battleId, navigation: navigation, model: onlinePresentation, l: companion.l)
+        applyPinning(popoverOpen: true)   // before show, so the first frame already has the right behavior
         practice.setPaused(false, reason: .popoverClosed)
         buildPopoverContent()   // 열 때 호스팅 트리 생성(닫힐 때 해제)
         // LSUIElement 앱이 비활성이면 팝오버 내부 버튼 클릭이 무시됨 — show 전에 활성화 보장
@@ -789,13 +936,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     /// overwrite a live token (#168). `start` is also idempotent if `didShow` fires twice.
     func popoverDidShow(_ notification: Notification) {
         Task { await online?.perform(.setPopoverVisible(true)) }
-        startOutsideClickMonitor()
+        deliverOnlineAttention(popoverJustShown: true)   // an open popover marks what it shows as seen, and may ask the permission once
+        if let notifier = onlineNotifier { Task { await notifier.refreshPermissionHint() } }
+        if !onlinePresentation.popoverPinned { startOutsideClickMonitor() }
     }
 
     /// 팝오버가 닫히면 호스팅 컨트롤러 해제(숨은 트리 재레이아웃 비용 제거) + 메뉴바 애니메이션 재개.
     func popoverDidClose(_ notification: Notification) {
         Task { await online?.perform(.setPopoverVisible(false)) }
         stopOutsideClickMonitor()
+        applyPinning(popoverOpen: false)   // back to .transient; the next open decides again
         popover.contentViewController = nil
         practice.setPaused(true, reason: .popoverClosed)
         practice.releaseIfIdle()   // 진행 중인 배틀이 없을 때만 엔진·로스터 해제

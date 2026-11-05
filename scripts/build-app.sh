@@ -1,5 +1,5 @@
 #!/bin/bash
-# PokeTokenBar Battle.app 번들 조립 + /Applications 설치
+# PokeTokenBattle.app 번들 조립 + /Applications 설치
 #
 # 포크 식별값(번들 ID·앱 이름·실행 파일·LaunchAgent label)은 Sources/PokeTokenBar/Core/AppIdentity.swift 와
 # 같아야 한다 — AppIdentityTests 가 이 파일을 읽어 대조한다. 원본 PokeTokenBar.app 은 절대 지우거나 종료하지 않는다.
@@ -13,7 +13,13 @@ if [[ -n "${PTB_RELEASE_VERSION:-}" ]]; then
     [[ "$PTB_RELEASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'Invalid PTB_RELEASE_VERSION' >&2; exit 1; }
     VERSION="$PTB_RELEASE_VERSION"
 fi
-APP_NAME="PokeTokenBar Battle"
+# Optional build-time server address (never committed). Unset = the app keeps manual address entry.
+SERVER_URL_PLIST=""
+if [[ -n "${PTB_BATTLE_SERVER_URL:-}" ]]; then
+    SERVER_URL="$(python3 scripts/release-validate.py server-url "$PTB_BATTLE_SERVER_URL")" || exit 1
+    SERVER_URL_PLIST="<key>PTBBattleServerURL</key><string>$SERVER_URL</string>"
+fi
+APP_NAME="PokeTokenBattle"
 EXEC_NAME="PokeTokenBarBattle"
 BUNDLE_ID="io.github.dding94.poketokenbar-battle"
 LOGIN_LABEL="io.github.dding94.poketokenbar-battle.login"
@@ -80,6 +86,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>CFBundleIconFile</key><string>AppIcon</string>
     <key>LSUIElement</key><true/>
     <key>NSHighResolutionCapable</key><true/>
+    $SERVER_URL_PLIST
 </dict>
 </plist>
 PLIST

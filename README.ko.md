@@ -1,10 +1,12 @@
-> **Battle 포크 안내:** 이 저장소는 `dding94/poketokenbar-battle`이며 최소 macOS 15입니다. 아래 기존 육성 앱 소개는 upstream에서 가져온 설명입니다. 온라인 기능의 최신 구현/검증 상태는 [AI_HANDOFF](docs/AI_HANDOFF.md), 설치·공개 경계는 [RELEASE.md](RELEASE.md)를 따릅니다. 2.6.0 테스트판을 공개했으며 실제 두 맥 검증은 아직 완료되지 않았습니다.
+> **비공식 팬 프로젝트:** PokeTokenBattle은 The Pokémon Company, Nintendo 및 원본 PokeTokenBar와 무관하며 이들의 승인·후원을 받지 않았습니다.
+
+> **Battle 포크 안내:** 이 저장소는 `dding94/poketokenbar-battle`이며 최소 macOS 15입니다. 아래 기존 육성 앱 소개는 upstream에서 가져온 설명입니다. 온라인 기능의 최신 구현/검증 상태는 [AI_HANDOFF](docs/AI_HANDOFF.md), 설치·공개 경계는 [RELEASE.md](RELEASE.md)를 따릅니다. 공개 전 실제 두 맥 시험은 하지 않았고 공개 후 실전에서 확인합니다.
 
 <div align="center">
 
 <img src="assets/icon.png" width="128" alt="PokeTokenBar 아이콘">
 
-# PokeTokenBar Battle
+# PokeTokenBattle
 
 **당신의 AI 코딩 토큰을 포켓몬으로 — 메뉴바에서.**
 
@@ -32,10 +34,6 @@ PokeTokenBar는 당신이 이미 태우고 있는 AI 코딩 토큰(Claude Code �
 - 오늘의 토큰 사용량과 비용을 한눈에 — 대시보드도, 브라우저 탭도 필요 없이.
 - 공식 **5시간 / 주간** 한도를 리셋 카운트다운과 함께 추적하고, 현재 burn rate로 언제 도달할지 예측합니다.
 
-<div align="center">
-<img src="assets/screenshot-home.png" width="420" alt="팝오버 홈 — 포켓몬, 오늘 토큰, 일별 차트">
-</div>
-
 ## 어떻게 자라나요
 
 1. 🥚 **평소처럼 코딩하세요.** Claude Code·Codex·Gemini CLI·Antigravity·OpenCode·Hermes Agent·Cursor·Grok CLI·Copilot CLI·Kiro CLI·Pi Agent·omp·Aside·Kimi Code에서 태우는 토큰이 알을 품습니다 — 따로 돌릴 건 없어요.
@@ -49,36 +47,31 @@ PokeTokenBar는 당신이 이미 태우고 있는 AI 코딩 토큰(Claude Code �
 
 <table>
 <tr>
-<td width="45%" align="center"><img src="assets/floating-pet.gif" width="340" alt="바탕화면 플로팅 펫 — 호버 콜아웃과 우클릭 메뉴"></td>
-<td width="55%" valign="middle">
+<td valign="middle">
 <h3>🐾 바탕화면에 두기</h3>
 파트너를 메뉴바 밖 바탕화면으로 꺼내 48~384px 원하는 크기로 둘 수 있어요. 호버하면 오늘 사용량, 클릭하면 팝오버, 우클릭하면 메뉴, 드래그로 위치 이동 — 한도 알림은 펫 위 말풍선으로도 떠요.
 </td>
 </tr>
 <tr>
-<td width="55%" valign="middle">
+<td valign="middle">
 <h3>메뉴바 속 파트너</h3>
 움직이는 Gen-V 스프라이트가 오늘 토큰 합계(compact, 예: <code>200.7M</code>) 옆에 삽니다. 오늘 비용(<code>$</code>)이나 공식 한도 <code>%</code> 를 더하거나 — 전부 꺼서 캐릭터만 남길 수도 있어요.
 </td>
-<td width="45%" align="center"><img src="assets/menubar.gif" width="240" alt="메뉴바"></td>
 </tr>
 <tr>
-<td width="45%" align="center"><img src="assets/shiny-banner.gif" width="340" alt="일반 vs 이로치"></td>
-<td width="55%" valign="middle">
+<td valign="middle">
 <h3>✨ 아주 드문 우연, 이로치</h3>
 이로치는 메뉴바·홈 카드·진화 라인에서 전용 색으로 표시되고 진화를 거쳐도 유지됩니다. 도감 격자에서도 이로치로 보유한 종을 이로치 색과 ✨로 표시하며, 상세에서 보유한 일반·이로치 모습을 전환합니다. 안농의 격자 아이콘은 A를 유지하고 상세에서 문자와 색을 고릅니다. 전용 알림으로 부화 순간을 알려 줍니다.
 </td>
 </tr>
 <tr>
-<td width="55%" valign="middle">
+<td valign="middle">
 <h3>채우고 싶어지는 도감</h3>
 <b>도감</b>은 보유한 종을 한 칸으로 접어 4×4 배치로 한 페이지 16칸씩 보여 줍니다. 이름·번호 검색, 희귀도·이로치 필터와 정렬을 지원합니다. 마우스 휠·트랙패드 또는 클릭 영역을 넓힌 화살표로 페이지를 넘기세요. 홈·진화 라인·<b>포획 로그</b>의 수집한 포켓몬을 누르면 상세로 이동하고, 뒤로가기는 보던 도감 페이지나 열었던 로그 행으로 돌아옵니다. 로그에는 개체별 전체 진화 라인·희귀도·성격·획득일이 남습니다.
 </td>
-<td width="45%" align="center"><img src="assets/screenshot-collection-pokedex-ko.png" width="300" alt="도감 — 종 하나가 한 칸"><br><br><img src="assets/screenshot-collection-catchlog-ko.png" width="300" alt="포획 로그 — 키운 개체 하나가 한 행"></td>
 </tr>
 <tr>
-<td width="45%" align="center"><img src="assets/screenshot-pokemon-forms-ko.png" width="300" alt="로토무 폼 선택기와 폼별 개체"><br><small>샘플 포켓몬으로 실제 UI를 로컬 렌더링한 이미지입니다.</small></td>
-<td width="55%" valign="middle">
+<td valign="middle">
 <h3>같은 종의 다른 모습까지 수집</h3>
 로토무 가전, 쉐이미 랜드·스카이폼, 사철록 계절 모습, 안농 문자 등 지원하는 1~5세대 폼을 수집합니다. 도감에서 수집한 폼 수와 폼별 개체를 보고, 보유한 폼을 메뉴바·플로팅 펫의 대표로 고르세요. 동쪽 깝질무는 동쪽 트리토돈으로 진화하며, 모습은 저장·내보내기에도 유지됩니다. 타입·능력치·특성·기술은 기본형 데이터를 표시합니다.
 </td>
@@ -91,15 +84,13 @@ PokeTokenBar는 당신이 이미 태우고 있는 AI 코딩 토큰(Claude Code �
 </td>
 </tr>
 <tr>
-<td width="55%" valign="middle">
+<td valign="middle">
 <h3>🍬 한도를 채우면 이상한 사탕</h3>
 5시간 또는 주간 사용량 한도를 다 채우면 <b>이상한 사탕</b>을 받습니다 — 5시간 한도당 1개, 주간 한도당 5개. 새 <b>가방</b> 탭에서 현재 포켓몬에게 써서 키우세요: 막히는 순간이 곧 성장하는 순간이 됩니다.
 </td>
-<td width="45%" align="center"><img src="assets/screenshot-bag-ko.png" width="300" alt="가방 속 이상한 사탕과 민트"></td>
 </tr>
 <tr>
-<td width="45%" align="center"><img src="assets/screenshot-shop-ko.png" width="300" alt="토큰 상점 — 민트·이상한 사탕·포켓몬 알·고급 알·이로치 부적·희귀 알"></td>
-<td width="55%" valign="middle">
+<td valign="middle">
 <h3>🛒 사용량으로 돌아가는 상점</h3>
 그동안 쓴 토큰이 곧 재화입니다. 수량과 총가격을 보고 소모품 여러 개를 한 번에 구매하세요. <b>이상한 사탕</b>은 현재 포켓몬을 키우고, <b>민트</b>는 성격을 다시 굴립니다. <b>이로치 부적</b>은 이로치 확률을 영구히 올립니다. 알을 사면 현재 포켓몬을 놓아주고 다시 시작합니다 — 일반 <b>포켓몬 알</b>, 고급 이상 확정 <b>고급 알</b>, 희귀 이상 확정 <b>희귀 알</b>을 고를 수 있고 등급 알에도 전설은 섞여 있습니다. 빈 가방에서는 버튼으로 바로 상점에 갈 수 있습니다.
 </td>
@@ -183,9 +174,7 @@ Pi는 모델 여러 개를 세션 로그 하나로 흘려보낼 수 있습니다
 - **이상한 사탕 일괄 사용** — 여러 사탕을 한 번에 사용하고, 사용 전 성장 결과를 미리 볼 수 있습니다.
 - **한도 사용 페이스** — 게이지의 경과 시간 표식과 6단계 색상으로 사용 속도를 확인합니다. 메뉴바 한도 비율도 같은 색상을 사용합니다.
 
-<img src="assets/screenshot-usage-recap-ko.png" width="360" alt="선택한 기간의 사용량 돌아보기">
-
-<small>위 홈·설정·폼·상점·가방·난이도·일별 차트·회고 이미지는 샘플 데이터로 실제 UI를 로컬 렌더링한 이미지입니다.</small>
+<small>게임 스프라이트가 보이는 스크린샷은 이 문서에서 뺐습니다. 스프라이트는 실행 중 [PokéAPI](https://pokeapi.co/)에서 내려받으며 앱 번들에 들어 있지 않습니다. 남은 이미지는 샘플 데이터로 실제 UI를 로컬 렌더링한 것입니다.</small>
 
 ## 지원 도구
 
@@ -208,29 +197,44 @@ Pi는 모델 여러 개를 세션 로그 하나로 흘려보낼 수 있습니다
 
 모두 로컬에서 읽습니다 — 외부 사용량 CLI 불필요. 도구는 프로바이더 구현과 등록으로 추가합니다([CONTRIBUTING.ko.md](CONTRIBUTING.ko.md) 참고).
 
+## 온라인 대전 시작하기
+
+1. 방장에게 **초대코드**를 받습니다. 서버 주소는 앱에 들어 있어 입력하지 않습니다. 코드는 공개 파일에 올리지 않습니다.
+2. 홈에서 **온라인 배틀**을 열고 **닉네임**과 **초대코드**를 입력한 뒤 **그룹 참여**를 누르세요. 클립보드의 코드는 **초대코드 붙여넣기**로 넣을 수 있고, 가입 직후 보이는 복구코드는 복사해 두세요.
+3. 로비에서 동료에게 정식전을 신청하고 수락·최종 확인·전투 준비를 거쳐 직접 조작 또는 자동으로 겨룹니다. 팝오버를 닫아도 메뉴바 표식과 macOS 알림으로 신청·내 차례를 알려 줍니다.
+4. 지면 출전한 포켓몬이 **기절하고**(실제 세이브에 반영됩니다), 이기면 현재 포켓몬이 경험치를 받습니다. 기절은 상점에서 산 회복약으로 되살립니다.
+
+**방장 패널**: 방장에게만 로비에 **멤버 관리**가 보입니다. 초대코드 발급·회수(30명 7일 또는 1회용 7일), 멤버 제거, 키를 잃은 동료의 재연결 코드 발급을 앱 안에서 처리합니다.
+
 ## 온라인 화면 미리보기
 
-아래는 합성 fixture로 렌더한 **한국어 SwiftUI 화면**이며 실제 두 사용자 경기 캡처가 아닙니다. 포켓몬 그림 대신 회색 대체 아이콘을 사용합니다. 두 맥 인수 검증은 아직 남아 있습니다.
+아래는 합성 fixture로 렌더한 **한국어 SwiftUI 화면**이며 실제 두 사용자 경기 캡처가 아닙니다. 닉네임·코드는 가상의 예시이고 포켓몬 그림 대신 회색 대체 아이콘을 사용합니다.
 
+![합성 한국어 화면: 닉네임과 초대코드로 가입](assets/screenshot-online-join.png)
+![합성 한국어 화면: 방장의 멤버 관리 패널과 새 초대코드](assets/screenshot-online-host-panel.png)
+![합성 한국어 화면: 직접 조작 대전 아레나](assets/screenshot-online-arena.png)
+![합성 한국어 화면: 결과와 재대결 신청](assets/screenshot-online-result.png)
 ![합성 한국어 화면: 그룹 전적판](assets/screenshot-online-standings.png)
 ![합성 한국어 화면: 재대결 출전 준비](assets/screenshot-online-rematch.png)
 
-## 설치와 릴리스 준비
+## 설치와 업데이트
 
-자체 서명 **[2.6.0 테스트판](https://github.com/dding94/poketokenbar-battle/releases/tag/v2.6.0)**을 공개했습니다. **macOS 15 이상**, Apple Silicon·Intel을 지원합니다.
+**macOS 15 이상**, Apple Silicon·Intel을 지원하는 자체 서명 앱입니다(Apple 공증 없음). 최신 버전은 [릴리스 페이지](https://github.com/dding94/poketokenbar-battle/releases/latest)에서 확인하세요.
 
 ```bash
 brew install --cask dding94/tap/poke-token-bar-battle
-open -a "PokeTokenBar Battle"
+open -a "PokeTokenBattle"
 ```
 
-업데이트는 `brew update` 후 `brew upgrade --cask poke-token-bar-battle`입니다. 수동 설치한 포크가 이미 있으면 먼저 앱과 포크 세이브를 백업하세요. 강제 덮어쓰기는 하지 마세요.
+업데이트는 앱 안의 업데이트 버튼이나 `brew update` 후 `brew upgrade --cask poke-token-bar-battle`입니다.
 
-Apple 공증된 앱은 아닙니다. 첫 실행이 차단되면 [Apple 안내](https://support.apple.com/en-gb/102445)에 따라 시스템 설정 → 개인정보 보호 및 보안에서 이 앱의 실행을 허용할 수 있습니다. 받는 맥에 인증서를 따로 설치하거나 Gatekeeper를 끄지 않습니다. 회사 정책으로 실행이 제한될 수 있습니다.
+**2.6.0에서 올라오는 경우** (앱 이름이 PokeTokenBar Battle에서 PokeTokenBattle로 바뀌었습니다)
 
-온라인 배틀 화면에서 방장이 별도로 보낸 HTTPS 서버 주소를 입력하고 **서버 주소 적용**을 누른 뒤 초대코드·닉네임으로 **그룹 참여**를 누르세요. Keychain 접근 비활성화 설정이 켜져 있으면 온라인 연결이 중단됩니다. 서버 주소·초대코드는 공개 파일에 넣지 않습니다. [한국어 설치·시험 안내 파일](https://github.com/dding94/poketokenbar-battle/releases/download/v2.6.0/INSTALL-ko.txt)도 제공합니다.
+- 업데이트하면 `/Applications/PokeTokenBar Battle.app`이 지워지고 `/Applications/PokeTokenBattle.app`이 설치됩니다. 첫 업데이트 뒤 앱이 자동으로 다시 열리지 않을 수 있으니 **PokeTokenBattle을 직접 한 번 여세요.** 시작 시 자동 실행은 그때 새 경로로 다시 등록됩니다.
+- 서버가 새로 바뀌어 **2.6.0에서 가입했던 사람도 방장에게 새 초대코드를 받아 다시 가입해야 합니다.** 세이브(`~/Library/Application Support/PokeTokenBarBattle`)는 그대로 쓰며, 올리기 전에 백업하세요. 패배하면 출전한 포켓몬이 기절하고 실제 세이브에 반영됩니다.
+- brew로 설치하지 않았다면 앱 안 업데이트 버튼은 릴리스 페이지만 엽니다. 새 앱을 `/Applications`로 옮기고 옛 `PokeTokenBar Battle.app`을 지우세요.
 
-공개 ZIP의 SHA-256과 Homebrew 임시 폴더 설치·서명 검증을 확인했습니다. 앱을 실행한 두 맥 시험·실제 기본 경로 업그레이드·Free 운영 부하/복구는 미검증이며 PR 13 전체 완료는 아닙니다. 자세한 준비·백업 절차는 [RELEASE.md](RELEASE.md)를 따릅니다.
+첫 실행이 차단되면 [Apple 안내](https://support.apple.com/en-gb/102445)에 따라 시스템 설정 → 개인정보 보호 및 보안에서 실행을 허용하세요. 받는 맥에 인증서를 따로 설치하거나 Gatekeeper를 끄지 않습니다. 회사 정책으로 실행이 제한되면 방장에게 알려 주세요. Keychain 접근 비활성화 설정이 켜져 있으면 온라인 연결이 중단됩니다. 자세한 준비·백업 절차는 [RELEASE.md](RELEASE.md)를 따릅니다.
 
 설치 없이 소스 번들만 만들려면:
 
@@ -238,7 +242,7 @@ Apple 공증된 앱은 아닙니다. 첫 실행이 차단되면 [Apple 안내](h
 PTB_SKIP_INSTALL=1 ./scripts/build-app.sh
 ```
 
-생성 위치는 `build/PokeTokenBar Battle.app`입니다. 인증서가 없으면 ad-hoc 개발 서명이며 공개 배포의 서명·공증을 의미하지 않습니다. 개발 실행은 별도 시험 계정과 `PTB_STATE_DIR`로 실제 세이브를 분리해야 합니다. 원본 앱이나 세이브를 덮어쓰지 마세요.
+생성 위치는 `build/PokeTokenBattle.app`입니다. 인증서가 없으면 ad-hoc 개발 서명이며 공개 배포의 서명·공증을 의미하지 않습니다. 개발 실행은 별도 시험 계정과 `PTB_STATE_DIR`로 실제 세이브를 분리해야 합니다. 원본 앱이나 세이브를 덮어쓰지 마세요.
 
 ## 데이터 소스
 

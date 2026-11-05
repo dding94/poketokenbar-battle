@@ -73,19 +73,7 @@ struct PracticeBattleBoard: View {
     /// What the staged beats have shown of the opponent so far (history plus the beat on screen). The
     /// engine's view is already at the end of the step, so it would reveal a move before its beat plays.
     /// nil without a playback: the view is then the only source.
-    private var stagedReveal: PracticeReveal? {
-        guard let playback else { return nil }
-        let beats = playback.history + (playback.beat.map { [$0] } ?? [])
-        var reveal = PracticeReveal()
-        for beat in beats {
-            if beat.actor == .opponent, let moveID = beat.moveID, moveID != "struggle", moveID != "recharge",
-               !reveal.moves.contains(moveID) {
-                reveal.moves.append(moveID)
-            }
-            for case .abilityRevealed(.opponent, let abilityID) in beat.callouts { reveal.ability = abilityID }
-        }
-        return reveal
-    }
+    private var stagedReveal: PracticeReveal? { playback.map { PracticeReveal(staged: $0) } }
 
     private var versus: some View {
         Text(l.practiceVersus)
@@ -121,11 +109,8 @@ struct PracticeBattleBoard: View {
     private var stage: some View {
         VStack(alignment: .leading, spacing: 6) {
             if let playback {
-                current(playback)
-                if !playback.recent.isEmpty {
-                    Divider()
-                    recent(playback)
-                }
+                PracticeBeatLines(playback: playback, wording: wording, idle: playback.history.isEmpty
+                                  ? l.practiceBattleBegins : l.practiceTurn(battle.view?.turn ?? 1), l: l, artwork: artwork)
             } else {
                 legacyTicker
             }
@@ -133,62 +118,6 @@ struct PracticeBattleBoard: View {
         .font(.caption)
         .frame(maxWidth: .infinity, minHeight: 92, maxHeight: 92, alignment: .topLeading)
         .practiceCard(padding: 8)
-    }
-
-    private func current(_ playback: PracticePlayback) -> some View {
-        ZStack(alignment: .topLeading) {
-            if let beat = playback.beat {
-                VStack(alignment: .leading, spacing: 4) {
-                    PracticePhraseText(phrase: wording.action(beat), l: l, artwork: artwork)
-                        .font(.callout.weight(.semibold))
-                        .lineLimit(1)
-                    chips(beat)
-                }
-                .id(beat.id)
-                .transition(.asymmetric(insertion: .offset(x: -12).combined(with: .opacity), removal: .opacity))
-            } else {
-                Text(playback.history.isEmpty ? l.practiceBattleBegins : l.practiceTurn(battle.view?.turn ?? 1))
-                    .font(.callout.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-        }
-        .frame(maxWidth: .infinity, minHeight: 38, alignment: .topLeading)
-        .animation(.easeOut(duration: 0.2), value: playback.beat?.id)
-    }
-
-    /// Up to three chips; fewer when the localized words do not fit one line.
-    private func chips(_ beat: PracticeBeat) -> some View {
-        let callouts = wording.chips(beat)
-        return ViewThatFits(in: .horizontal) {
-            chipRow(callouts.prefix(3), beat)
-            chipRow(callouts.prefix(2), beat)
-            chipRow(callouts.prefix(1), beat)
-        }
-        .frame(minHeight: 18, alignment: .leading)
-    }
-
-    private func chipRow(_ callouts: ArraySlice<PracticeCallout>, _ beat: PracticeBeat) -> some View {
-        HStack(spacing: 5) {
-            ForEach(Array(callouts.enumerated()), id: \.offset) { _, callout in
-                PracticeCalloutChip(phrase: wording.callout(callout, in: beat), tone: wording.tone(callout),
-                                    l: l, artwork: artwork)
-            }
-        }
-    }
-
-    /// The three newest finished beats as sentences, newest first.
-    private func recent(_ playback: PracticePlayback) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            ForEach(Array(playback.recent.prefix(3).enumerated()), id: \.element.id) { index, beat in
-                PracticePhraseText(phrase: wording.sentence(beat), l: l, artwork: artwork)
-                    .foregroundStyle(index == 0 ? Color.primary : Color.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .transition(.opacity)
-            }
-        }
-        .animation(.easeOut(duration: 0.2), value: playback.recent.first?.id)
     }
 
     /// Without a playback: the three newest log lines, newest first. Turn separators are left out.
@@ -332,6 +261,22 @@ struct PracticeBattleBoard: View {
     }
 }
 
+/// Gives a side card one spoken name and value while its chips stay reachable inside it. Without words it does nothing.
+@MainActor
+private struct PracticeSpokenCard: ViewModifier {
+    let spoken: OnlineBattleSpoken.Card?
+
+    @ViewBuilder func body(content: Content) -> some View {
+        if let spoken {
+            content.accessibilityElement(children: .contain)
+                .accessibilityLabel(spoken.label)
+                .accessibilityValue(spoken.value)
+        } else {
+            content
+        }
+    }
+}
+
 /// One side of the battle: sprite, name and level, types, status, HP, and what is known about its
 /// moves and ability. The opponent's HP is a percentage. With a playback, `display` overrides the
 /// engine's HP and status, `delta` floats over the HP for the beat `beatID`, and `hitTrigger` shakes
@@ -354,6 +299,17 @@ struct PracticeSideCard: View {
     var wild = false
     /// How the opponent picks its moves (`PracticeTemperament`); nil for my own side.
     var temperament: PracticeTemperament?
+    /// PokéAPI slugs for ids whose set is not in `snapshot` (the online opponent's disclosed moves and ability).
+    var moveSlugs: [String: String] = [:]
+    var abilitySlugs: [String: String] = [:]
+    /// Without a snapshot the sprite is the plain species artwork (the online opponent's public species).
+    var spriteSpecies: Int?
+    /// Replaces the "Foe" tag (the online foe's "Foe · nickname"); it shortens before the row around it does.
+    var label: String?
+    /// One small line at the card's foot (the online foe's streak and record). A blank string keeps the line's room.
+    var caption: String?
+    /// What VoiceOver reads for the whole card; nil leaves the card's own children to speak (practice).
+    var spoken: OnlineBattleSpoken.Card?
 
     private var revealedMoves: [String] { reveal?.moves ?? side.moves }
     private var revealedAbility: String? {
@@ -373,7 +329,7 @@ struct PracticeSideCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
             HStack(spacing: 10) {
-                PracticeSpriteTile(set: snapshot?.set, size: 44, artwork: artwork)
+                PracticeSpriteTile(set: snapshot?.set, speciesID: spriteSpecies, size: 44, artwork: artwork)
                     .practiceFainted(fainted)
                     .practiceHitReaction(trigger: hitTrigger)
                 VStack(alignment: .leading, spacing: 5) {
@@ -381,8 +337,10 @@ struct PracticeSideCard: View {
                         if wild {
                             PracticeWildTag(l: l)
                         } else {
-                            Text(own ? l.practiceYou : l.practiceFoe)
-                                .font(.caption2).foregroundStyle(.secondary).fixedSize()
+                            Text(label ?? (own ? l.practiceYou : l.practiceFoe))
+                                .font(.caption2).foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail)
+                                .frame(maxWidth: label == nil ? nil : 96, alignment: .leading)
+                                .fixedSize(horizontal: label == nil, vertical: false)
                         }
                         PracticeNameLevel(name: name, level: side.level)
                         PracticeTypeBadges(types: side.types, l: l, artwork: artwork).fixedSize()
@@ -395,17 +353,23 @@ struct PracticeSideCard: View {
                         }
                     }
                     HStack(spacing: 8) {
-                        PracticeHPBar(hp: hp, maxHP: maxHP)
+                        // With spoken words the card's value carries the HP, so the bar and its number stay silent.
+                        PracticeHPBar(hp: hp, maxHP: maxHP).accessibilityHidden(spoken != nil)
                         Text(hpText)
                             .font(.caption.weight(.semibold)).monospacedDigit()
                             .foregroundStyle(fainted ? Color.secondary : Color.primary)
                             .frame(minWidth: 52, alignment: .trailing)
+                            .accessibilityHidden(spoken != nil)
                     }
                 }
             }
             if own { ownAbility } else { revealed }
+            if let caption {
+                Text(caption).font(.caption2).foregroundStyle(.secondary).lineLimit(1).minimumScaleFactor(0.8)
+            }
         }
         .practiceCard(padding: 8)
+        .modifier(PracticeSpokenCard(spoken: spoken))
     }
 
     /// The beat's HP change next to the name row, right above the HP bar; keyed by the beat so each
@@ -454,7 +418,7 @@ struct PracticeSideCard: View {
             Text(l.practiceMoves).font(.caption2).foregroundStyle(.secondary)
             ForEach(Array(revealedMoves.prefix(4)), id: \.self) { move in
                 PracticeChip {
-                    PracticeMetadataName(kind: .move, id: move, snapshot: snapshot, l: l, artwork: artwork)
+                    PracticeMetadataName(kind: .move, id: moveSlugs[move] ?? move, snapshot: snapshot, l: l, artwork: artwork)
                 }
             }
             ForEach(0..<max(0, 4 - revealedMoves.count), id: \.self) { _ in
@@ -468,7 +432,7 @@ struct PracticeSideCard: View {
             Text(l.practiceAbility).font(.caption2).foregroundStyle(.secondary)
             if let ability = revealedAbility {
                 PracticeChip {
-                    PracticeMetadataName(kind: .ability, id: ability, snapshot: snapshot, l: l, artwork: artwork)
+                    PracticeMetadataName(kind: .ability, id: abilitySlugs[ability] ?? ability, snapshot: snapshot, l: l, artwork: artwork)
                 }
             } else {
                 PracticeChip(dimmed: true) { Text("?") }
@@ -490,7 +454,30 @@ struct PracticeMoveCard: View {
     let artwork: Bool
     /// Automatic mode or a paused battle: nothing to choose.
     let locked: Bool
+    /// The online arena marks the card whose choice is already in; it stays full strength while the rest dim.
+    /// The mark takes the key badge's place, so the card never changes size.
+    var chosen = false
+    /// The names VoiceOver reads come from the store the card's own labels fill, so it says what the screen shows.
+    var nameStore: PokemonNameDisplayStore = .shared
     let action: () -> Void
+
+    /// The name and the value VoiceOver reads for this card.
+    var spokenLabel: String { OnlineBattleSpoken.moveLabel(l: l, slot: key, name: spokenName) }
+    var spokenValue: String {
+        OnlineBattleSpoken.moveValue(l: l, typeName: spokenType, pp: move.pp, maxPP: move.maxpp, special: special,
+                                     details: spokenDetails, chosen: chosen)
+    }
+    private var spokenName: String {
+        switch move.id {
+        case "recharge": l.practiceRecharge
+        case "struggle": l.practiceStruggle
+        default: OnlineBattleSpoken.name(.move, slug: PracticeMetadataName.slug(.move, move.id, in: snapshot), l: l,
+                                         artwork: artwork, names: nameStore.names)
+        }
+    }
+    private var spokenType: String {
+        move.type.isEmpty ? "" : OnlineBattleSpoken.name(.type, slug: move.type.lowercased(), l: l, artwork: artwork, names: nameStore.names)
+    }
 
     private var special: Bool { move.id == "recharge" || move.id == "struggle" }
     private var disabled: Bool { locked || move.disabled || (!special && move.pp <= 0) }
@@ -500,17 +487,23 @@ struct PracticeMoveCard: View {
     private var multiplier: Double? { hint?.multiplier.flatMap { $0 == 1 ? nil : $0 } }
 
     var body: some View {
-        Button(action: action) {
+        // The marked card is not disabled (a disabled button greys its content): its choice is already in, so it does nothing.
+        Button(action: { if !chosen { action() } }) {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 4) {
                     name.font(.callout.weight(.semibold)).lineLimit(1).minimumScaleFactor(0.8).layoutPriority(1)
                     Spacer(minLength: 2)
                     if let multiplier { PracticeEffectivenessBadge(multiplier: multiplier, l: l) }
-                    Text("\(key)")
-                        .font(.system(size: 9, weight: .bold).monospacedDigit())
-                        .foregroundStyle(.secondary)
-                        .frame(width: 14, height: 14)
-                        .overlay(RoundedRectangle(cornerRadius: 3).strokeBorder(Color.secondary.opacity(0.4)))
+                    if chosen {
+                        Image(systemName: "checkmark.circle.fill").font(.system(size: 13, weight: .bold))
+                            .foregroundStyle(tint).frame(width: 14, height: 14)
+                    } else {
+                        Text("\(key)")
+                            .font(.system(size: 9, weight: .bold).monospacedDigit())
+                            .foregroundStyle(.secondary)
+                            .frame(width: 14, height: 14)
+                            .overlay(RoundedRectangle(cornerRadius: 3).strokeBorder(Color.secondary.opacity(0.4)))
+                    }
                 }
                 // A long type name with both markers runs out of room first (FIGHTING + STAB + Priority in
                 // English): the PP count drops its label, then Priority shrinks to the hare glyph the matchup's
@@ -530,16 +523,17 @@ struct PracticeMoveCard: View {
             }
             .padding(.horizontal, 7).padding(.vertical, 5)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(tint.opacity(0.14), in: RoundedRectangle(cornerRadius: 10))
-            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(tint.opacity(0.4)))
+            .background(tint.opacity(chosen ? 0.3 : 0.14), in: RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(tint.opacity(chosen ? 0.95 : 0.4), lineWidth: chosen ? 2 : 1))
             .contentShape(RoundedRectangle(cornerRadius: 10))
         }
         .buttonStyle(.plain)
-        .disabled(disabled)
-        .opacity(disabled ? 0.45 : 1)
+        .disabled(disabled && !chosen)
+        .opacity(disabled && !chosen ? 0.45 : 1)
+        .accessibilityAddTraits(chosen ? .isSelected : [])
         .keyboardShortcut(KeyEquivalent(Character(String(key))), modifiers: [])
-        .accessibilityLabel(l.practiceMoveLabel(key, move.name))
-        .accessibilityValue(spoken)
+        .accessibilityLabel(OnlineBattleSpoken.moveLabel(l: l, slot: key, name: spokenName))
+        .accessibilityValue(spokenValue)
     }
 
     private enum PriorityStyle { case text, glyph, hidden }
@@ -577,9 +571,10 @@ struct PracticeMoveCard: View {
                                    accuracy: info.accuracy, fixedDamage: info.fixedDamage)
     }
 
-    private var spoken: String {
+    /// The hint's words without the PP, which the value says for every card.
+    private var spokenDetails: String {
         guard let hint else { return "" }
-        var parts = [stats, "PP \(move.pp)/\(move.maxpp)"]
+        var parts = [stats]
         if hint.info.variableType { parts.append(l.practiceVariableType) }
         if let multiplier { parts.append(l.practiceMultiplier(multiplier)) }
         if hint.stab { parts.append(l.practiceStab) }
@@ -601,4 +596,17 @@ struct PracticeMoveCard: View {
 struct PracticeReveal: Equatable {
     var moves: [String] = []
     var ability: String?
+
+    init(moves: [String] = [], ability: String? = nil) { self.moves = moves; self.ability = ability }
+
+    /// From the finished beats plus the one on screen; a beat still queued shows nothing yet.
+    @MainActor init(staged playback: PracticePlayback) {
+        for beat in playback.history + (playback.beat.map { [$0] } ?? []) {
+            if beat.actor == .opponent, let moveID = beat.moveID, moveID != "struggle", moveID != "recharge",
+               !moves.contains(moveID) {
+                moves.append(moveID)
+            }
+            for case .abilityRevealed(.opponent, let abilityID) in beat.callouts { ability = abilityID }
+        }
+    }
 }

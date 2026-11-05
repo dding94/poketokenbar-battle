@@ -44,6 +44,8 @@ final class PopoverNavigation {
     /// again after `reset()` while `PracticeSession.isActive`, so a battle reopens where it was.
     var showingPractice = false { didSet { if showingPractice { dexDetailCollectionID = nil } } }
     var showingOnlineBattle = false { didSet { if showingOnlineBattle { dexDetailCollectionID = nil } } }
+    /// Closes the popover itself (the pinned header's close button). Set by `AppDelegate`; not view state.
+    @ObservationIgnored var closePopover: () -> Void = {}
     /// The Collection tab's open Pokédex detail page (`DexSpecies.collectionID`); nil = grid or log.
     /// It lives here so Home sprites can open it, but it only lasts while the collection content is
     /// on screen: leaving the tab, switching segment, or covering it with Settings/Recap drops it —
@@ -70,6 +72,18 @@ final class PopoverNavigation {
     func openSessionKeySettings() {
         showSettings = true
         expandAdvancedOnOpen = true
+    }
+
+    /// Every way to an online event lands here. Settings and the recap are drawn before the online screen, so they have
+    /// to go too. `battleId` nil keeps the selected room.
+    func openOnlineEvent(_ battleId: String?, model: OnlineBattlePresentation, l: L) {
+        showSettings = false
+        expandAdvancedOnOpen = false
+        showingRecap = false
+        showingOnlineBattle = true
+        guard let battleId else { return }
+        if model.unreadEndedBattleIDs.contains(battleId) { model.acknowledgeEnded(battleId, l: l) }
+        model.send(.followAttention(battleId))
     }
 
     /// Clicking a Pokémon sprite on Home opens that species' Pokédex detail page. The segment is left
@@ -99,14 +113,41 @@ struct PopoverView: View {
     /// (tests, previews) keep the tabs and hide the practice entry points.
     @Environment(PracticeSession.self) private var practice: PracticeSession?
     @Environment(OnlineBattlePresentation.self) private var onlineBattle: OnlineBattlePresentation?
+    @Environment(OnlineAttentionSource.self) private var onlineAttention: OnlineAttentionSource?
 
     private var l: L { companion.l }
     @State private var showingClaudeKeychainHelp = false
+
+    /// The home row follows the same rule as opening the popover, so its subtitle and its destination cannot disagree.
+    static func openOnlineFromHome(nav: PopoverNavigation, source: OnlineAttentionSource?, model: OnlineBattlePresentation, l: L) {
+        nav.openOnlineEvent(source?.openRoute()?.battleId, model: model, l: l)
+    }
 
     var body: some View {
         // NOTE: 설정을 .sheet 로 띄우면 transient 팝오버가 닫힐 때 시트가 고아로 남아
         // 이후 팝오버의 모든 버튼 클릭을 차단할 수 있음 — 팝오버 내부 화면 전환으로 처리
         @Bindable var nav = nav
+        VStack(spacing: 0) {
+            attentionBanner
+            screen
+        }
+        .frame(width: PopoverMetrics.width)
+        .environment(\.locale, companion.language.displayLocale)
+    }
+
+    /// Above every screen and absent when there is nothing to say, so the screens below draw exactly as they do alone.
+    @ViewBuilder
+    private var attentionBanner: some View {
+        if let onlineBattle, let attention = onlineAttention?.banner(onlineScreenShowing: nav.showingOnlineBattle) {
+            OnlineAttentionBanner(attention: attention, l: l, onOpen: {
+                nav.openOnlineEvent(attention.battleId, model: onlineBattle, l: l)
+            }, onDismiss: attention.kind == .requestEnded ? { onlineBattle.send(.dismissEnded(attention.battleId)) } : nil)
+            .padding([.horizontal, .top], PopoverMetrics.padding)
+        }
+    }
+
+    @ViewBuilder
+    private var screen: some View {
         Group {
             if nav.showSettings {
                 SettingsView(
@@ -123,7 +164,9 @@ struct PopoverView: View {
             } else if nav.showingRecap {
                 RecapScreen(store: store, companion: companion) { nav.showingRecap = false }
             } else if nav.showingOnlineBattle, let onlineBattle {
-                OnlineBattleScreen(model: onlineBattle, l: l) { nav.showingOnlineBattle = false }
+                OnlineBattleScreen(model: onlineBattle, l: l, onClosePopover: { nav.closePopover() }) { nav.showingOnlineBattle = false }
+                    .onAppear { onlineBattle.send(.setOnlineScreenVisible(true)) }
+                    .onDisappear { onlineBattle.send(.setOnlineScreenVisible(false)) }
             } else if nav.showingPractice, let practice {
                 // Back only leaves the screen; the session keeps the battle (and pauses manual turns).
                 PracticeScreen(session: practice, bag: companion, l: l) { nav.showingPractice = false }
@@ -139,8 +182,6 @@ struct PopoverView: View {
                 mainContent
             }
         }
-        .frame(width: PopoverMetrics.width)
-        .environment(\.locale, companion.language.displayLocale)
     }
 
     @ViewBuilder
@@ -196,14 +237,11 @@ struct PopoverView: View {
                         if let practice {
                             PracticeEntryRow(session: practice, l: l) { nav.showingPractice = true }
                         }
-                        if onlineBattle != nil {
-                            Button { nav.showingOnlineBattle = true } label: {
-                                HStack {
-                                    Label(l.onlineTitle, systemImage: "network")
-                                    Spacer()
-                                    Image(systemName: "chevron.right").font(.caption)
-                                }.frame(maxWidth: .infinity).contentShape(Rectangle())
-                            }.buttonStyle(.plain).practiceCard()
+                        if let onlineBattle {
+                            OnlineEntryRow(l: l, subtitle: onlineAttention?.homeSubtitle(l: l),
+                                           hint: onlineBattle.notificationHint == .denied ? l.onlineNotificationHint(.denied) : nil) {
+                                Self.openOnlineFromHome(nav: nav, source: onlineAttention, model: onlineBattle, l: l)
+                            }
                         }
                         Divider()
                         header

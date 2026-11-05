@@ -1,10 +1,12 @@
-> **Battle フォーク:** このリポジトリは `dding94/poketokenbar-battle`、必要環境は macOS 15 以降です。以下の育成アプリの紹介は upstream 由来です。オンライン機能の現在の実装・検証状況は [AI_HANDOFF](docs/AI_HANDOFF.md)、インストール・公開の境界は [RELEASE.md](RELEASE.md) を参照してください。2.6.0テスト版を公開しました。2台のMacによる実機検証は未完了です。
+> **非公式ファンプロジェクト:** PokeTokenBattle は The Pokémon Company、任天堂、元の PokeTokenBar とは関係がなく、承認・後援を受けていません。
+
+> **Battle フォーク:** このリポジトリは `dding94/poketokenbar-battle`、必要環境は macOS 15 以降です。以下の育成アプリの紹介は upstream 由来です。オンライン機能の現在の実装・検証状況は [AI_HANDOFF](docs/AI_HANDOFF.md)、インストール・公開の境界は [RELEASE.md](RELEASE.md) を参照してください。公開前の2台のMacによる実機検証は行っておらず、公開後に実環境で確認します。
 
 <div align="center">
 
 <img src="assets/icon.png" width="128" alt="PokeTokenBar アイコン">
 
-# PokeTokenBar Battle
+# PokeTokenBattle
 
 **あなたのAIコーディングトークンを、ポケモンに — メニューバーで。**
 
@@ -32,10 +34,6 @@ PokeTokenBar は、あなたがすでに使っている AI コーディングト
 - 今日のトークン使用量とコストを一目で — ダッシュボードもブラウザタブも不要。
 - 公式の **5時間 / 週間** 上限をリセットのカウントダウンとともに追跡し、現在の burn rate でいつ到達するかを予測します。
 
-<div align="center">
-<img src="assets/screenshot-home.png" width="420" alt="ポップオーバー ホーム — パートナー、今日のトークン、日別グラフ">
-</div>
-
 ## しくみ
 
 1. 🥚 **いつも通りコーディング。** Claude Code・Codex・Gemini CLI・Antigravity・OpenCode・Hermes Agent・Cursor・Grok CLI・Copilot CLI・Kiro CLI・Pi Agent・omp・Aside・Kimi Code で使うトークンがタマゴを温めます — 追加の操作は不要です。
@@ -49,36 +47,31 @@ PokeTokenBar は、あなたがすでに使っている AI コーディングト
 
 <table>
 <tr>
-<td width="45%" align="center"><img src="assets/floating-pet.gif" width="340" alt="デスクトップのフローティングペット — ホバー表示と右クリックメニュー"></td>
-<td width="55%" valign="middle">
+<td valign="middle">
 <h3>🐾 デスクトップに置く</h3>
 パートナーをメニューバーからデスクトップへ、48〜384px の好きなサイズで。ホバーで今日の使用量、クリックでポップオーバー、右クリックでメニュー、ドラッグで自由に移動 — 上限アラートはペットの上に吹き出しでも表示されます。
 </td>
 </tr>
 <tr>
-<td width="55%" valign="middle">
+<td valign="middle">
 <h3>メニューバーの相棒</h3>
 動く Gen-V スプライトが今日のトークン合計（compact、例：<code>200.7M</code>）の隣に住んでいます。今日のコスト（<code>$</code>）や公式上限 <code>%</code> を追加しても、すべてオフにしてキャラクターだけにしても。
 </td>
-<td width="45%" align="center"><img src="assets/menubar.gif" width="240" alt="メニューバー"></td>
 </tr>
 <tr>
-<td width="45%" align="center"><img src="assets/shiny-banner.gif" width="340" alt="通常 vs 色違い"></td>
-<td width="55%" valign="middle">
+<td valign="middle">
 <h3>✨ ごくまれな偶然、色違い</h3>
 色違いはメニューバー・ホームカード・進化ラインで専用カラーになり、進化しても維持されます。図鑑のマスでも所持している色違いの色と ✨ を表示し、詳細で所持している通常・色違いの姿を切り替えられます。アンノーンのマスは A のままで、文字と色は詳細で選びます。専用通知で孵化の瞬間をお知らせします。
 </td>
 </tr>
 <tr>
-<td width="55%" valign="middle">
+<td valign="middle">
 <h3>埋めたくなる図鑑</h3>
 <b>図鑑</b>は手に入れた種を1マスにまとめ、4×4配置で1ページ16マスを表示します。名前・番号での検索、レア度・色違いの絞り込み、並べ替えに対応。マウスホイール・トラックパッド、またはクリック範囲を広げた矢印でページを切り替えます。ホーム・進化ライン・<b>捕獲ログ</b>で収集済みのポケモンを押すと詳細へ移動し、戻ると元の図鑑ページやログの行を表示します。ログには個体ごとの進化ライン・レア度・せいかく・捕獲日が残ります。
 </td>
-<td width="45%" align="center"><img src="assets/screenshot-collection-pokedex-ja.png" width="300" alt="図鑑 — 1種が1マス"><br><br><img src="assets/screenshot-collection-catchlog-ja.png" width="300" alt="捕獲ログ — 育てた個体が1行"></td>
 </tr>
 <tr>
-<td width="45%" align="center"><img src="assets/screenshot-pokemon-forms-ja.png" width="300" alt="ロトムのフォルム選択とフォルムごとの個体"><br><small>サンプルのポケモンで実際の UI をローカル描画した画像です。</small></td>
-<td width="55%" valign="middle">
+<td valign="middle">
 <h3>同じ種の別の姿も集める</h3>
 ロトムの家電、シェイミのランド・スカイフォルム、シキジカの季節、アンノーンの文字など、対応する第1〜5世代のフォルムを集められます。図鑑で収集数とフォルムごとの個体を確認し、所持フォルムをメニューバーとフローティングペットの代表に選びましょう。ひがしのうみのカラナクシは同じ姿のトリトドンへ進化し、保存・エクスポートでも姿を維持します。タイプ・能力値・特性・技はデフォルトの姿のデータを表示します。
 </td>
@@ -91,15 +84,13 @@ PokeTokenBar は、あなたがすでに使っている AI コーディングト
 </td>
 </tr>
 <tr>
-<td width="55%" valign="middle">
+<td valign="middle">
 <h3>🍬 上限を使い切ると、ふしぎなアメ</h3>
 5時間または週間の使用量上限を使い切ると <b>ふしぎなアメ</b> がもらえます — 5時間上限で1個、週間上限で5個。新しい <b>バッグ</b> タブから使っていまのポケモンを育てましょう。レート制限にかかった瞬間が、レベルアップの瞬間になります。
 </td>
-<td width="45%" align="center"><img src="assets/screenshot-bag-ja.png" width="300" alt="バッグの中のふしぎなアメとミント"></td>
 </tr>
 <tr>
-<td width="45%" align="center"><img src="assets/screenshot-shop-ja.png" width="300" alt="トークンショップ — ミント・ふしぎなアメ・ポケモンのタマゴ・アンコモンのタマゴ・光るお守り・レアのタマゴ"></td>
-<td width="55%" valign="middle">
+<td valign="middle">
 <h3>🛒 使用量で回るショップ</h3>
 これまで使ったトークンがそのまま通貨です。数量と合計価格を確認して消耗品をまとめ買いできます。<b>ふしぎなアメ</b>で育て、<b>ミント</b>でせいかくを引き直し、<b>光るお守り</b>で色違い確率を永続的に上げましょう。タマゴを買うと現在のパートナーを手放してやり直せます — 通常の<b>ポケモンのタマゴ</b>、アンコモン以上確定の<b>アンコモンのタマゴ</b>、レア以上確定の<b>レアのタマゴ</b>。等級付きのタマゴにも伝説は含まれます。空のバッグにはショップへのボタンがあります。
 </td>
@@ -183,9 +174,7 @@ Pi は複数のモデルを一つのセッションログに流すことがあ�
 - **ふしぎなアメの一括使用** — 複数のアメをまとめて使い、使用前に成長結果を確認できます。
 - **上限の使用ペース** — ゲージの経過時間マーカーと6段階の色で使用ペースを確認できます。メニューバーの上限割合にも同じ色を使用します。
 
-<img src="assets/screenshot-usage-recap-ja.png" width="360" alt="選択した期間の使用量の振り返り">
-
-<small>上のホーム・設定・フォルム・ショップ・バッグ・難易度・日別グラフ・振り返り画像は、サンプルデータで実際の UI をローカル描画したものです。</small>
+<small>ゲームのスプライトが写るスクリーンショットはこのドキュメントから外しました。スプライトは実行時に [PokéAPI](https://pokeapi.co/) から取得し、アプリのバンドルには含まれません。残りの画像はサンプルデータで実際の UI をローカル描画したものです。</small>
 
 ## 対応ツール
 
@@ -208,27 +197,44 @@ Pi は複数のモデルを一つのセッションログに流すことがあ�
 
 すべてローカルから読み取り — 外部の使用量CLIは不要。ツールはプロバイダーの実装と登録で追加します（[CONTRIBUTING.ja.md](CONTRIBUTING.ja.md) 参照）。
 
+## オンライン対戦のはじめ方
+
+1. ホストから**招待コード**を受け取ります。サーバーのアドレスはアプリに内蔵されているため入力しません。コードは公開ファイルに載せません。
+2. ホームで**オンライン対戦**を開き、**ニックネーム**と**招待コード**を入力して**グループに参加**を押します。クリップボードのコードは**招待コードを貼り付け**で入力できます。参加直後に表示される復旧コードはコピーして保管してください。
+3. ロビーで同僚に正式戦を申し込み、承諾・最終確認・戦闘準備を経て、手動操作または自動で対戦します。ポップオーバーを閉じていても、メニューバーの表示とmacOS通知で申し込みや自分の番を知らせます。
+4. 負けると出場したポケモンが**ひんし**になり(実際のセーブに反映されます)、勝つと現在のポケモンが経験値を得ます。ひんしはショップで買った回復アイテムで復活させます。
+
+**ホストパネル**: ロビーの**メンバー管理**はホストにだけ表示されます。招待コードの発行・回収(30人7日または1回限り7日)、メンバーの削除、キーを失った同僚への再接続コード発行をアプリ内で行います。
+
 ## オンライン画面プレビュー
 
-以下は合成 fixture からレンダリングした **韓国語の SwiftUI 画面**で、実際の2人対戦のキャプチャではありません。ポケモン画像の代わりに灰色の代替アイコンを使っています。2台の Mac による受け入れ検証は未完了です。
+以下は合成 fixture からレンダリングした **韓国語の SwiftUI 画面**で、実際の2人対戦のキャプチャではありません。ニックネームとコードは架空の例で、ポケモン画像の代わりに灰色の代替アイコンを使っています。
 
+![合成された韓国語画面: ニックネームと招待コードで参加](assets/screenshot-online-join.png)
+![合成された韓国語画面: ホストのメンバー管理パネルと新しい招待コード](assets/screenshot-online-host-panel.png)
+![合成された韓国語画面: 手動操作の対戦アリーナ](assets/screenshot-online-arena.png)
+![合成された韓国語画面: 結果と再対戦の申し込み](assets/screenshot-online-result.png)
 ![合成された韓国語画面: グループ成績](assets/screenshot-online-standings.png)
 ![合成された韓国語画面: 再対戦の出場準備](assets/screenshot-online-rematch.png)
 
-## インストールとリリース準備
+## インストールとアップデート
 
-自己署名の **[2.6.0テスト版](https://github.com/dding94/poketokenbar-battle/releases/tag/v2.6.0)** を公開しました。macOS 15以降、Apple Silicon・Intelに対応します。
+macOS 15以降、Apple Silicon・Intel対応の自己署名アプリです(Apple公証なし)。最新版は[リリースページ](https://github.com/dding94/poketokenbar-battle/releases/latest)で確認してください。
 
 ```bash
 brew install --cask dding94/tap/poke-token-bar-battle
-open -a "PokeTokenBar Battle"
+open -a "PokeTokenBattle"
 ```
 
-更新は `brew update` の後に `brew upgrade --cask poke-token-bar-battle` を実行します。手動インストール済みの場合はアプリとフォークのセーブを先にバックアップしてください。Apple公証はありません。初回起動が制限された場合は[Appleの案内](https://support.apple.com/en-gb/102445)に従って設定から許可してください。証明書の追加やGatekeeperの無効化は不要です。管理されたMacでは利用が制限される場合があります。
+更新はアプリ内のアップデートボタン、または `brew update` の後に `brew upgrade --cask poke-token-bar-battle` を実行します。
 
-オンライン対戦画面でホストから別途届くHTTPSサーバーURLを適用し、招待コードとニックネームでグループに参加してください。Keychainアクセス無効化中は接続できません。サーバーURL・招待コードは公開しません。
+**2.6.0から更新する場合**(アプリ名が PokeTokenBar Battle から PokeTokenBattle に変わりました)
 
-公開ZIPのハッシュと一時フォルダーへのHomebrewインストール・署名を確認しました。2台のMac、実際のアップグレード、Free環境の負荷・復旧は未検証です。[RELEASE.md](RELEASE.md)を参照してください。
+- 更新すると `/Applications/PokeTokenBar Battle.app` が削除され、`/Applications/PokeTokenBattle.app` がインストールされます。最初の更新後はアプリが自動で再起動しないことがあるため、**PokeTokenBattleを一度手動で開いてください。** ログイン時の自動起動はそのとき新しいパスで再登録されます。
+- サーバーが新しくなったため、**2.6.0で参加していた人もホストから新しい招待コードを受け取って再参加する必要があります。** セーブ(`~/Library/Application Support/PokeTokenBarBattle`)はそのまま使われます。更新前にバックアップしてください。負けると出場したポケモンがひんしになり、実際のセーブに反映されます。
+- brewを使わずに入れた場合、アプリ内のボタンはリリースページを開くだけです。新しいアプリを `/Applications` に移し、古い `PokeTokenBar Battle.app` を削除してください。
+
+初回起動がブロックされたら[Appleの案内](https://support.apple.com/en-gb/102445)に従い、システム設定 → プライバシーとセキュリティで許可してください。証明書の追加やGatekeeperの無効化は不要です。管理されたMacで制限される場合はホストに連絡してください。Keychainアクセス無効化中はオンライン接続できません。詳しい手順は[RELEASE.md](RELEASE.md)を参照してください。
 
 インストールせずソースからバンドルを作る場合:
 
@@ -236,7 +242,7 @@ open -a "PokeTokenBar Battle"
 PTB_SKIP_INSTALL=1 ./scripts/build-app.sh
 ```
 
-出力は `build/PokeTokenBar Battle.app` です。証明書がなければ ad-hoc 開発署名であり、公開配布の署名・公証を意味しません。開発時は別のテストアカウントと `PTB_STATE_DIR` で実際のセーブを分離してください。元のアプリやセーブを上書きしないでください。
+出力は `build/PokeTokenBattle.app` です。証明書がなければ ad-hoc 開発署名であり、公開配布の署名・公証を意味しません。開発時は別のテストアカウントと `PTB_STATE_DIR` で実際のセーブを分離してください。元のアプリやセーブを上書きしないでください。
 
 ## データソース
 

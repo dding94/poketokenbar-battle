@@ -1,8 +1,10 @@
 """Release boundary regressions. Commands run only in disposable fixture repositories."""
 import hashlib
+import importlib.util
 import json
 import os
 import plistlib
+import re
 import shutil
 import subprocess
 import tempfile
@@ -10,6 +12,15 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def native_runner_names():
+    """The tests scripts/run-native-acceptance.sh requires, read from the script itself."""
+    script=(ROOT/'scripts/run-native-acceptance.sh').read_text()
+    block=re.search(r"expected = \[(.*?)\]",script,re.S)
+    return re.findall(r"'(test\w+)'",block[1])
+
+
 LEAF = hashlib.sha1(b'public certificate fixture').hexdigest().upper()
 NOTES = '''## New
 None.
@@ -20,8 +31,8 @@ Release preparation.
 ## Contributors
 No external contributors in this release.
 ---
-**Install:** Download `PokeTokenBarBattle.zip` from this fork's release and move `PokeTokenBar Battle.app` to `/Applications`.
-**Upgrade:** Replace only `/Applications/PokeTokenBar Battle.app` after backing up `PokeTokenBarBattle` state. Homebrew is not available until the fork tap is published.
+**Install:** Download `PokeTokenBarBattle.zip` from this fork's release and move `PokeTokenBattle.app` to `/Applications`.
+**Upgrade:** Replace only `/Applications/PokeTokenBattle.app` after backing up `PokeTokenBarBattle` state. Homebrew is not available until the fork tap is published.
 '''
 MOCK = r'''#!/usr/bin/env python3
 import os, sys, pathlib, plistlib, base64, json
@@ -102,7 +113,8 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.env={k:v for k,v in os.environ.items() if not k.startswith(('PTB_', 'CODESIGN_'))}
         self.env.update(PATH=str(self.bin)+os.pathsep+self.env['PATH'], CALLS=str(self.repo/'calls'),
                         PTB_EXPECTED_LEAF=LEAF, PTB_NOTES_FILE=str(self.repo/'notes.md'),
-                        PTB_CONTRIBUTORS_FILE=str(self.repo/'contributors.txt'))
+                        PTB_CONTRIBUTORS_FILE=str(self.repo/'contributors.txt'),
+                        PTB_BATTLE_SERVER_URL='https://league.example.invalid')
         self.ci_run={'id':12345,'head_sha':'1'*40,'name':'CI','path':'.github/workflows/ci.yml',
                      'status':'completed','conclusion':'success','run_attempt':1,
                      'repository':{'full_name':'dding94/poketokenbar-battle'},
@@ -121,10 +133,9 @@ class ReleaseWorkflowTests(unittest.TestCase):
              'run_id':12345,'run_attempt':1,'head_sha':'1'*40,
              'steps':[{'name':step,'status':'completed','conclusion':'success'} for step in steps]}
             for index,(name,steps) in enumerate(required.items())]}
-        self.ci_log='\n'.join("Test Case '-[PokeTokenBarTests.OnlineBattleNativeAcceptanceTests "+name+"]' passed (1.0 seconds)." for name in (
-            'testNativeManualAndAutomaticReportsPrivacyReplayAndRematch',
-            'testSessionsRecoverCommittedResponseLossAndApplyDurablyOnce',
-            'testSessionsReleaseVoidWithoutHealthXPWalletOrUsageEffects'))+'\nNATIVE_ACCEPTANCE required=3 passed=3 skipped=0 (single Mac, local Worker)\n'
+        # What the runner in this repository prints, so this fixture cannot pass with an old count.
+        native=native_runner_names()
+        self.ci_log='\n'.join("Test Case '-[PokeTokenBarTests.OnlineBattleNativeAcceptanceTests "+name+"]' passed (1.0 seconds)." for name in native)+f'\nNATIVE_ACCEPTANCE required={len(native)} passed={len(native)} skipped=0 (single Mac, local Worker)\n'
         self.write_ci_fixture()
         self.env['PTB_CI_RUN_ID']='12345'
 
@@ -150,17 +161,18 @@ class ReleaseWorkflowTests(unittest.TestCase):
 printf 'build:skip-install=%s version=%s\\n' "$PTB_SKIP_INSTALL" "$PTB_RELEASE_VERSION" >> "$CALLS"
 python3 - <<'BUILD'
 import os, pathlib, plistlib
-app=pathlib.Path('build/PokeTokenBar Battle.app/Contents')
+app=pathlib.Path('build/PokeTokenBattle.app/Contents')
 (app/'MacOS').mkdir(parents=True,exist_ok=True)
 (app/'MacOS/PokeTokenBarBattle').write_text('fixture binary')
-plist={'CFBundleIdentifier':'io.github.dding94.poketokenbar-battle','CFBundleName':'PokeTokenBar Battle', 'CFBundleExecutable':'PokeTokenBarBattle','CFBundleShortVersionString':os.environ['PTB_RELEASE_VERSION'],'LSMinimumSystemVersion':'15.0'}
+plist={'CFBundleIdentifier':'io.github.dding94.poketokenbar-battle','CFBundleName':'PokeTokenBattle', 'CFBundleExecutable':'PokeTokenBarBattle','CFBundleShortVersionString':os.environ['PTB_RELEASE_VERSION'],'LSMinimumSystemVersion':'15.0'}
+if os.environ.get('PTB_BATTLE_SERVER_URL') and not os.environ.get('DROP_SERVER_URL'): plist['PTBBattleServerURL']=os.environ['PTB_BATTLE_SERVER_URL']
 (app/'Info.plist').write_bytes(plistlib.dumps(plist))
 (app/'Resources').mkdir(exist_ok=True)
 (app/'Library/LaunchAgents').mkdir(parents=True,exist_ok=True)
-(app/'Library/LaunchAgents/io.github.dding94.poketokenbar-battle.login.plist').write_bytes(plistlib.dumps({'Label':'io.github.dding94.poketokenbar-battle.login','ProgramArguments':['/Applications/PokeTokenBar Battle.app/Contents/MacOS/PokeTokenBarBattle']}))
+(app/'Library/LaunchAgents/io.github.dding94.poketokenbar-battle.login.plist').write_bytes(plistlib.dumps({'Label':'io.github.dding94.poketokenbar-battle.login','ProgramArguments':['/Applications/PokeTokenBattle.app/Contents/MacOS/PokeTokenBarBattle']}))
 BUILD
-bash scripts/package-battle-engines.sh "build/PokeTokenBar Battle.app/Contents/Resources"
-[[ "${CORRUPT_ENGINE:-0}" != 1 ]] || printf corrupt > "build/PokeTokenBar Battle.app/Contents/Resources/battle-engine.js"
+bash scripts/package-battle-engines.sh "build/PokeTokenBattle.app/Contents/Resources"
+[[ "${CORRUPT_ENGINE:-0}" != 1 ]] || printf corrupt > "build/PokeTokenBattle.app/Contents/Resources/battle-engine.js"
 '''
         path=self.repo/'scripts/build-app.sh';path.write_text(header+body);path.chmod(0o755)
         (self.repo/'engine/LICENSE.pokemon-showdown').write_text('fixture license')
@@ -212,7 +224,7 @@ bash scripts/package-battle-engines.sh "build/PokeTokenBar Battle.app/Contents/R
         self.assertIn(hashlib.sha256(b'fixture zip bytes').hexdigest(),cask)
         self.assertIn('https://github.com/dding94/poketokenbar-battle/releases/download/v#{version}/PokeTokenBarBattle.zip',cask)
         self.assertIn('depends_on macos: ">= :sequoia"',cask)
-        self.assertIn('app "PokeTokenBar Battle.app"',cask)
+        self.assertIn('app "PokeTokenBattle.app"',cask)
         self.assertIn('build:skip-install=1 version=3.0.0',self.calls())
         self.assertNotRegex(self.calls(),r'(?m)^gh release |^gh api -X |^pkill |^git (add|commit|push|tag) ')
 
@@ -242,6 +254,21 @@ bash scripts/package-battle-engines.sh "build/PokeTokenBar Battle.app/Contents/R
         self.assertNotEqual(result.returncode,0)
         self.assertNotIn('build:',self.calls())
 
+    def test_a_release_needs_the_server_address_before_anything_is_built(self):
+        self.fake_build()
+        env=dict(self.env); env.pop('PTB_BATTLE_SERVER_URL',None)
+        result=subprocess.run(['bash',str(self.repo/'scripts/release.sh'),'--prepare-build','3.0.0'],env=env,text=True,capture_output=True)
+        self.assertNotEqual(result.returncode,0)
+        self.assertIn('PTB_BATTLE_SERVER_URL',result.stderr)
+        self.assertNotIn('build:',self.calls())
+
+    def test_a_bundle_without_the_server_address_prevents_zip_preview(self):
+        self.fake_build()
+        result=self.run_release('--prepare-build','3.0.0',DROP_SERVER_URL='1')
+        self.assertNotEqual(result.returncode,0,result.stdout+result.stderr)
+        self.assertIn('no embedded server address',result.stderr)
+        self.assertFalse((self.repo/'build/release/poke-token-bar-battle.rb').exists())
+
     def test_invalid_bundle_prevents_zip_preview(self):
         for injection, expected in (({'BAD_ARCH':'1'}, 'lipo'), ({'MINOS':'14.0'}, 'deployment target'),
                                     ({'BAD_JIT':'1'}, 'JIT'), ({'BAD_SIGN':'1'}, 'codesign'),
@@ -264,7 +291,7 @@ bash scripts/package-battle-engines.sh "build/PokeTokenBar Battle.app/Contents/R
         self.fake_build()
         result = self.run_release('--prepare-build', '3.0.0')
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertRegex(self.calls(), r'(?m)^codesign -d --extract-certificates=.+/cert build/PokeTokenBar Battle.app$')
+        self.assertRegex(self.calls(), r'(?m)^codesign -d --extract-certificates=.+/cert build/PokeTokenBattle.app$')
         self.assertNotIn('codesign -d --extract-certificates ', self.calls())
         self.assertTrue((self.repo/'build/release/PokeTokenBarBattle.zip').exists())
 
@@ -335,7 +362,7 @@ bash scripts/package-battle-engines.sh "build/PokeTokenBar Battle.app/Contents/R
         self.assertEqual(result.returncode,0,result.stderr)
         for old,new in (('dding94/poketokenbar-battle','chattymin/PokeTokenBar'),
                         ('a'*64,'no_check'), ('>= :sequoia','>= :sonoma'),
-                        ('app "PokeTokenBar Battle.app"','app "PokeTokenBar.app"')):
+                        ('app "PokeTokenBattle.app"','app "PokeTokenBar.app"')):
             with self.subTest(old=old):
                 cask=self.repo/'invalid.rb';cask.write_text(result.stdout.replace(old,new))
                 check=subprocess.run(['python3',str(helper),'check-cask',str(cask)],capture_output=True,text=True)
@@ -361,6 +388,41 @@ bash scripts/package-battle-engines.sh "build/PokeTokenBar Battle.app/Contents/R
         self.assertIn('version "3.0.0"',published)
         self.assertIn(hashlib.sha256(b'fixture zip bytes').hexdigest(),published)
         self.assertNotIn('pkill ',self.calls())
+
+    def legacy_cask(self, version='2.6.0', sha='a'*64):
+        """The cask text published with 2.6.0 (before the PokeTokenBattle rename)."""
+        result=subprocess.run(['python3',str(self.repo/'scripts/release-validate.py'),'cask',version,sha],capture_output=True,text=True)
+        self.assertEqual(result.returncode,0,result.stderr)
+        text=result.stdout.replace('name "PokeTokenBattle"','name "PokeTokenBar Battle"').replace('app "PokeTokenBattle.app"','app "PokeTokenBar Battle.app"')
+        self.assertIn('app "PokeTokenBar Battle.app"',text)
+        return text
+
+    def test_publication_starts_from_the_pre_rename_tap_cask_and_writes_the_current_template(self):
+        # The real tap held this text when the rename release was prepared; a fixture rendered from the
+        # current template would pass even though the publication read of the tap rejected the real file.
+        self.fake_build()
+        cask=self.repo/'existing.rb'
+        cask.write_text(self.legacy_cask())
+        result=self.run_release('3.0.0',PTB_FORK_RELEASE_READY='1',BRANCH='main',FAKE_TAP=str(cask),ALLOW_PUBLICATION_STUB='1')
+        self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+        import base64, json
+        published=base64.b64decode(json.loads((self.repo/'calls.update.json').read_text())['content']).decode()
+        self.assertIn('app "PokeTokenBattle.app"',published)
+        self.assertNotIn('PokeTokenBar Battle',published)
+
+    def test_pre_rename_template_is_only_accepted_for_the_published_cask(self):
+        helper=self.repo/'scripts/release-validate.py'
+        legacy=self.repo/'legacy.rb';legacy.write_text(self.legacy_cask())
+        published=subprocess.run(['python3',str(helper),'check-published-cask',str(legacy)],capture_output=True,text=True)
+        self.assertEqual(published.returncode,0,published.stderr)
+        preview=subprocess.run(['python3',str(helper),'check-cask',str(legacy)],capture_output=True,text=True)
+        self.assertNotEqual(preview.returncode,0)  # a new build preview must never keep the old app folder
+        for old,new in (('dding94/poketokenbar-battle','chattymin/PokeTokenBar'),('>= :sequoia','>= :sonoma'),
+                        ('app "PokeTokenBar Battle.app"','app "PokeTokenBar.app"')):
+            with self.subTest(old=old):
+                tampered=self.repo/'tampered.rb';tampered.write_text(self.legacy_cask().replace(old,new))
+                check=subprocess.run(['python3',str(helper),'check-published-cask',str(tampered)],capture_output=True,text=True)
+                self.assertNotEqual(check.returncode,0)
 
     def test_prepare_build_never_runs_local_test_gate_or_ocr(self):
         self.fake_build()
@@ -392,7 +454,7 @@ bash scripts/package-battle-engines.sh "build/PokeTokenBar Battle.app/Contents/R
                 elif mutation=='partial-jobs': jobs['jobs']=jobs['jobs'][:-1];jobs['total_count']-=1
                 elif mutation=='skipped-job': jobs['jobs'][2]['conclusion']='skipped'
                 elif mutation=='skipped-step': jobs['jobs'][2]['steps'][-1]['conclusion']='skipped'
-                elif mutation=='native-skip': log=log.replace('passed=3 skipped=0','passed=2 skipped=1')
+                elif mutation=='native-skip': log=re.sub(r'passed=(\d+) skipped=0',lambda found:f'passed={int(found[1])-1} skipped=1',log)
                 elif mutation=='native-missing': log=log.replace('testSessionsRecoverCommittedResponseLossAndApplyDurablyOnce','otherTest')
                 elif mutation=='attempt': jobs['jobs'][2]['run_attempt']=2
                 elif mutation=='job-run': jobs['jobs'][2]['run_id']=54321
@@ -406,6 +468,26 @@ bash scripts/package-battle-engines.sh "build/PokeTokenBar Battle.app/Contents/R
                 self.assertNotIn('build:',self.calls())
                 self.assertNotIn('security ',self.calls())
                 self.assertNotIn('local-test-gate',self.calls())
+
+    def test_native_gate_names_the_tests_the_runner_requires_and_the_test_file_has(self):
+        spec=importlib.util.spec_from_file_location('release_ci',ROOT/'scripts/release-ci.py')
+        gate=importlib.util.module_from_spec(spec);spec.loader.exec_module(gate)
+        runner=native_runner_names()
+        declared=re.findall(r'func (test\w+)\(',(ROOT/'Tests/PokeTokenBarTests/OnlineBattleNativeAcceptanceTests.swift').read_text())
+        self.assertEqual(sorted(gate.NATIVE_TESTS),sorted(runner),'release-ci.py and run-native-acceptance.sh disagree')
+        self.assertEqual(sorted(runner),sorted(declared),'run-native-acceptance.sh and the Swift test file disagree')
+
+    def test_ci_gate_refuses_a_native_count_other_than_the_runners(self):
+        self.fake_build()
+        count=len(native_runner_names())
+        for wrong in (count-1,count+1):
+            with self.subTest(wrong=wrong):
+                (self.repo/'calls').unlink(missing_ok=True)
+                log=self.ci_log.replace(f'required={count} passed={count}',f'required={wrong} passed={wrong}')
+                (self.repo/'ci-log.json').write_text(log)
+                result=self.run_release('--prepare-build','3.0.0')
+                self.assertNotEqual(result.returncode,0,result.stdout+result.stderr)
+                self.assertIn('native acceptance',result.stderr)
 
     def test_ci_gate_rejects_dirty_source_or_api_unavailability(self):
         self.fake_build()

@@ -7,7 +7,7 @@ REPO="dding94/poketokenbar-battle"
 TAP_REPO="dding94/homebrew-tap"
 CASK_NAME="poke-token-bar-battle"
 CASK_PATH="Casks/$CASK_NAME.rb"
-APP_NAME="PokeTokenBar Battle"
+APP_NAME="PokeTokenBattle"
 EXEC_NAME="PokeTokenBarBattle"
 MODE="${1:-}"
 case "$MODE" in
@@ -18,6 +18,10 @@ case "$MODE" in
     [[ $# == 1 ]] || { echo 'Use release.sh VERSION' >&2; exit 1; }
     MODE=publish; VERSION="$1" ;;
 esac
+# A public build without the address silently falls back to manual entry, and every later check would pass.
+if [[ "$MODE" == --prepare-build || "$MODE" == publish ]]; then
+  [[ -n "${PTB_BATTLE_SERVER_URL:-}" ]] || { echo 'PTB_BATTLE_SERVER_URL is required: a release embeds the server address.' >&2; exit 1; }
+fi
 
 doc_check() {
   local warn=0
@@ -119,7 +123,8 @@ value=json.loads(pathlib.Path(sys.argv[1]).read_text())
 if not value.get('sha') or not value.get('content'): sys.exit('Fork tap cask is missing')
 pathlib.Path(sys.argv[2]).write_bytes(base64.b64decode(value['content'], validate=False))
 TAP
-  python3 scripts/release-validate.py check-cask "$TMP_RELEASE/cask.rb"
+  # The tap still holds the pre-rename template (app "PokeTokenBar Battle.app") until this publication rewrites it.
+  python3 scripts/release-validate.py check-published-cask "$TMP_RELEASE/cask.rb"
 fi
 
 # CI is the full-suite criterion. Do not run local OCR or an unisolated/opt-out native test gate.
@@ -171,7 +176,7 @@ git add scripts/build-app.sh
 git commit -q -m "$COMMIT_MESSAGE"
 git push -q origin main
 gh release create "v$VERSION" "$ZIP" --repo "$REPO" \
-  --title "PokeTokenBar Battle v$VERSION" --target main --notes-file "$NOTES_FILE"
+  --title "$APP_NAME v$VERSION" --target main --notes-file "$NOTES_FILE"
 # Update both version and checksum from the validated artifact, with optimistic tap SHA.
 python3 - "$TMP_RELEASE/tap.json" "build/release/$CASK_NAME.rb" "$TMP_RELEASE/update.json" <<'UPDATE'
 import base64,json,pathlib,sys

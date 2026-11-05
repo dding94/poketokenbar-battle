@@ -37,12 +37,14 @@ struct OnlineBattleSpeciesNameLevel: View {
         }
         return "\(localized) [\(PokemonNameLocalization.identifier(publicForm.suffix))]"
     }
+    /// Fills the shared name cache for this species and its public form; `displayName` reads it.
+    func load() async {
+        guard loadsNames else { return }
+        _ = await displayStore.load(speciesResource, provider: provider)
+        if let formResource { _ = await displayStore.load(formResource, provider: provider) }
+    }
     var body: some View {
         PracticeNameLevel(name: displayName, level: level)
-            .task(id: [speciesResource.cacheKey, publicName]) {
-                guard loadsNames else { return }
-                _ = await displayStore.load(speciesResource, provider: provider)
-                if let formResource { _ = await displayStore.load(formResource, provider: provider) }
-            }
+            .task(id: [speciesResource.cacheKey, publicName]) { await load() }
     }
 }

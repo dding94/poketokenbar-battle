@@ -2,15 +2,31 @@ import XCTest
 @testable import PokeTokenBar
 
 final class OnlineBattleHistoryTextTests: XCTestCase {
-    func testKoreanKnownMovesAndSafeUntranslatedFallbackWithP2Orientation() {
+    func testKoreanKnownMovesAndTheNameItselfForOthersWithP2Orientation() {
         let raw = ["|turn|1", "|move|p1a: Pikachu|Quick Attack|p2a: Eevee", "|move|p2a: Eevee|Mystery Move|p1a: Pikachu", "|-ability|p1a: Pikachu|Static", "|win|p2"]
         let text = OnlineBattleHistoryText.logs(raw, localSide: .p2).joined(separator: "\n")
         XCTAssertTrue(text.contains("1턴"))
         XCTAssertTrue(text.contains("상대 포켓몬 · 전광석화 사용"))
-        XCTAssertTrue(text.contains("내 포켓몬 · 미번역 기술 (Mystery Move) 사용"))
+        XCTAssertTrue(text.contains("내 포켓몬 · Mystery Move 사용"))
+        XCTAssertFalse(text.contains("미번역"))
         XCTAssertTrue(text.contains("정전기"))
         XCTAssertTrue(text.contains("내 포켓몬 승리"))
         XCTAssertFalse(text.contains("p1a:"))
+    }
+    /// The dictionary holds 17 moves. Any other safe name reads as its own name instead of an apology.
+    func testMovesOutsideTheDictionaryNeverReadAsUntranslated() {
+        let names = ["Volt Tackle", "Flare Blitz", "Close Combat", "Swords Dance", "Iron Tail", "Hyper Voice", "Shadow Ball",
+                     "U-turn", "Will-O-Wisp", "King's Shield", "Bullet Punch", "Dragon Dance", "Thunder Wave", "Stealth Rock",
+                     "Draco Meteor", "Knock Off", "Psychic"]
+        XCTAssertEqual(names.count, 17)
+        let raw = names.map { "|move|p1a: Pikachu|\($0)|p2a: Eevee" } + ["|-ability|p2a: Eevee|Sand Veil", "|-start|p1a: Pikachu|ability: Sand Veil"]
+        let lines = OnlineBattleHistoryText.logs(raw, localSide: .p1)
+        XCTAssertEqual(lines.count, raw.count)
+        let text = lines.joined(separator: "\n")
+        XCTAssertFalse(text.contains("미번역"))
+        for name in names { XCTAssertTrue(lines.contains("내 포켓몬 · \(name) 사용"), name) }
+        XCTAssertTrue(lines.contains("상대 포켓몬 · 특성 Sand Veil 공개"))
+        XCTAssertTrue(lines.contains("내 포켓몬 · Sand Veil 발동"))
     }
     func testUnknownProtocolAndUnsafeNamesNeverEchoRawMetadata() {
         let raw = ["|player|p1|private@example.com", "|-unknown|p1a: private@example.com|SECRET", "|raw|<script>SECRET</script>", "|move|p1a: name|<script>SECRET</script>|p2a: name", "|move|p9a: SECRET|Tackle|p2a: name", "|-ability|p1a: name|secret@example.com", "|turn|SECRET", "|-damage|p1a: name|SECRET"]

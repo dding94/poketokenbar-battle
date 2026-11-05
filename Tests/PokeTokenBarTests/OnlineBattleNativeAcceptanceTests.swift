@@ -23,7 +23,13 @@ private actor NativeHTTP: OnlineBattleHTTPTransport {
     private var reporting = false
     private(set) var committedDrops = 0
     private var requests: [String: Int] = [:]
+    private var pausedAdvance = false
+    private var advanceWaiter: CheckedContinuation<Void, Never>?
     func counts() -> [String: Int] { requests }
+    /// Holds the next advance back, so a test can stand in the first seat's gap between rounds.
+    func pauseAdvance() { pausedAdvance = true }
+    func advanceIsPaused() -> Bool { advanceWaiter != nil }
+    func resumeAdvance() { pausedAdvance = false; advanceWaiter?.resume(); advanceWaiter = nil }
     init(_ endpoint: NativeEndpoint) { self.endpoint = endpoint }
     func dropCompletedReportAndDisconnect() { dropCompletion = true }
     func send(_ request: URLRequest) async throws -> OnlineBattleHTTPResponse {
@@ -31,6 +37,7 @@ private actor NativeHTTP: OnlineBattleHTTPTransport {
         let path = request.url!.path
         let category = path.hasSuffix("/choices") ? "choices" : path.hasSuffix("/advance") ? "advance" : path.hasSuffix("/report") ? "report" : (request.httpMethod ?? "GET") + " " + (path.hasPrefix("/v1/battles/") ? "/v1/battles/:id" : path)
         requests[category, default: 0] += 1
+        if category == "advance", pausedAdvance { await withCheckedContinuation { advanceWaiter = $0 } }
         let isReport = request.httpMethod == "POST" && request.url?.path.hasSuffix("/report") == true
         if isReport { reporting = true }
         defer { if isReport { reporting = false } }
@@ -92,6 +99,39 @@ private struct NativeSocketDriver: OnlineBattleSocketDriver {
         guard let probe else { return socket }
         let traced = NativeTracedSocket(socket); await probe.append(traced); return traced
     }
+}
+/// A real socket that can also be lost the way a sleeping Mac loses it: an abnormal close and nothing more.
+private final class NativeLosableSocket: OnlineBattleSocket, @unchecked Sendable {
+    let events: AsyncStream<OnlineBattleSocketEvent>
+    private let raw: any OnlineBattleSocket
+    private let continuation: AsyncStream<OnlineBattleSocketEvent>.Continuation
+    private var receiver: Task<Void, Never>?
+    init(_ raw: any OnlineBattleSocket) {
+        self.raw = raw
+        let stream = AsyncStream<OnlineBattleSocketEvent>.makeStream(); events = stream.stream; continuation = stream.continuation
+        receiver = Task {
+            for await event in raw.events { stream.continuation.yield(event) }
+            stream.continuation.finish()
+        }
+    }
+    func lose() { continuation.yield(.closed(1006)) }
+    func sendPing() async throws { try await raw.sendPing() }
+    func close() async { await raw.close(); receiver?.cancel() }
+}
+private actor NativeUnreliableNetwork: OnlineBattleSocketDriver {
+    private let endpoint: NativeEndpoint
+    private var down = false
+    private var current: NativeLosableSocket?
+    init(endpoint: NativeEndpoint) { self.endpoint = endpoint }
+    func connect(_ request: URLRequest) async throws -> any OnlineBattleSocket {
+        if down { throw OnlineBattleFailure.transport }
+        let raw = try await OnlineBattleURLSessionSocketDriver().connect(endpoint.rewrite(request))
+        let socket = NativeLosableSocket(raw)
+        current = socket
+        return socket
+    }
+    func goDown() { down = true; current?.lose() }
+    func comeBack() { down = false }
 }
 private actor NativeCredentials: OnlineBattleCredentialStoring {
     private var key: String?
@@ -376,8 +416,9 @@ final class OnlineBattleNativeAcceptanceTests: XCTestCase {
         return CompanionStore(provider: NativeOfflineProvider(), fileURL: save, dittoDisguiseRollingEnabled: false, defaults: defaults)
     }
     private func session(_ grant: OnlineBattleGrant, snapshot: OnlineBattleSnapshot, store: CompanionStore,
-                         transport: NativeHTTP) -> OnlineBattleSession {
+                         transport: NativeHTTP, driver: (any OnlineBattleSocketDriver)? = nil) -> OnlineBattleSession {
         let endpoint = endpoint!, engineURL = engineURL
+        let driver = driver ?? NativeSocketDriver(endpoint: endpoint)
         let candidate = PracticeCandidate(id: snapshot.instanceId, name: snapshot.publicInfo.species,
             snapshot: .init(schemaVersion: 1, instanceID: snapshot.instanceId, engineHash: BattleEngineManifest.sha256,
                 rulesVersion: BattleSnapshot.rules, policyVersion: BattleSnapshot.policy, set: snapshot.set,
@@ -385,7 +426,7 @@ final class OnlineBattleNativeAcceptanceTests: XCTestCase {
         let session = OnlineBattleSession(settings: .init(profileID: UUID().uuidString, serverURL: NativeEndpoint.productOrigin),
             credentials: NativeCredentials(grant.accessKey), transport: transport, effects: store,
             engineFactory: { try BattleEngine(url: engineURL) },
-            connectionFactory: { OnlineBattleConnection(driver: NativeSocketDriver(endpoint: endpoint), observer: $0) },
+            connectionFactory: { OnlineBattleConnection(driver: driver, observer: $0) },
             rosterProvider: { [candidate] }, automaticTicks: false)
         sessions.append(session)
         return session
@@ -394,6 +435,152 @@ final class OnlineBattleNativeAcceptanceTests: XCTestCase {
         XCTAssertEqual(store.state.usedSinceInstall, 1_000_000_000, file: file, line: line)
         XCTAssertEqual(store.state.spentTokens, 123, file: file, line: line)
         XCTAssertEqual(store.state.inventory, [ItemKind.potion.rawValue: 2], file: file, line: line)
+    }
+    /// The gap between rounds on the real server, from both seats. A press there used to go out with the ended round's
+    /// number: the same slot was acknowledged and forgotten, another one was refused as a conflict.
+    func testAMovePressedBetweenRoundsReachesTheRoundThatOpens() async throws {
+        func waitFor(_ what: String, _ condition: @MainActor () async throws -> Bool) async throws {
+            for _ in 0..<400 {
+                if try await condition() { return }
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            XCTFail("Timed out waiting for " + what)
+            throw OnlineBattleFailure.transport
+        }
+        // The other seat is driven by the API, so the gap lasts as long as this test wants it to.
+        for local in [1, 0] {
+            let other = 1 - local
+            let pair = try await pair(), snapshots = try snapshots()
+            let initial = try await running(pair, mode: .manual, snapshots: snapshots)
+            let store = try store(local, snapshot: snapshots[local], create: true)
+            let transport = NativeHTTP(endpoint)
+            let live = session(pair.grants[local], snapshot: snapshots[local], store: store, transport: transport)
+            let model = live.presentation
+            let opposite = try OnlineBattleResolver(battle: initial, localTrainerID: pair.grants[other].trainer.trainerId, engine: engine())
+            defer { opposite.close() }
+            func foeSlot() throws -> Int { try XCTUnwrap(opposite.request.moves.first { !$0.disabled && $0.pp > 0 }?.slot) }
+            await live.bootstrap()
+            try await waitFor("the open first round") { model.room?.roundSeq == 1 && model.roundIsOpen && model.request?.kind == "move" }
+            let id = initial.battleId
+            func chosen() async -> Int { await transport.counts()["choices", default: 0] }
+            if local == 1 {
+                // Second seat: the foe chooses first, my choice releases the pair, and the first seat has not advanced.
+                _ = try await pair.apis[other].choose(id: id, roundSeq: 1, slot: try foeSlot())
+                await live.perform(.chooseMove(try XCTUnwrap(model.request?.moves.first { !$0.disabled && $0.pp > 0 }?.slot)))
+            } else {
+                // First seat: my choice releases the pair and my own advance is on its way.
+                await transport.pauseAdvance()
+                _ = try await pair.apis[other].choose(id: id, roundSeq: 1, slot: try foeSlot())
+                let slot = try XCTUnwrap(model.request?.moves.first { !$0.disabled && $0.pp > 0 }?.slot)
+                Task { await live.perform(.chooseMove(slot)) }
+                try await waitFor("the advance to be under way") { await transport.advanceIsPaused() }
+            }
+            try await waitFor("the gap") { model.room?.journal.count == 1 && !model.roundIsOpen }
+            let usable = try XCTUnwrap(model.request).moves.filter { !$0.disabled && $0.pp > 0 }.map(\.slot)
+            XCTAssertGreaterThan(usable.count, 1, "the fixture has two moves to change between")
+            let sentBefore = await chosen()
+            model.send(.chooseMove(usable[0]))
+            model.send(.chooseMove(usable[1]))
+            try await Task.sleep(for: .milliseconds(100))
+            let sentInGap = await chosen()
+            XCTAssertEqual(sentInGap, sentBefore, "seat \(local + 1): nothing goes out between rounds")
+            XCTAssertEqual(model.chosenSlot, usable[1], "seat \(local + 1): the last press shows as picked")
+            let bystander = try await pair.apis[local].battle(id: id)
+            XCTAssertNil(bystander.ownChoice, "seat \(local + 1)")
+            // The round opens: by the foe's advance on the socket, or by my own advance's answer.
+            if local == 1 { _ = try await pair.apis[other].advance(id: id, processedRoundSeq: 1) }
+            else { await transport.resumeAdvance() }
+            try await waitFor("the kept move on the server") { try await pair.apis[local].battle(id: id).ownChoice != nil }
+            let room = try await pair.apis[local].battle(id: id)
+            XCTAssertEqual(room.roundSeq, 2, "seat \(local + 1)")
+            XCTAssertEqual(room.ownChoice, "move \(usable[1])", "seat \(local + 1)")
+            let sentAfter = await chosen()
+            XCTAssertEqual(sentAfter, sentBefore + 1, "seat \(local + 1)")
+            try await waitFor("the choice in the room") { model.choiceSubmitted && model.heldChoice == nil }
+            XCTAssertEqual(model.chosenSlot, usable[1], "seat \(local + 1)")
+            XCTAssertNil(model.notice, "seat \(local + 1)")
+            // The foe's answer releases round 2, and the journal holds what was picked between rounds.
+            try opposite.consume(journal: room.journal)
+            let released = try await pair.apis[other].choose(id: id, roundSeq: 2, slot: try foeSlot())
+            let pick = try XCTUnwrap(released.journal.last)
+            XCTAssertEqual(pick.roundSeq, 2)
+            XCTAssertEqual(local == 0 ? pick.p1 : pick.p2, .move(usable[1]), "seat \(local + 1)")
+            await live.setEnabled(false)
+        }
+    }
+    /// The real server binds ready to a socket: one side's reconnect used to lock both sides in ACCEPTED.
+    func testSessionsStillStartWhenOneSideReconnectsAfterPressingReady() async throws {
+        let pair = try await pair(), snapshots = try snapshots()
+        var room = try await pair.apis[0].createBattle(requestId: UUID().uuidString,
+            targetTrainerId: pair.grants[1].trainer.trainerId, mode: .manual, snapshot: snapshots[0])
+        room = try await pair.apis[1].accept(id: room.battleId, revision: room.revision, snapshot: snapshots[1])
+        room = try await pair.apis[0].confirm(id: room.battleId, revision: room.revision)
+        let stores = try (0..<2).map { try store($0, snapshot: snapshots[$0], create: true) }
+        let live = (0..<2).map { session(pair.grants[$0], snapshot: snapshots[$0], store: stores[$0], transport: NativeHTTP(endpoint)) }
+        func waitFor(_ what: String, _ condition: () -> Bool) async throws {
+            for _ in 0..<400 {
+                if condition() { return }
+                try await Task.sleep(for: .milliseconds(25))
+            }
+            XCTFail("Timed out waiting for " + what)
+            throw OnlineBattleFailure.transport
+        }
+        for session in live {
+            await session.bootstrap(); await session.perform(.setPopoverVisible(true))
+            try await waitFor("the first hello") { session.presentation.canStart }
+        }
+        await live[0].perform(.prepareBattle(room.battleId))
+        XCTAssertTrue(live[0].presentation.localReady)
+        // A second socket for the same trainer makes the server close the session's one, so its ready no longer counts.
+        _ = try await connected(pair.grants[0])
+        try await waitFor("the replaced socket") { !live[0].presentation.canStart }
+        XCTAssertFalse(live[0].presentation.localReady)
+        for connection in connections { await connection.stop() }
+        await live[1].perform(.prepareBattle(room.battleId))
+        let waiting = try await pair.apis[1].battle(id: room.battleId)
+        XCTAssertEqual(waiting.state, .accepted, "The server must not count the ready of a socket that is gone")
+        await live[0].perform(.setPopoverVisible(false)); await live[0].perform(.setPopoverVisible(true))
+        try await waitFor("both sides in the match") { live.allSatisfy { $0.presentation.room?.state == .running } }
+        XCTAssertEqual(live[0].presentation.phase, .arena)
+        XCTAssertEqual(live[1].presentation.phase, .arena)
+    }
+    /// A Mac that sleeps past three failed opens with the popover closed: the wake hint must not leave it waiting for the two-minute retry,
+    /// and the ready it pressed before sleeping goes out again on the new socket.
+    func testAWakeHintBringsBackASessionThatGaveUpAndItsReadyStillCounts() async throws {
+        let pair = try await pair(), snapshots = try snapshots()
+        var room = try await pair.apis[0].createBattle(requestId: UUID().uuidString,
+            targetTrainerId: pair.grants[1].trainer.trainerId, mode: .manual, snapshot: snapshots[0])
+        room = try await pair.apis[1].accept(id: room.battleId, revision: room.revision, snapshot: snapshots[1])
+        room = try await pair.apis[0].confirm(id: room.battleId, revision: room.revision)
+        let stores = try (0..<2).map { try store($0, snapshot: snapshots[$0], create: true) }
+        let network = NativeUnreliableNetwork(endpoint: endpoint)
+        let live = [session(pair.grants[0], snapshot: snapshots[0], store: stores[0], transport: NativeHTTP(endpoint), driver: network),
+                    session(pair.grants[1], snapshot: snapshots[1], store: stores[1], transport: NativeHTTP(endpoint))]
+        func waitFor(_ what: String, _ condition: () -> Bool) async throws {
+            for _ in 0..<400 {
+                if condition() { return }
+                try await Task.sleep(for: .milliseconds(25))
+            }
+            XCTFail("Timed out waiting for " + what)
+            throw OnlineBattleFailure.transport
+        }
+        for session in live {
+            await session.bootstrap()
+            try await waitFor("the first hello") { session.presentation.canStart }
+        }
+        await live[0].perform(.prepareBattle(room.battleId))
+        XCTAssertTrue(live[0].presentation.localReady)
+        await network.goDown()
+        try await waitFor("giving up on the socket") { live[0].presentation.connectionState == .polling }
+        await live[1].perform(.prepareBattle(room.battleId))
+        let waiting = try await pair.apis[1].battle(id: room.battleId)
+        XCTAssertEqual(waiting.state, .accepted, "The server must not count the ready of a socket that is gone")
+        await network.comeBack()
+        await live[0].reconnectHint(.wake)
+        try await waitFor("both sides in the match, well before the two-minute retry") {
+            live.allSatisfy { $0.presentation.room?.state == .running }
+        }
+        XCTAssertEqual(live[0].presentation.connectionState, .connected)
     }
     func testSessionsRecoverCommittedResponseLossAndApplyDurablyOnce() async throws {
         let pair = try await pair(), snapshots = try snapshots()

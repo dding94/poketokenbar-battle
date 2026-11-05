@@ -1,19 +1,23 @@
 #!/usr/bin/env python3
 """Local fork release validation. Reads only source, artifacts, and public signing metadata."""
 import hashlib
+import os
 import plistlib
 import re
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from urllib.parse import urlsplit
 
 REPO = 'dding94/poketokenbar-battle'
-APP = 'PokeTokenBar Battle'
+APP = 'PokeTokenBattle'
 EXEC = 'PokeTokenBarBattle'
 BUNDLE = 'io.github.dding94.poketokenbar-battle'
 LABEL = BUNDLE + '.login'
 CASK = 'poke-token-bar-battle'
+# Display name and app folder of the already published 2.6.0 cask (before the PokeTokenBattle rename).
+LEGACY_APP = 'PokeTokenBar Battle'
 
 
 def require(condition, message):
@@ -31,8 +35,50 @@ def run(*args):
     return result.stdout + result.stderr
 
 
+def server_url(value):
+    """Plain https origin for the build-time server address; the value is never echoed (it may be the real one)."""
+    message = 'Server URL must be a plain https origin (host and optional port; no path, query, fragment or credentials)'
+    require(value and value == value.strip() and '?' not in value and '#' not in value, message)
+    try:
+        parts = urlsplit(value)
+        port = parts.port
+    except ValueError:
+        raise ValueError(message) from None
+    host = parts.hostname or ''
+    require(parts.scheme == 'https' and '@' not in parts.netloc and parts.path in ('', '/')
+            and re.fullmatch(r'[a-z0-9]([a-z0-9.-]*[a-z0-9])?', host) and (port is None or 1 <= port <= 65535), message)
+    return f'https://{host}' + (f':{port}' if port not in (None, 443) else '')
+
+
+# Account labels that are documentation placeholders; any other <worker>.<account>.workers.dev is treated as real.
+PLACEHOLDER_ACCOUNTS = {b'example', b'secret-sub', b'subdomain'}
+WORKERS_DEV = re.compile(rb'[A-Za-z0-9][A-Za-z0-9-]*\.([A-Za-z0-9][A-Za-z0-9-]*)\.workers\.dev', re.I)
+SKIPPED_DIRECTORIES = {'.git', 'node_modules', '.build', 'build', '.wrangler', '.swiftpm', 'DerivedData'}
+
+
+def address_check(root):
+    """The real server address lives only in a local build input. Report file names, never the address."""
+    root = Path(root)
+    found = []
+    for directory, names, files in os.walk(root):
+        relative = Path(directory).relative_to(root)
+        names[:] = [n for n in names if n not in SKIPPED_DIRECTORIES and not (relative.parts[-1:] == ('.claude',) and n == 'worktrees')]
+        for name in files:
+            path = Path(directory) / name
+            try:
+                if path.is_symlink() or path.stat().st_size > 20_000_000: continue
+                data = path.read_bytes()
+            except OSError:
+                continue
+            if any(m[1].lower() not in PLACEHOLDER_ACCOUNTS for m in WORKERS_DEV.finditer(data)):
+                found.append(str(path.relative_to(root)))
+    require(not found, 'Real workers.dev address must not be committed (keep it in the local PTB_BATTLE_SERVER_URL build input): '
+            + ', '.join(sorted(found)))
+
+
 def source_check(root):
     root = Path(root)
+    address_check(root)
     identity = (root/'Sources/PokeTokenBar/Core/AppIdentity.swift').read_text().split('enum Upstream {')[0]
     values = {'bundleID': BUNDLE, 'appName': APP, 'executableName': EXEC, 'stateDirectoryName': EXEC,
               'loginAgentLabel': LABEL, 'releaseRepo': REPO, 'caskName': CASK}
@@ -85,6 +131,10 @@ def bundle_check(root, app, target_version, leaf):
         field = 'minos' if command.strip() == 'LC_BUILD_VERSION' else 'version'
         minima = [value.strip() for value in re.findall(rf'^\s*{field}\b([^\n]*)$', body, re.M)]
         require(len(minima) == 1 and minima[0] in ('15.0','15.0.0'), f'{arch} deployment target must be macOS 15.0')
+    # Only release builds reach this check, and a release must carry the address (build-app.sh embeds it).
+    require('PTBBattleServerURL' in info, 'Release bundle has no embedded server address (PTB_BATTLE_SERVER_URL)')
+    require(isinstance(info['PTBBattleServerURL'], str) and server_url(info['PTBBattleServerURL']) == info['PTBBattleServerURL'],
+            'Embedded server URL is not a normalized https origin')
     run('codesign', '--verify', '--deep', '--strict', str(app))
     entitlement_output = run('codesign', '-d', '--entitlements', ':-', str(app))
     xml = re.search(rb'<\?xml.*?</plist>', entitlement_output, re.S)
@@ -104,7 +154,7 @@ def bundle_check(root, app, target_version, leaf):
         require(path.is_file() and hashlib.sha256(path.read_bytes()).hexdigest() == pin, f'Packaged engine hash mismatch: {pin}')
 
 
-def cask_text(target_version, sha):
+def cask_text(target_version, sha, app=APP):
     version(target_version)
     require(re.fullmatch(r'[0-9a-f]{64}', sha), 'Cask SHA256 must be 64 lowercase hex digits')
     return f'''cask "{CASK}" do
@@ -112,12 +162,12 @@ def cask_text(target_version, sha):
   sha256 "{sha}"
 
   url "https://github.com/{REPO}/releases/download/v#{{version}}/{EXEC}.zip"
-  name "{APP}"
+  name "{app}"
   desc "Menu bar companion with local practice and online battles"
   homepage "https://github.com/{REPO}"
 
   depends_on macos: ">= :sequoia"
-  app "{APP}.app"
+  app "{app}.app"
 end
 '''
 
@@ -130,6 +180,19 @@ def check_cask(path):
     require(text == cask_text(ver[1], sha[1]), 'Cask must match fork URL/SHA/macOS15/app template exactly')
 
 
+def check_published_cask(path):
+    """The cask already in the tap before publication: the current template, or the pre-rename 2.6.0 template.
+
+    The publication step rewrites it with the current template, so the first release across the rename must be able
+    to start from the old `app` folder. Everything else (URL, minimum macOS, checksum form) is still pinned."""
+    text = Path(path).read_text()
+    ver = re.search(r'^  version "([^"]+)"$', text, re.M)
+    sha = re.search(r'^  sha256 "([^"]+)"$', text, re.M)
+    require(ver and sha, 'Missing cask version/SHA256')
+    require(text in (cask_text(ver[1], sha[1]), cask_text(ver[1], sha[1], LEGACY_APP)),
+            'Published cask must match the fork template (current or pre-rename) exactly')
+
+
 if __name__ == '__main__':
     try:
         mode, *args = sys.argv[1:]
@@ -137,7 +200,10 @@ if __name__ == '__main__':
         elif mode == 'bundle' and len(args) == 4: bundle_check(*args)
         elif mode == 'cask' and len(args) == 2: print(cask_text(*args), end='')
         elif mode == 'check-cask' and len(args) == 1: check_cask(*args)
+        elif mode == 'check-published-cask' and len(args) == 1: check_published_cask(*args)
         elif mode == 'version' and len(args) == 1: version(*args)
+        elif mode == 'server-url' and len(args) == 1: print(server_url(*args))
+        elif mode == 'addresses' and len(args) == 1: address_check(*args)
         else: raise ValueError('Use source ROOT | bundle ROOT APP VERSION LEAF | cask VERSION SHA | check-cask FILE | version VERSION')
     except (ValueError, OSError, subprocess.CalledProcessError, plistlib.InvalidFileException) as error:
         sys.exit(f'Release validation: {error}')

@@ -18,6 +18,8 @@ extension View {
 @MainActor
 struct PracticeSpriteTile: View {
     let set: BattleSet?
+    /// Public species artwork when no set is known (shiny and form are then unknown too).
+    var speciesID: Int?
     var size: CGFloat = 44
     let artwork: Bool
 
@@ -26,6 +28,8 @@ struct PracticeSpriteTile: View {
             if artwork, let set {
                 SpriteView(speciesID: set.speciesNum, size: size * 0.92, shiny: set.shiny,
                            form: set.form.map { PokemonForm($0) })
+            } else if artwork, let speciesID {
+                SpriteView(speciesID: speciesID, size: size * 0.92)
             } else {
                 Image(systemName: "pawprint.fill")
                     .font(.system(size: size * 0.4))

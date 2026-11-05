@@ -31,7 +31,7 @@ struct OnlineBattleOrigin: Equatable, Sendable {
     }
     var hash: String { SHA256.hash(data: Data(url.absoluteString.utf8)).map { String(format: "%02x", $0) }.joined() }
 }
-enum OnlineBattleFailure: String, Error, Equatable, Sendable { case invalidSettings, credentialsDisabled, invalidOrigin, invalidRequest, transport, invalidResponse, staleGeneration, unauthorized, protocolError, credentialsUnavailable }
+enum OnlineBattleFailure: String, Error, Equatable, Sendable { case invalidSettings, credentialsDisabled, invalidOrigin, invalidRequest, transport, invalidResponse, staleGeneration, unauthorized, protocolError, credentialsUnavailable, peerCancelled, peerExpired, entryChanged, connectionUnavailable, roundPassed, choiceAlreadyIn }
 
 enum OnlineBattleMode: String, Codable, Sendable { case manual, auto }
 enum OnlineBattleState: String, Codable, Sendable {
@@ -52,6 +52,14 @@ struct OnlineBattleSnapshot: Codable, Equatable, Sendable {
     }
     init(snapshot: BattleSnapshot, hp: Int) {
         self.init(instanceId: snapshot.instanceID, set: snapshot.set, publicInfo: snapshot.publicInfo, hp: hp)
+    }
+}
+extension OnlineBattleSnapshot {
+    /// The shape the practice cards read (sprite shiny/form, move and ability slugs). Display only: the engine hash
+    /// is left empty because this value is never hashed, verified or sent anywhere.
+    var displaySnapshot: BattleSnapshot {
+        BattleSnapshot(schemaVersion: 1, instanceID: instanceId, engineHash: "", rulesVersion: BattleSnapshot.rules,
+                       policyVersion: BattleSnapshot.policy, set: set, publicInfo: publicInfo)
     }
 }
 struct OnlineBattlePlayer: Codable, Equatable, Sendable {
@@ -157,6 +165,9 @@ struct OnlineBattleView: Codable, Equatable, Sendable {
     let result: OnlineBattleReport?
     let reason: String?
     let rematchOf: String?
+    /// Whether the other seat's choice for this round is in; never which one. Optional on the wire: a server
+    /// that predates the field sends nothing, which reads the same as "not known".
+    var opponentSubmitted: Bool? = nil
     func side(for trainerId: String) -> OnlineBattleSide? { p1.trainerId == trainerId ? .p1 : p2.trainerId == trainerId ? .p2 : nil }
 }
 struct OnlineBattlePage: Codable, Sendable { let battles: [OnlineBattleView]; let before: String? }

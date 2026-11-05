@@ -21,7 +21,12 @@ enum LoginItem {
 
     /// 토글 — 켜면 에이전트 등록(로그인 실행+KeepAlive), 끄면 해제. 실패 시 throw(호출부가 표면화).
     static func setEnabled(_ on: Bool) throws {
-        if on { try agent.register() } else { try agent.unregister() }
+        if on {
+            try agent.register()
+            UserDefaults.standard.set(Bundle.main.bundlePath, forKey: registeredPathKey)
+        } else {
+            try agent.unregister()
+        }
     }
 
     /// 구버전(`SMAppService.mainApp` 로그인아이템) → KeepAlive 에이전트로 **1회 이관**.
@@ -37,5 +42,47 @@ enum LoginItem {
         } catch {
             AppLog.write("login item migration failed (mainApp 유지): \(error)")
         }
+    }
+
+    /// Outcome of the launch-time path check.
+    enum PathCheck: Equatable { case notEnabled, upToDate, reregistered, failed }
+
+    /// Pure decision: an enabled login agent must be re-registered when the bundle path recorded at
+    /// registration time is missing (installs from before this check) or differs from the running bundle.
+    static func needsReregistration(isEnabled: Bool, recordedPath: String?, currentPath: String) -> Bool {
+        isEnabled && recordedPath != currentPath
+    }
+
+    /// Launch-time check with injectable side effects so the path comparison is testable without SMAppService.
+    static func reconcileRegisteredPath(
+        isEnabled: Bool, recordedPath: String?, currentPath: String,
+        reregister: () throws -> Void, record: (String) -> Void
+    ) -> PathCheck {
+        guard isEnabled else { return .notEnabled }
+        guard needsReregistration(isEnabled: isEnabled, recordedPath: recordedPath, currentPath: currentPath) else {
+            return .upToDate
+        }
+        do {
+            try reregister()
+            record(currentPath)   // recorded only after success so a failure is retried next launch
+            return .reregistered
+        } catch {
+            return .failed
+        }
+    }
+
+    private static let registeredPathKey = "loginAgentRegisteredBundlePath"
+
+    /// Called at launch. The agent plist's ProgramArguments is baked into the bundle, so an install moved
+    /// from `/Applications/PokeTokenBar Battle.app` still has launchd pointing at the old path. Unregister
+    /// and register again so launchd re-reads the plist of the running bundle.
+    static func reconcileRegisteredPathAtLaunch() {
+        let result = reconcileRegisteredPath(
+            isEnabled: isEnabled,
+            recordedPath: UserDefaults.standard.string(forKey: registeredPathKey),
+            currentPath: Bundle.main.bundlePath,
+            reregister: { try? agent.unregister(); try agent.register() },
+            record: { UserDefaults.standard.set($0, forKey: registeredPathKey) })
+        if result != .notEnabled && result != .upToDate { AppLog.write("login item path check: \(result)") }
     }
 }

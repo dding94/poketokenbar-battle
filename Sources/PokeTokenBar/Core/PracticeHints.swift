@@ -78,6 +78,18 @@ struct PracticeMoveHint: Equatable, Sendable {
     let stab: Bool
 }
 
+extension PracticeMoveHint {
+    /// The one place that decides a card's matchup and STAB, for the practice board and the online arena alike.
+    /// `defenderTypes` is the foe's current public types; nil (no battle) or a missing chart leaves the matchup out.
+    /// `attackerTypes` is the user's own current types. Fixed damage has no STAB, and a variable-type move's real
+    /// type is hidden, so neither shows STAB.
+    init(info: PracticeMoveInfo, chart: PracticeTypeChart?, attackerTypes: [String]?, defenderTypes: [String]?) {
+        let multiplier = defenderTypes.flatMap { chart?.effectiveness(of: info, against: $0) }
+        let stab = !info.fixedDamage && !info.variableType && attackerTypes?.contains(info.type) == true
+        self.init(info: info, multiplier: multiplier, stab: stab)
+    }
+}
+
 /// How fast turns are staged. `instant` skips the staging like a hidden screen does.
 enum PracticePlaybackSpeed: String, CaseIterable, Sendable {
     case normal, fast, instant

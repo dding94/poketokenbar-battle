@@ -13,6 +13,33 @@ final class OnlineBattleModelsTests: XCTestCase {
         }
         XCTAssertThrowsError(try JSONEncoder().encode(OnlineBattleRelayToken.move(0)))
     }
+    /// T16: the field is optional on the wire, so a server that predates it still decodes (the app ships after the server,
+    /// but an older or rolled-back Worker must not break the room).
+    @MainActor
+    func testOpponentSubmittedDecodesWhenPresentAndIsNilForAnOlderServer() throws {
+        let base = try OnlineBattleArenaFixture.golden("manual")
+        var json = try XCTUnwrap(JSONSerialization.jsonObject(with: BattleJSON.encoder().encode(base)) as? [String: Any])
+        func decoded() throws -> OnlineBattleView { try JSONDecoder().decode(OnlineBattleView.self, from: JSONSerialization.data(withJSONObject: json)) }
+        json["opponentSubmitted"] = nil
+        XCTAssertNil(try decoded().opponentSubmitted, "an older server sends no such field")
+        json["opponentSubmitted"] = true
+        XCTAssertEqual(try decoded().opponentSubmitted, true)
+        json["opponentSubmitted"] = false
+        XCTAssertEqual(try decoded().opponentSubmitted, false)
+        json["opponentSubmitted"] = NSNull()
+        XCTAssertNil(try decoded().opponentSubmitted)
+        json["opponentSubmitted"] = nil; json["someFutureField"] = ["x": 1]
+        XCTAssertNil(try decoded().opponentSubmitted, "unknown keys are ignored")
+    }
+
+    /// A view from an older server must not gain the key when the app writes it back (replay archives, fixtures).
+    @MainActor
+    func testAViewWithoutTheFieldIsWrittenWithoutIt() throws {
+        let base = try OnlineBattleArenaFixture.golden("manual")
+        let shape = try XCTUnwrap(JSONSerialization.jsonObject(with: BattleJSON.encoder().encode(base)) as? [String: Any])
+        XCTAssertNil(shape["opponentSubmitted"])
+    }
+
     func testServerSnapshotAndEngineConfigAreSeparateShapes() throws {
         let set = BattleSet(speciesNum: 25, form: nil, level: 50, gender: .male, nature: "hardy", ability: "static", moves: ["thunderbolt"], ivs: [:], shiny: false)
         let info = BattlePublicInfo(speciesNum: 25, species: "Pikachu", level: 50, types: ["Electric"], stats: ["hp": 100])

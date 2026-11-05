@@ -1,0 +1,88 @@
+import SwiftUI
+
+/// Top of the battle room: who we are battling, the four steps, whose move it is, and (for the
+/// challenger) that the request went out and how long ago.
+@MainActor
+struct OnlineBattleRoomGuide: View {
+    let model: OnlineBattlePresentation
+    let l: L
+    let progress: OnlineRoomProgress
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(l.onlineRoomVersus(model.roomOpponentName)).font(.headline)
+                .fixedSize(horizontal: false, vertical: true)
+            steps
+            Text(l.onlineRoomGuide(progress, opponent: model.roomOpponentName))
+                .font(.callout.weight(progress.turn == .mine ? .semibold : .regular))
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(8)
+                .background(RoundedRectangle(cornerRadius: 8).fill(Color.accentColor.opacity(progress.turn == .mine ? 0.14 : 0.06)))
+                .accessibilityIdentifier("online.room.guide")
+            if model.requestRemaining(now: .now) != nil { requestStatus }
+        }
+    }
+
+    private var steps: some View {
+        HStack(alignment: .top, spacing: 2) {
+            ForEach(OnlineRoomStep.allCases, id: \.rawValue) { step in
+                let done = step.rawValue < progress.step.rawValue
+                let current = step == progress.step
+                VStack(spacing: 3) {
+                    Image(systemName: done ? "checkmark.circle.fill" : "\(step.rawValue + 1).circle\(current ? ".fill" : "")")
+                        .font(.system(size: 16))
+                        .foregroundStyle(done || current ? Color.accentColor : Color.secondary.opacity(0.6))
+                    Text(l.onlineStepName(step)).font(.system(size: 10, weight: current ? .bold : .regular))
+                        .foregroundStyle(current ? Color.primary : Color.secondary)
+                        .lineLimit(1).minimumScaleFactor(0.7)
+                }
+                .frame(maxWidth: .infinity)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("\(step.rawValue + 1)/4 \(l.onlineStepName(step))")
+                .accessibilityValue(l.onlineStepState(done: done, current: current))
+            }
+        }
+    }
+
+    /// What the challenger can know (sent, waiting, how long ago) and when the room expires. The
+    /// expiry applies to every step before the match. Minute-level wording, so a slow tick is enough.
+    private var requestStatus: some View {
+        TimelineView(.periodic(from: .now, by: 15)) { context in
+            VStack(alignment: .leading, spacing: 2) {
+                if model.room?.state == .pending && model.localSide == .p1 {
+                    Label(l.onlineRequestSent(opponent: model.roomOpponentName), systemImage: "paperplane")
+                        .font(.caption)
+                    Text(l.onlineAwaitingResponse(opponent: model.roomOpponentName))
+                        .font(.caption2).foregroundStyle(.secondary)
+                        .accessibilityIdentifier("online.room.awaiting")
+                    Text(l.onlineRequestAge(seconds: Int(model.requestAge(now: context.date) ?? 0)))
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+                if let remaining = model.requestRemaining(now: context.date), let expiresAt = model.room?.expiresAt {
+                    Label(l.onlineRequestExpiry(remaining: remaining, expiresAt: Date(timeIntervalSince1970: expiresAt / 1000)),
+                          systemImage: "clock")
+                        .font(.caption2).foregroundStyle(.secondary)
+                        .accessibilityIdentifier("online.room.expiry")
+                }
+            }
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+}
+
+/// One short line under a disabled primary button saying why it is disabled.
+@MainActor
+struct OnlineBattleBlockReason: View {
+    let block: OnlineActionBlock?
+    let l: L
+    var identifier = "online.block.reason"
+    var body: some View {
+        if let block {
+            Text(l.onlineActionBlock(block)).font(.caption2).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier(identifier)
+        }
+    }
+}

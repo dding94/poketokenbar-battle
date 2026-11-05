@@ -17,6 +17,31 @@ final class OnlineBattlePresentationTests: XCTestCase {
         XCTAssertTrue(sent, "The onboarding form must reach the session through its typed boundary")
     }
 
+    func testApplyingServerReachesTheSessionOnlyForAValidAddressAndASetupRequestOnAManualBuild() {
+        let model = OnlineBattlePresentation()
+        var sent = 0
+        model.onAction = { _ in sent += 1 }
+        let join = OnlineBattleUIAction.join(inviteCode: "CODE", email: "나래")
+        model.send(.applyingServer("https://battle.example", join))
+        model.send(.applyingServer("https://battle.example", .recover(code: "R")))
+        model.send(.applyingServer("https://battle.example", .reconnect(code: "C")))
+        XCTAssertEqual(sent, 3)
+        model.send(.applyingServer("http://battle.example", join))
+        model.send(.applyingServer("https://battle.example/path", join))
+        model.send(.applyingServer("https://battle.example", .refresh))
+        model.send(.applyingServer("https://battle.example", .join(inviteCode: " ", email: "나래")))
+        model.send(.applyingServer("https://battle.example", .applyingServer("https://other.example", join)))
+        XCTAssertEqual(sent, 3, "bad addresses, non-setup actions and empty inner fields must not reach the session")
+        model.isBusy = true
+        model.send(.applyingServer("https://battle.example", join))
+        XCTAssertEqual(sent, 3)
+        model.isBusy = false; model.serverIsEmbedded = true
+        model.send(.applyingServer("https://battle.example", join))
+        XCTAssertEqual(sent, 3, "an embedded build has no address to apply")
+        model.send(join)
+        XCTAssertEqual(sent, 4)
+    }
+
     func testUnavailableRosterCannotChallengeAndUnknownMoveCannotReachSession() {
         let model = OnlineBattlePresentation()
         var sent = 0
@@ -79,6 +104,8 @@ extension OnlineBattlePresentationTests {
         let model = OnlineBattlePresentation(); model.recoveryCode = "SYNTHETIC-RECOVERY"
         var acknowledged = 0
         model.onAction = { if case .acknowledgeRecoveryCode = $0 { acknowledged += 1 } }
+        // The keep button needs the "I wrote it down" box first (T11).
+        model.send(.setRecoveryWrittenDown(true))
         model.send(.acknowledgeRecoveryCode); model.send(.acknowledgeRecoveryCode)
         XCTAssertNil(model.recoveryCode); XCTAssertEqual(acknowledged, 1)
     }
@@ -177,17 +204,30 @@ extension OnlineBattlePresentationTests {
             }
         }
         model.room = OnlineBattleScreenRenderingTests.room(state: .pending, confirmed: false)
-        model.localSide = .p1; model.send(.accept); model.send(.decline)
-        model.localSide = .p2; model.entryHP["synthetic-pikachu"] = 0; model.send(.accept)
-        model.entryHP["synthetic-pikachu"] = 88; model.send(.accept); model.send(.decline)
+        model.localSide = .p1; model.send(.accept(model.room?.battleId ?? "")); model.send(.decline(model.room?.battleId ?? ""))
+        model.localSide = .p2; model.entryHP["synthetic-pikachu"] = 0; model.send(.accept(model.room?.battleId ?? ""))
+        model.entryHP["synthetic-pikachu"] = 88; model.send(.accept(model.room?.battleId ?? "")); model.send(.decline(model.room?.battleId ?? ""))
         model.room = OnlineBattleScreenRenderingTests.room(state: .accepted, confirmed: false)
-        model.send(.confirm)
-        model.localSide = .p1; model.send(.confirm)
+        model.send(.confirm(model.room?.battleId ?? ""))
+        model.localSide = .p1; model.send(.confirm(model.room?.battleId ?? ""))
         model.room = OnlineBattleScreenRenderingTests.room(state: .accepted)
-        model.send(.confirm); model.send(.prepareBattle)
-        model.canStart = true; model.send(.prepareBattle); model.send(.cancel)
-        model.room = OnlineBattleScreenRenderingTests.room(state: .running); model.send(.cancel)
+        model.send(.confirm(model.room?.battleId ?? "")); model.send(.prepareBattle(model.room?.battleId ?? ""))
+        model.canStart = true; model.send(.prepareBattle(model.room?.battleId ?? "")); model.send(.cancel(model.room?.battleId ?? ""))
+        model.room = OnlineBattleScreenRenderingTests.room(state: .running); model.send(.cancel(model.room?.battleId ?? ""))
         XCTAssertEqual(events, ["accept", "decline", "confirm", "prepare", "cancel"])
+    }
+    func testRoomActionNamingARoomThatIsNotOnScreenIsDropped() {
+        let model = OnlineBattleScreenRenderingTests.model()
+        var sent = 0
+        model.onAction = { _ in sent += 1 }
+        model.canStart = true
+        model.room = OnlineBattleScreenRenderingTests.room(state: .pending, confirmed: false); model.localSide = .p2
+        model.send(.accept("another-battle")); model.send(.decline("another-battle")); model.send(.cancel("another-battle"))
+        model.room = OnlineBattleScreenRenderingTests.room(state: .accepted, confirmed: false); model.localSide = .p1
+        model.send(.confirm("another-battle"))
+        model.room = OnlineBattleScreenRenderingTests.room(state: .accepted, confirmed: true)
+        model.send(.prepareBattle("another-battle"))
+        XCTAssertEqual(sent, 0)
     }
     func testSelectionsRejectUnknownAndReservedIDsAndVisibilityAlwaysReachesSession() {
         let model = OnlineBattleScreenRenderingTests.model()
@@ -205,5 +245,128 @@ extension OnlineBattlePresentationTests {
         model.send(.selectOpponent("synthetic-foe")); XCTAssertEqual(model.selectedOpponentID, "synthetic-foe")
         model.send(.setMode(.auto)); XCTAssertEqual(model.mode, .auto)
         model.isBusy = true; model.send(.setPopoverVisible(true)); XCTAssertTrue(visible)
+    }
+}
+
+// MARK: T15 waiting on the opponent
+
+extension OnlineBattlePresentationTests {
+    /// A manual round in which my own choice is in and the foe's presence is `online`.
+    private func waiting(online: Bool = true, status: OnlineConnectionStatus = .connection(.connected), submitted: Bool = true) -> OnlineBattlePresentation {
+        let model = OnlineBattleScreenRenderingTests.model(); OnlineBattleScreenRenderingTests.arena(model)
+        model.members = [.init(trainerId: "synthetic-foe", displayEmail: "연습친구", role: .host, status: .active, joinedAt: 0, online: online)]
+        model.connectionStatus = status
+        model.choiceSubmitted = submitted
+        return model
+    }
+
+    func testWaitingOnAnOnlineOpponentIsChoosingAndOnAnOfflineOneIsDisconnected() {
+        XCTAssertEqual(waiting(online: true).opponentWait, .choosing)
+        XCTAssertEqual(waiting(online: false).opponentWait, .offline)
+    }
+
+    /// While the socket is down presence is not refreshed, so an offline flag may be old: it is only a maybe.
+    func testAnOfflineFlagFromAStalePresenceIsNeverStatedAsFact() {
+        XCTAssertEqual(waiting(online: false, status: .connection(.polling)).opponentWait, .offlineMaybe)
+        XCTAssertEqual(waiting(online: false, status: .connection(.connecting)).opponentWait, .offlineMaybe)
+        XCTAssertEqual(waiting(online: false, status: .unknown).opponentWait, .offlineMaybe)
+        // An old "online" proves nothing either way, so it keeps the neutral line.
+        XCTAssertEqual(waiting(online: true, status: .connection(.polling)).opponentWait, .choosing)
+    }
+
+    func testOnlyALiveSocketMakesAnOfflineFlagAFact() {
+        for state in [OnlineBattleConnectionState.unconfigured, .credentialsRequired, .connecting, .retryWaiting, .polling, .replaced, .revoked, .protocolError] {
+            XCTAssertEqual(waiting(online: false, status: .connection(state)).opponentWait, .offlineMaybe, "\(state)")
+        }
+        XCTAssertEqual(waiting(online: false, status: .accessOff).opponentWait, .offlineMaybe)
+        XCTAssertEqual(waiting(online: false, status: .connection(.connected)).opponentWait, .offline)
+    }
+
+    func testTheOpponentIsTheOtherSeatNotAlwaysThePlayerTwo() {
+        let model = waiting(online: true)
+        model.localSide = .p2   // the foe is now p1, "synthetic-me" in this fixture room
+        model.members = [.init(trainerId: "synthetic-me", displayEmail: "상대", role: .member, status: .active, joinedAt: 0, online: false),
+                         .init(trainerId: "synthetic-foe", displayEmail: "나", role: .host, status: .active, joinedAt: 0, online: true)]
+        XCTAssertEqual(model.opponentWait, .offline)
+    }
+
+    func testNothingToWaitForUnlessMyChoiceIsInOnAManualRound() {
+        XCTAssertNil(waiting(submitted: false).opponentWait, "still choosing myself")
+        let auto = waiting(); auto.room = OnlineBattleScreenRenderingTests.room(mode: .auto)
+        XCTAssertNil(auto.opponentWait)
+        let pending = waiting(); pending.room = OnlineBattleScreenRenderingTests.room(state: .pending)
+        XCTAssertNil(pending.opponentWait)
+        let lobby = waiting(); lobby.phase = .lobby
+        XCTAssertNil(lobby.opponentWait)
+        let unknown = waiting(); unknown.members = []
+        XCTAssertEqual(unknown.opponentWait, .choosing, "no presence record is not a disconnect")
+    }
+
+    func testTheChosenSlotComesFromMyClickThenFromTheServersOwnChoice() {
+        let model = OnlineBattleScreenRenderingTests.model(); OnlineBattleScreenRenderingTests.arena(model)
+        XCTAssertNil(model.chosenSlot)
+        model.send(.chooseMove(2))
+        XCTAssertEqual(model.chosenSlot, 2)
+        // The server's record wins once it arrives; a restored room shows it without any click here.
+        model.room = Self.room(roundSeq: 1, ownChoice: "move 1")
+        XCTAssertEqual(model.chosenSlot, 1)
+        model.choiceSubmitted = false
+        XCTAssertNil(model.chosenSlot, "nothing is chosen in a round whose choice is not in")
+    }
+
+    /// A click from an earlier round must not mark a card in the next one.
+    func testAClickFromAnEarlierRoundDoesNotMarkTheNextRound() {
+        let model = OnlineBattleScreenRenderingTests.model(); OnlineBattleScreenRenderingTests.arena(model)
+        model.send(.chooseMove(2))
+        model.room = Self.room(roundSeq: 2, ownChoice: nil)
+        model.choiceSubmitted = true   // e.g. the session restored a choice it could not name
+        XCTAssertNil(model.chosenSlot)
+    }
+
+    // MARK: T16 the opponent has chosen
+
+    /// The fixture room as the server's view would carry the flag.
+    private static func room(opponentSubmitted: Bool?, mode: OnlineBattleMode = .manual, state: OnlineBattleState = .running) throws -> OnlineBattleView {
+        let base = OnlineBattleScreenRenderingTests.room(state: state, mode: mode)
+        var json = try XCTUnwrap(JSONSerialization.jsonObject(with: BattleJSON.encoder().encode(base)) as? [String: Any])
+        json["opponentSubmitted"] = opponentSubmitted.map { $0 as Any }
+        return try JSONDecoder().decode(OnlineBattleView.self, from: JSONSerialization.data(withJSONObject: json))
+    }
+
+    /// The flag alone is enough: it also shows while I have not chosen yet, which is what makes the other side's
+    /// choice felt. It wins over an offline presence, since a choice that is in is in.
+    func testTheOpponentHavingChosenShowsWhetherOrNotMyChoiceIsIn() throws {
+        for mine in [false, true] {
+            let model = waiting(online: true, submitted: mine)
+            model.room = try Self.room(opponentSubmitted: true)
+            XCTAssertEqual(model.opponentWait, .submitted, "my choice in: \(mine)")
+        }
+        let offline = waiting(online: false); offline.room = try Self.room(opponentSubmitted: true)
+        XCTAssertEqual(offline.opponentWait, .submitted)
+    }
+
+    func testWithoutTheFlagTheWaitStaysChoosingAsBefore() throws {
+        for flag in [nil, false] as [Bool?] {
+            let model = waiting(online: true); model.room = try Self.room(opponentSubmitted: flag)
+            XCTAssertEqual(model.opponentWait, .choosing, "flag \(String(describing: flag))")
+            let idle = waiting(submitted: false); idle.room = try Self.room(opponentSubmitted: flag)
+            XCTAssertNil(idle.opponentWait, "flag \(String(describing: flag)), nothing sent")
+        }
+    }
+
+    func testTheFlagIsIgnoredOutsideALiveManualRound() throws {
+        let auto = waiting(); auto.room = try Self.room(opponentSubmitted: true, mode: .auto)
+        XCTAssertNil(auto.opponentWait)
+        let pending = waiting(); pending.room = try Self.room(opponentSubmitted: true, state: .pending)
+        XCTAssertNil(pending.opponentWait)
+        let lobby = waiting(); lobby.room = try Self.room(opponentSubmitted: true); lobby.phase = .lobby
+        XCTAssertNil(lobby.opponentWait)
+    }
+
+    private static func room(roundSeq: Int, ownChoice: String?) -> OnlineBattleView {
+        let base = OnlineBattleScreenRenderingTests.room()
+        return .init(battleId: base.battleId, state: .running, revision: 1, mode: .manual, p1: base.p1, p2: base.p2,
+                     createdAt: base.createdAt, expiresAt: base.expiresAt, startedAt: 0, reportedAt: nil, confirmed: true,
+                     config: nil, roundSeq: roundSeq, deadline: nil, ownChoice: ownChoice, journal: [], result: nil, reason: nil, rematchOf: nil)
     }
 }

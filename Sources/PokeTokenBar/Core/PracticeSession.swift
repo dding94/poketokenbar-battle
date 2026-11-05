@@ -302,10 +302,8 @@ final class PracticeSession {
     /// public types (`battle.view`); nil for unknown moves such as recharge or Struggle.
     func moveHint(_ moveID: String) -> PracticeMoveHint? {
         guard let info = moveInfo[moveID] else { return nil }
-        let multiplier = battle?.view.flatMap { view in typeChart?.effectiveness(of: info, against: view.p2.types) }
-        // Fixed damage has no STAB, and a variable-type move's real type is hidden.
-        let stab = !info.fixedDamage && !info.variableType && battle?.view?.p1.types.contains(info.type) == true
-        return PracticeMoveHint(info: info, multiplier: multiplier, stab: stab)
+        let view = battle?.view
+        return PracticeMoveHint(info: info, chart: typeChart, attackerTypes: view?.p1.types, defenderTypes: view?.p2.types)
     }
     /// Automatic battles only: plays the rest of the battle at once without staging, so the result shows
     /// next. The playback still receives every event (summary and log stay complete).

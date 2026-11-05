@@ -196,14 +196,14 @@ struct L {
     var basedOnUpstream: String { t("원본 PokeTokenBar", "Original PokeTokenBar", "元の PokeTokenBar", "PokeTokenBar original", "PokeTokenBar d’origine", "PokeTokenBar original", "Original-PokeTokenBar", "Оригинальный PokeTokenBar") }
     /// README 의 "라이선스와 고지"와 같은 내용. 문구를 바꾸면 README 도 함께 바꾼다.
     var forkDisclaimer: String { t(
-        "PokeTokenBar Battle은 PokeTokenBar를 바탕으로 한 비공식·비상업 팬 프로젝트입니다. Nintendo, Game Freak, Creatures Inc., The Pokémon Company와 관련이 없으며 이들의 승인·후원을 받지 않았습니다. Pokémon과 관련 이름·캐릭터·이미지는 각 권리자의 상표이자 저작물입니다.",
-        "PokeTokenBar Battle is an unofficial, non-commercial fan project based on PokeTokenBar. It is not affiliated with, endorsed, sponsored, or approved by Nintendo, Game Freak, Creatures Inc., or The Pokémon Company. Pokémon and all related names, characters, and imagery are trademarks and copyrights of their respective owners.",
-        "PokeTokenBar Battle は PokeTokenBar をもとにした非公式・非営利のファンプロジェクトです。任天堂、ゲームフリーク、クリーチャーズ、株式会社ポケモンとは関係がなく、承認や支援も受けていません。ポケモンおよび関連する名称・キャラクター・画像は各権利者の商標・著作物です。",
-        "PokeTokenBar Battle es un proyecto de fans no oficial y sin fines comerciales basado en PokeTokenBar. No está afiliado, respaldado, patrocinado ni aprobado por Nintendo, Game Freak, Creatures Inc. ni The Pokémon Company. Pokémon y todos los nombres, personajes e imágenes relacionados son marcas y obras de sus respectivos titulares.",
-        "PokeTokenBar Battle est un projet de fans non officiel et non commercial basé sur PokeTokenBar. Il n’est ni affilié, ni approuvé, ni sponsorisé par Nintendo, Game Freak, Creatures Inc. ou The Pokémon Company. Pokémon ainsi que les noms, personnages et images associés sont des marques et des œuvres de leurs détenteurs respectifs.",
-        "PokeTokenBar Battle é um projeto de fãs não oficial e sem fins comerciais baseado no PokeTokenBar. Não é afiliado, endossado, patrocinado nem aprovado pela Nintendo, Game Freak, Creatures Inc. ou The Pokémon Company. Pokémon e todos os nomes, personagens e imagens relacionados são marcas e obras de seus respectivos titulares.",
-        "PokeTokenBar Battle ist ein inoffizielles, nicht kommerzielles Fanprojekt auf Basis von PokeTokenBar. Es steht in keiner Verbindung zu Nintendo, Game Freak, Creatures Inc. oder The Pokémon Company und wird von ihnen weder unterstützt noch genehmigt. Pokémon sowie alle zugehörigen Namen, Figuren und Bilder sind Marken und Werke ihrer jeweiligen Inhaber.",
-        "PokeTokenBar Battle — неофициальный некоммерческий фанатский проект на основе PokeTokenBar. Он не связан с Nintendo, Game Freak, Creatures Inc. и The Pokémon Company и не одобрен и не спонсируется ими. Pokémon и все связанные названия, персонажи и изображения — товарные знаки и объекты авторского права их владельцев.") }
+        "PokeTokenBattle은 PokeTokenBar를 바탕으로 한 비공식·비상업 팬 프로젝트입니다. Nintendo, Game Freak, Creatures Inc., The Pokémon Company와 관련이 없으며 이들의 승인·후원을 받지 않았습니다. Pokémon과 관련 이름·캐릭터·이미지는 각 권리자의 상표이자 저작물입니다.",
+        "PokeTokenBattle is an unofficial, non-commercial fan project based on PokeTokenBar. It is not affiliated with, endorsed, sponsored, or approved by Nintendo, Game Freak, Creatures Inc., or The Pokémon Company. Pokémon and all related names, characters, and imagery are trademarks and copyrights of their respective owners.",
+        "PokeTokenBattle は PokeTokenBar をもとにした非公式・非営利のファンプロジェクトです。任天堂、ゲームフリーク、クリーチャーズ、株式会社ポケモンとは関係がなく、承認や支援も受けていません。ポケモンおよび関連する名称・キャラクター・画像は各権利者の商標・著作物です。",
+        "PokeTokenBattle es un proyecto de fans no oficial y sin fines comerciales basado en PokeTokenBar. No está afiliado, respaldado, patrocinado ni aprobado por Nintendo, Game Freak, Creatures Inc. ni The Pokémon Company. Pokémon y todos los nombres, personajes e imágenes relacionados son marcas y obras de sus respectivos titulares.",
+        "PokeTokenBattle est un projet de fans non officiel et non commercial basé sur PokeTokenBar. Il n’est ni affilié, ni approuvé, ni sponsorisé par Nintendo, Game Freak, Creatures Inc. ou The Pokémon Company. Pokémon ainsi que les noms, personnages et images associés sont des marques et des œuvres de leurs détenteurs respectifs.",
+        "PokeTokenBattle é um projeto de fãs não oficial e sem fins comerciais baseado no PokeTokenBar. Não é afiliado, endossado, patrocinado nem aprovado pela Nintendo, Game Freak, Creatures Inc. ou The Pokémon Company. Pokémon e todos os nomes, personagens e imagens relacionados são marcas e obras de seus respectivos titulares.",
+        "PokeTokenBattle ist ein inoffizielles, nicht kommerzielles Fanprojekt auf Basis von PokeTokenBar. Es steht in keiner Verbindung zu Nintendo, Game Freak, Creatures Inc. oder The Pokémon Company und wird von ihnen weder unterstützt noch genehmigt. Pokémon sowie alle zugehörigen Namen, Figuren und Bilder sind Marken und Werke ihrer jeweiligen Inhaber.",
+        "PokeTokenBattle — неофициальный некоммерческий фанатский проект на основе PokeTokenBar. Он не связан с Nintendo, Game Freak, Creatures Inc. и The Pokémon Company и не одобрен и не спонсируется ими. Pokémon и все связанные названия, персонажи и изображения — товарные знаки и объекты авторского права их владельцев.") }
     var thirdPartyNotice: String { t(
         "배틀 엔진: Pokémon Showdown 시뮬레이터(@pkmn/sim, MIT 라이선스). 원본 앱: PokeTokenBar(MIT 라이선스).",
         "Battle engine: Pokémon Showdown simulator (@pkmn/sim, MIT License). Original app: PokeTokenBar (MIT License).",
@@ -879,14 +879,14 @@ struct L {
           "Покедекс \(dex) · \(tokens) за всё время")
     }
     var importErrorNotSaveFile: String {
-        t("PokeTokenBar 세이브 파일이 아니에요.",
-          "That isn't a PokeTokenBar save file.",
-          "PokeTokenBar のセーブファイルではありません。",
-          "Ese no es un archivo de partida de PokeTokenBar.",
-          "Ce n'est pas un fichier de sauvegarde PokeTokenBar.",
-          "Esse não é um arquivo de save do PokeTokenBar.",
-          "Das ist keine PokeTokenBar-Spielstandsdatei.",
-          "Это не файл сохранения PokeTokenBar.")
+        t("PokeTokenBattle 세이브 파일이 아니에요.",
+          "That isn't a PokeTokenBattle save file.",
+          "PokeTokenBattle のセーブファイルではありません。",
+          "Ese no es un archivo de partida de PokeTokenBattle.",
+          "Ce n'est pas un fichier de sauvegarde PokeTokenBattle.",
+          "Esse não é um arquivo de save do PokeTokenBattle.",
+          "Das ist keine PokeTokenBattle-Spielstandsdatei.",
+          "Это не файл сохранения PokeTokenBattle.")
     }
     var importErrorNewerSchema: String {
         t("더 새로운 버전에서 만든 세이브예요 — 앱을 업데이트한 뒤 다시 시도해 주세요.",
@@ -956,14 +956,14 @@ struct L {
           "Не удалось открыть почтовое приложение. Напишите напрямую на \(address).")
     }
     func reportMailSubject(_ version: String) -> String {
-        t("[PokeTokenBar] 문제 리포트 (v\(version))",
-          "[PokeTokenBar] Problem report (v\(version))",
-          "[PokeTokenBar] 問題レポート (v\(version))",
-          "[PokeTokenBar] Reporte de problema (v\(version))",
-          "[PokeTokenBar] Rapport de problème (v\(version))",
-          "[PokeTokenBar] Relato de problema (v\(version))",
-          "[PokeTokenBar] Problembericht (v\(version))",
-          "[PokeTokenBar] Сообщение о проблеме (v\(version))")
+        t("[PokeTokenBattle] 문제 리포트 (v\(version))",
+          "[PokeTokenBattle] Problem report (v\(version))",
+          "[PokeTokenBattle] 問題レポート (v\(version))",
+          "[PokeTokenBattle] Reporte de problema (v\(version))",
+          "[PokeTokenBattle] Rapport de problème (v\(version))",
+          "[PokeTokenBattle] Relato de problema (v\(version))",
+          "[PokeTokenBattle] Problembericht (v\(version))",
+          "[PokeTokenBattle] Сообщение о проблеме (v\(version))")
     }
     func reportMailBody(version: String, os: String) -> String {
         t("""

@@ -76,7 +76,8 @@ enum OnlineBattleHistoryText {
             return "알 수 없는 \(category)"
         }
         let id = value.lowercased().filter { $0.isLetter || $0.isNumber }
-        return translations[id] ?? "미번역 \(category) (\(value))"
+        // A name outside the dictionary reads as itself (already limited to plain letters above), never as an apology.
+        return translations[id] ?? value
     }
     private static func health(_ value: String) -> String? {
         // Already viewer-filtered: own HP is exact; the opponent's denominator is 100.

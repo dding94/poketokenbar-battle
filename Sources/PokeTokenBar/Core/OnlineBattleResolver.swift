@@ -26,30 +26,40 @@ final class OnlineBattleResolver {
     private(set) var request = BattleRequest(kind: "none", moves: [])
     private(set) var result: BattleResult?
     private(set) var logs: [String] = []
+    /// For the display only: `logs.count` after the opening and after each round, so
+    /// `roundLogEnds.count == journal.count + 1`. Segment 0 is the opening.
+    private(set) var roundLogEnds: [Int] = []
+    /// The reveals of each `roundLogEnds` segment. Empty for a completed proof, which has nothing to stage.
+    private(set) var roundReveals: [[BattleLogReveal]] = []
+    private let capturesReveals: Bool
     private(set) var journal: [OnlineBattlePair] = []
+    /// For the display only: what my request was when each journal round opened. A "timeout" on a forced round says nothing.
+    private(set) var roundOpeningKinds: [String] = []
     var processedRoundSeq: Int { journal.count }
     private let initial: OnlineBattleView
     private let config: OnlineBattleConfig
     private let engine: BattleEngine
     private var engineID: String?
     private var invalidated = false
+    /// Loaded on the first `moveHints()` and kept, whether or not it succeeded.
+    private var hintData: HintData?
 
     /// Live matches continue to require the current engine; archived pins never broaden this entry point.
     convenience init(battle: OnlineBattleView, localTrainerID: String, engine: BattleEngine) throws {
         guard battle.config?.engineHash == BattleEngineManifest.sha256,
               let entry = BattleEngineArchive.entry(for: BattleEngineManifest.sha256) else { throw Failure.invalidConfiguration }
-        try self.init(battle: battle, localTrainerID: localTrainerID, engine: engine, entry: entry)
+        try self.init(battle: battle, localTrainerID: localTrainerID, engine: engine, entry: entry, capturesReveals: true)
     }
 
     /// Completed-only verification for replay or normal reconciliation. Live matches keep the strict initializer.
     static func completedResolver(battle: OnlineBattleView, localTrainerID: String, engine: BattleEngine) throws -> OnlineBattleResolver {
         guard battle.state == .completed, let hash = battle.config?.engineHash,
               let entry = BattleEngineArchive.entry(for: hash) else { throw Failure.invalidConfiguration }
-        return try OnlineBattleResolver(battle: battle, localTrainerID: localTrainerID, engine: engine, entry: entry)
+        return try OnlineBattleResolver(battle: battle, localTrainerID: localTrainerID, engine: engine, entry: entry, capturesReveals: false)
     }
 
     private init(battle: OnlineBattleView, localTrainerID: String, engine: BattleEngine,
-                 entry: BattleEngineArchive.Entry) throws {
+                 entry: BattleEngineArchive.Entry, capturesReveals: Bool) throws {
         guard let localSide = battle.side(for: localTrainerID), battle.p1.trainerId != battle.p2.trainerId,
               !battle.battleId.isEmpty, let config = battle.config,
               [.ready, .running, .reported, .completed].contains(battle.state),
@@ -58,6 +68,7 @@ final class OnlineBattleResolver {
             throw Failure.invalidConfiguration
         }
         self.initial = battle; self.config = config; self.localSide = localSide; self.engine = engine
+        self.capturesReveals = capturesReveals
         struct Version: Decodable { let engine: String; let adapter: String; let rules: String }
         let version: Version = try BattleJSON.decode(engine.call(.version))
         guard version.engine == entry.engineVersion, version.adapter == entry.adapterVersion, version.rules == entry.rulesVersion else {
@@ -97,6 +108,7 @@ final class OnlineBattleResolver {
             }
             for pair in incoming.dropFirst(journal.count) {
                 guard result?.ended != true else { throw Failure.invalidJournal }
+                roundOpeningKinds.append(request.kind)
                 try apply(pair.p1, side: .p1)
                 try apply(pair.p2, side: .p2)
                 journal.append(pair)
@@ -136,6 +148,53 @@ final class OnlineBattleResolver {
         return VerifiedCompletion(battleID: battle.battleId, resultHash: Self.hash(try BattleJSON.encode(report)),
                                   localInstanceID: own.instanceId, remainingHPShare: Double(hp) / Double(own.publicInfo.stats["hp"]!),
                                   winner: report.winner, localSide: localSide)
+    }
+
+    // MARK: Move hints
+
+    /// What a move card needs to hint at a choice: the engine's type chart and the public data of my own moves.
+    struct HintData: Equatable {
+        var chart: PracticeTypeChart?
+        /// Keyed by the engine's move id, which is what a request lists.
+        var moves: [String: PracticeMoveInfo] = [:]
+    }
+
+    /// Both calls are pure lookups (no battle state, no RNG). A failure leaves that part empty and never throws:
+    /// the hints simply stay out and the battle goes on, as on the practice screen.
+    static func loadHintData(engine: BattleEngine, ownMoves: [String]) -> HintData {
+        var data = HintData()
+        if let text = try? engine.call(.typeChart) { data.chart = try? BattleJSON.decode(text) }
+        struct Described: Decodable { let moves: [PracticeMoveInfo] }
+        if !ownMoves.isEmpty, let arguments = try? BattleJSON.encode(ownMoves),
+           let text = try? engine.call(.describeMoves, arguments: [arguments]),
+           let described: Described = try? BattleJSON.decode(text) {
+            for info in described.moves { data.moves[info.id] = info }
+        }
+        return data
+    }
+
+    /// Moves whose real effectiveness is not the plain type chart (Freeze-Dry is super effective on Water, Flying
+    /// Press adds Flying, Thousand Arrows hits Flying types). Their card shows power and accuracy, no matchup.
+    private static let chartBreakingMoves: Set<String> = ["freezedry", "flyingpress", "thousandarrows"]
+
+    /// Card hints for the moves of my current move request, by slot. They use only what a player may know: my own
+    /// set (the data of my own four moves), my own and the foe's current types from the engine's view, and the
+    /// engine's chart. The foe's set, ability and choice are never read. Empty for any other kind of request, so a
+    /// forced Struggle or Recharge has none, and for a closed resolver.
+    func moveHints() -> [Int: PracticeMoveHint] {
+        guard !invalidated, engineID != nil, request.kind == "move", let view else { return [:] }
+        let data = hintData ?? Self.loadHintData(engine: engine, ownMoves: (localSide == .p1 ? config.p1 : config.p2).set.moves)
+        hintData = data
+        let own = localSide == .p1 ? view.p1 : view.p2, foe = localSide == .p1 ? view.p2 : view.p1
+        var hints: [Int: PracticeMoveHint] = [:]
+        for move in request.moves {
+            guard let info = data.moves[move.id] else { continue }
+            let chart = Self.chartBreakingMoves.contains(info.id) ? nil : data.chart
+            // STAB is a damage bonus, so a status move never shows it (the practice board still does, unchanged).
+            hints[move.slot] = PracticeMoveHint(info: info, chart: chart, attackerTypes: info.isStatus ? nil : own.types,
+                                                defenderTypes: foe.types)
+        }
+        return hints
     }
 
     /// Explicitly release on navigation/session replacement. No further reports can be produced afterwards.
@@ -194,6 +253,14 @@ final class OnlineBattleResolver {
         result = try BattleJSON.decode(call(.result))
         let fresh: [String] = try BattleJSON.decode(call(.drainLog, side: localSide))
         logs += fresh
+        roundLogEnds.append(logs.count)
+        // Reveals use their own cursor and never touch the battle log, so the log hash cannot see this. It is
+        // display data: if it ever failed, the round must still count.
+        var reveals: [BattleLogReveal] = []
+        if capturesReveals {
+            do { reveals = try BattleJSON.decode(call(.drainEvents, side: localSide)) } catch { reveals = [] }
+        }
+        roundReveals.append(reveals)
     }
     private func call(_ method: BattleEngine.Method, side: OnlineBattleSide? = nil, extra: [String] = []) throws -> String {
         guard let engineID else { throw Failure.needsRefetch }

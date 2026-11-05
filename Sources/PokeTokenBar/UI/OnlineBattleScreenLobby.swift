@@ -5,9 +5,25 @@ struct OnlineBattleLobby: View {
     let model: OnlineBattlePresentation
     let l: L
     let artwork: Bool
+    /// Row badges to draw instead of the ones read from the model; tests pin them here.
+    var badges: [String: OnlineLobbyRowBadge]? = nil
+    /// Carries the facts the presentation lacks (readiness is bound to the connection), so a row and the menu mark agree.
+    @Environment(OnlineAttentionSource.self) private var attention: OnlineAttentionSource?
+
+    private var rowBadges: [String: OnlineLobbyRowBadge] {
+        if let badges { return badges }
+        let input = attention?.input()
+            ?? OnlineAttentionInput(presentation: model, preparedBattleIDs: [], stagingHeldBattleIDs: [], now: Date())
+        return OnlineLobbyRowBadge.badges(input)
+    }
+    /// The peer the challenge button would send to, if one is chosen.
+    private var chosenPeer: OnlineBattleMember? { model.lobbyPeers.first { $0.trainerId == model.selectedOpponentID } }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
+            if let steps = model.firstSteps {
+                OnlineBattleFirstStepsCard(steps: steps, l: l) { model.send(.dismissFirstSteps) }
+            }
             HStack {
                 Text(model.account?.group.name ?? l.onlineTitle).font(.headline).lineLimit(2)
                 Spacer(minLength: 4)
@@ -16,7 +32,12 @@ struct OnlineBattleLobby: View {
             }
             VStack(alignment: .leading, spacing: 7) {
                 Text(l.onlineMembers).font(.subheadline.bold())
-                ForEach(model.members.filter { $0.status == .active && $0.trainerId != model.account?.trainer.trainerId }, id: \.trainerId) { member in
+                if model.lobbyPeers.isEmpty {
+                    Text(l.onlineNoPeers(isHost: model.isHost)).font(.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("online.members.empty")
+                }
+                ForEach(model.lobbyPeers, id: \.trainerId) { member in
                     Button { model.send(.selectOpponent(member.trainerId)) } label: {
                         HStack(spacing: 6) {
                             Image(systemName: model.selectedOpponentID == member.trainerId ? "checkmark.circle.fill" : "circle")
@@ -27,7 +48,7 @@ struct OnlineBattleLobby: View {
                     }.buttonStyle(.plain)
                     .accessibilityIdentifier("online.member.\(member.trainerId)")
                 }
-            }.practiceCard()
+            }.frame(maxWidth: .infinity, alignment: .leading).practiceCard()
             OnlineBattleRoster(model: model, l: l, artwork: artwork)
             VStack(alignment: .leading, spacing: 7) {
                 Picker(l.onlineMode, selection: Binding(get: { model.mode }, set: { model.send(.setMode($0)) })) {
@@ -38,24 +59,28 @@ struct OnlineBattleLobby: View {
                     .fixedSize(horizontal: false, vertical: true)
                 Text(l.onlineStakesHint).font(.caption2).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+                if let peer = chosenPeer {
+                    // The whole name, wrapped: the list row above may cut a long one, this line must not.
+                    Text(l.onlineChallengeConfirm(opponent: peer.displayEmail ?? l.onlineAnonymous))
+                        .font(.caption).fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("online.challenge.confirm")
+                }
                 Button(l.onlineChallenge) { model.send(.challenge) }
                     .buttonStyle(.borderedProminent).disabled(!model.canChallenge)
                     .accessibilityIdentifier("online.challenge")
+                OnlineBattleBlockReason(block: model.challengeBlock, l: l, identifier: "online.challenge.reason")
+                if model.selectedOpponentOffline {
+                    Label(l.onlineOpponentOffline(model.selectedOpponent?.displayEmail), systemImage: "moon.zzz")
+                        .font(.caption2).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("online.challenge.offline")
+                }
             }
             VStack(alignment: .leading, spacing: 8) {
                 Text(l.onlineBattles).font(.subheadline.bold())
                 if model.activeBattles.isEmpty { Text(l.onlineNoBattles).font(.caption).foregroundStyle(.secondary) }
                 ForEach(model.activeBattles, id: \.battleId) { battle in
-                    Button { model.send(.openBattle(battle.battleId)) } label: {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text(opponentName(battle)).font(.callout).lineLimit(1).truncationMode(.middle)
-                                Text(l.onlineState(battle.state)).font(.caption2).foregroundStyle(.secondary)
-                            }
-                            Spacer(minLength: 4)
-                            Image(systemName: "chevron.right").font(.caption)
-                        }.contentShape(Rectangle())
-                    }.buttonStyle(.plain).disabled(model.isBusy)
+                    battleRow(battle, badge: rowBadges[battle.battleId])
                 }
             }.practiceCard()
             Button { model.send(.showHistory) } label: {
@@ -78,6 +103,37 @@ struct OnlineBattleLobby: View {
             .buttonStyle(.plain).disabled(model.isBusy)
             .accessibilityIdentifier("online.standings.open")
             .practiceCard()
+        }
+    }
+    /// The row keeps one height with or without a badge: the badge sits on the state line, and only its tint is extra.
+    private func battleRow(_ battle: OnlineBattleView, badge: OnlineLobbyRowBadge?) -> some View {
+        Button { model.send(.openBattle(battle.battleId)) } label: {
+            HStack {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(opponentName(battle)).font(.callout).lineLimit(1).truncationMode(.middle)
+                    HStack(spacing: 6) {
+                        if let badge {
+                            Text(l.onlineLobbyBadge(badge)).font(.caption2.bold()).foregroundStyle(.white)
+                                .lineLimit(1).padding(.horizontal, 6)
+                                .background(Capsule().fill(Self.color(badge)))
+                                .accessibilityIdentifier("online.battle.badge.\(battle.battleId)")
+                        }
+                        Text(l.onlineRoomState(battle)).font(.caption2).foregroundStyle(.secondary)
+                    }
+                }
+                Spacer(minLength: 4)
+                Image(systemName: "chevron.right").font(.caption)
+            }
+            .padding(6).contentShape(Rectangle())
+            .background(RoundedRectangle(cornerRadius: 8).fill(badge.map { Self.color($0).opacity(0.12) } ?? Color.clear))
+        }.buttonStyle(.plain).disabled(model.isBusy)
+        .accessibilityIdentifier("online.battle.\(battle.battleId)")
+    }
+    private static func color(_ badge: OnlineLobbyRowBadge) -> Color {
+        switch badge {
+        case .received: .blue
+        case .sent: .gray
+        case .myTurn: .orange
         }
     }
     private func opponentName(_ battle: OnlineBattleView) -> String {
@@ -141,33 +197,59 @@ struct OnlineBattleRoom: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             if let room = model.room {
-                Text(l.onlineState(room.state)).font(.headline)
+                if let progress = model.roomProgress {
+                    OnlineBattleRoomGuide(model: model, l: l, progress: progress)
+                } else {
+                    Text(l.onlineState(room.state)).font(.headline)
+                }
                 Text(room.mode == .manual ? l.onlineManual : l.onlineAuto).font(.caption).foregroundStyle(.secondary)
-                publicEntry(room.p1, own: model.localSide == .p1)
-                publicEntry(room.p2, own: model.localSide == .p2)
+                // The step's button sits right under the guide so it is never below the scroll fold.
                 if room.state == .pending && model.localSide == .p2 {
                     OnlineBattleRoster(model: model, l: l, artwork: artwork)
                 }
+                actions(room)
+                publicEntry(room.p1, own: model.localSide == .p1)
+                publicEntry(room.p2, own: model.localSide == .p2)
                 Text(l.onlineNoLevelLimit).font(.caption).foregroundStyle(.secondary)
                 Text(l.onlineHidden).font(.caption2).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 Text(l.onlineStakesHint).font(.caption2).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-                if room.state == .pending && model.localSide == .p2 {
-                    HStack {
-                        Button(l.onlineAccept) { model.send(.accept) }.buttonStyle(.borderedProminent).disabled(!model.canAccept)
-                        Button(l.onlineDecline) { model.send(.decline) }.disabled(model.isBusy)
+            }
+        }
+    }
+    @ViewBuilder private func actions(_ room: OnlineBattleView) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if room.state == .pending && model.localSide == .p2 {
+                HStack {
+                    Button(l.onlineAccept) { model.send(.accept(room.battleId)) }.buttonStyle(.borderedProminent).disabled(!model.canAccept)
+                        .accessibilityIdentifier("online.accept")
+                    if model.roomExits.contains(.decline) {
+                        Button(l.onlineDecline) { model.send(.decline(room.battleId)) }.disabled(model.isBusy)
+                            .accessibilityIdentifier("online.decline")
                     }
-                } else if room.state == .accepted && model.localSide == .p1 && !room.confirmed {
-                    Button(l.onlineConfirm) { model.send(.confirm) }.buttonStyle(.borderedProminent).disabled(!model.canConfirm)
-                } else if room.confirmed && [.accepted, .ready].contains(room.state) {
-                    Button(l.onlinePrepare) { model.send(.prepareBattle) }.buttonStyle(.borderedProminent).disabled(!model.canPrepare)
-                } else {
-                    Text(l.onlineWaiting).font(.caption).foregroundStyle(.secondary)
                 }
-                if [.pending, .accepted, .ready].contains(room.state) {
-                    Button(l.onlineCancel) { model.send(.cancel) }.disabled(model.isBusy)
-                }
+                OnlineBattleBlockReason(block: model.acceptBlock, l: l, identifier: "online.accept.reason")
+            } else if room.state == .accepted && model.localSide == .p1 && !room.confirmed {
+                Button(l.onlineConfirm) { model.send(.confirm(room.battleId)) }.buttonStyle(.borderedProminent).disabled(!model.canConfirm)
+                    .accessibilityIdentifier("online.confirm")
+                OnlineBattleBlockReason(block: model.isBusy ? .busy : nil, l: l, identifier: "online.confirm.reason")
+            } else if room.confirmed && [.accepted, .ready].contains(room.state) {
+                Button(model.localReady ? l.onlineOwnReady : l.onlinePrepare) { model.send(.prepareBattle(room.battleId)) }
+                    .buttonStyle(.borderedProminent).disabled(!model.canPrepare)
+                    .accessibilityIdentifier("online.prepare")
+                OnlineBattleBlockReason(block: model.prepareBlock, l: l, identifier: "online.prepare.reason")
+            } else if model.roomProgress == nil {
+                Text(l.onlineWaiting).font(.caption).foregroundStyle(.secondary)
+            }
+            // Only the challenger sees "cancel request"; the receiver declines, or cancels the battle after accepting.
+            if model.roomExits.contains(.cancelRequest) {
+                Button(l.onlineCancel) { model.send(.cancel(room.battleId)) }.disabled(model.isBusy)
+                    .accessibilityIdentifier("online.cancel")
+            }
+            if model.roomExits.contains(.cancelBattle) {
+                Button(l.onlineCancelBattle) { model.send(.cancel(room.battleId)) }.disabled(model.isBusy)
+                    .accessibilityIdentifier("online.cancelBattle")
             }
         }
     }

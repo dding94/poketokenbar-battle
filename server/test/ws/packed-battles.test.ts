@@ -6,7 +6,9 @@ closeSocketsAfterAll();
 it("persists each manual input once without changing lifecycle index or exposing the first choice", async () => {
   const f = await packedSession(), before = await f.get(1);
   const first = await measured(f, () => f.action(0, "choices", { roundSeq: 1, choice: "move 3" }));
-  expect(await f.get(1)).toEqual(before); await f.sockets[1]!.socket.sync();
+  // D7: the other view learns only that a choice is in (one battle_changed frame, no slot), never which slot.
+  expect(await f.get(1)).toEqual({ ...before, opponentSubmitted: true });
+  expect(await f.sockets[1]!.socket.next()).toMatchObject({ type: "battle_changed", opponentSubmitted: true }); await f.sockets[1]!.socket.sync();
   const second = await measured(f, () => f.action(1, "choices", { roundSeq: 1, choice: "move 2" }));
   const next = await measured(f, () => f.action(0, "advance", { processedRoundSeq: 1 }));
   const duplicate = await measured(f, () => f.action(1, "advance", { processedRoundSeq: 1 }));
