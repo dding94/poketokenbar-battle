@@ -257,17 +257,12 @@ final class PracticeBattle {
         request = try BattleJSON.decode(engine.call(.request, arguments: [id, viewer]))
         let lines: [String] = try BattleJSON.decode(engine.call(.drainLog, arguments: [id, viewer]))
         messages += lines.compactMap { PracticeText.log($0, names: names) }
-        var parsed = parser.parse(lines)
-        struct Reveal: Decodable { let kind: String; let side: String; let id: String; let turn: Int }
-        let reveals: [Reveal] = try BattleJSON.decode(engine.call(.drainEvents, arguments: [id, viewer]))
+        let parsed = parser.parse(lines)
+        let reveals: [BattleLogReveal] = try BattleJSON.decode(engine.call(.drainEvents, arguments: [id, viewer]))
         for reveal in reveals where reveal.kind == "ability" {
             messages.append("\(names[reveal.side] ?? reveal.side) · 특성 공개: \(reveal.id)")
-            guard let side = PracticeSide(rawValue: reveal.side) else { continue }
-            let event = PracticeEvent.abilityRevealed(side, abilityID: reveal.id)
-            // A reveal during turn N belongs before the `|turn|N+1` that closes the step; turn 0 is the start.
-            if reveal.turn >= 1, case .turn? = parsed.last { parsed.insert(event, at: parsed.count - 1) } else { parsed.append(event) }
         }
-        events += parsed
+        events += parser.merging(reveals, into: parsed)
         if view?.ended == true {
             result = try BattleJSON.decode(engine.call(.result, arguments: [id]))
             phase = .finished; remainingSeconds = 0; release()

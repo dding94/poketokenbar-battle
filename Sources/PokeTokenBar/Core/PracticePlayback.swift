@@ -1,20 +1,31 @@
 import Foundation
 import Observation
 
-/// A side of a practice battle from the player's (p1) viewpoint.
-enum PracticeSide: String, Hashable, Sendable { case player = "p1", opponent = "p2" }
+/// A combatant from the viewer's viewpoint. It has no raw value on purpose: the engine's seats ("p1", "p2")
+/// reach it only through `BattleSeatFrame`, so a p1 assumption cannot hide in a conversion.
+enum PracticeSide: Hashable, Sendable { case player, opponent }
 
+/// The one mapping between the engine's absolute seats and the viewer's sides. The engine never flips
+/// identifiers for a p2 viewer (only the HP scale follows the viewer), so a seated online player needs this
+/// to read "p2a: ..." as themselves. Practice always plays the first seat.
 struct BattleSeatFrame: Equatable, Sendable {
     let local: OnlineBattleSide
     static let practice = BattleSeatFrame(local: .p1)
+    /// "p1a: Pikachu" or a bare "p1"; nil for anything that names no seat.
     func side(ident: String) -> PracticeSide? {
-        if ident.hasPrefix("p1") { return .player }
-        if ident.hasPrefix("p2") { return .opponent }
+        if ident.hasPrefix("p1") { return local == .p1 ? .player : .opponent }
+        if ident.hasPrefix("p2") { return local == .p2 ? .player : .opponent }
         return nil
     }
-    func seat(_ side: PracticeSide) -> OnlineBattleSide { side == .player ? .p1 : .p2 }
-    func pokemon(_ side: PracticeSide, in view: BattleView) -> BattleView.Pokemon { side == .player ? view.p1 : view.p2 }
+    func seat(_ side: PracticeSide) -> OnlineBattleSide {
+        switch side {
+        case .player: return local
+        case .opponent: return local == .p1 ? .p2 : .p1
+        }
+    }
+    func pokemon(_ side: PracticeSide, in view: BattleView) -> BattleView.Pokemon { seat(side) == .p1 ? view.p1 : view.p2 }
 }
+/// One `drainEvents` row. `side` is an absolute seat and `turn` the turn it happened in (0: battle start).
 struct BattleLogReveal: Decodable, Equatable, Sendable {
     let kind: String
     let side: String
@@ -22,8 +33,8 @@ struct BattleLogReveal: Decodable, Equatable, Sendable {
     let turn: Int
 }
 
-/// One fact from the engine's p1-viewer protocol log, typed so the screen can stage it.
-/// HP is what p1 sees: exact for the player, percent (max 100) for the opponent.
+/// One fact from the engine's protocol log for one viewer, typed so the screen can stage it.
+/// HP is what the viewer sees: exact for the player, percent (max 100) for the opponent.
 enum PracticeEvent: Equatable, Sendable {
     case turn(Int)
     /// `|switch|`: the side entered with this HP (seeds the display).
@@ -56,17 +67,28 @@ enum PracticeEvent: Equatable, Sendable {
     case end(winner: PracticeSide?)
 }
 
-/// Turns `drainLog` lines (viewer p1) into events. It keeps each side's max HP from `|switch|` so a
-/// later "0 fnt" still has a scale. Lines it does not model are dropped; the text log keeps them.
+/// Turns `drainLog` lines of the frame's viewer into events. It keeps each side's max HP from `|switch|` so
+/// a later "0 fnt" still has a scale. Lines it does not model are dropped; the text log keeps them.
 /// `-sethp` (Pain Split) becomes a damage or heal by comparing with the side's last HP; `-setboost`
 /// (Belly Drum) is a boost whose `stages` is the stage it was set to. `|-weather|...|[upkeep]` repeats a
 /// weather already announced, so only changes become events.
 struct PracticeEventParser {
     private var maxHP: [PracticeSide: Int] = [:]
     private var lastHP: [PracticeSide: Int] = [:]
-    init(frame: BattleSeatFrame = .practice) {}
+    private let frame: BattleSeatFrame
+    init(frame: BattleSeatFrame = .practice) { self.frame = frame }
 
-    func merging(_ reveals: [BattleLogReveal], into parsed: [PracticeEvent]) -> [PracticeEvent] { parsed }
+    /// Adds the ability reveals of one engine step to its parsed events. A reveal during turn N belongs
+    /// before the `|turn|N+1` that closes the step; turn 0 is the start of the battle.
+    func merging(_ reveals: [BattleLogReveal], into parsed: [PracticeEvent]) -> [PracticeEvent] {
+        var events = parsed
+        for reveal in reveals where reveal.kind == "ability" {
+            guard let side = frame.side(ident: reveal.side) else { continue }
+            let event = PracticeEvent.abilityRevealed(side, abilityID: reveal.id)
+            if reveal.turn >= 1, case .turn? = events.last { events.insert(event, at: events.count - 1) } else { events.append(event) }
+        }
+        return events
+    }
 
     mutating func parse(_ lines: [String]) -> [PracticeEvent] {
         var events: [PracticeEvent] = []
@@ -78,7 +100,7 @@ struct PracticeEventParser {
         let parts = line.split(separator: "|", omittingEmptySubsequences: false).map(String.init)
         guard parts.count > 1 else { return nil }
         func field(_ index: Int) -> String { index < parts.count ? parts[index] : "" }
-        let side = Self.side(of: field(2))
+        let side = frame.side(ident: field(2))
         switch parts[1] {
         case "turn": return Int(field(2)).map(PracticeEvent.turn)
         case "switch", "drag":
@@ -114,17 +136,12 @@ struct PracticeEventParser {
             guard !parts.contains("[upkeep]") else { return nil }
             let weather = Self.id(field(2))
             return .weather(weather == "none" ? nil : weather)
-        case "win": return .end(winner: PracticeSide(rawValue: field(2)))
+        case "win": return .end(winner: side)
         case "tie": return .end(winner: nil)
         default: return nil
         }
     }
 
-    private static func side(of ident: String) -> PracticeSide? {
-        if ident.hasPrefix("p1") { return .player }
-        if ident.hasPrefix("p2") { return .opponent }
-        return nil
-    }
     /// "73/100", "73/100 psn" or "0 fnt"; `max` is nil when the field has no denominator.
     private static func hp(_ field: String) -> (current: Int, max: Int?)? {
         guard let token = field.split(separator: " ").first else { return nil }
