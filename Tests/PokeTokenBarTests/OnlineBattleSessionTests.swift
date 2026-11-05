@@ -2226,4 +2226,89 @@ final class OnlineBattleSessionTests: XCTestCase {
         XCTAssertNil(session.presentation.room)
         XCTAssertNil(attention(session))
     }
+    // MARK: Review A F1.4: a failed read is not a changed entry
+    private let copy = L(.ko)
+    private func roomActionCases() throws -> [(OnlineBattleUIAction, String, String, OnlineBattleView)] {
+        let pending = try pendingRoom(), confirmed = try confirmedRoom()
+        let unconfirmed = try changed(confirmed, ["confirmed": false])
+        return [(.confirm(unconfirmed.battleId), "confirm", "trainer-one", unconfirmed),
+                (.prepareBattle(confirmed.battleId), "ready", "trainer-one", confirmed),
+                (.decline(pending.battleId), "decline", "trainer-two", pending),
+                (.cancel(pending.battleId), "cancel", "trainer-one", pending)]
+    }
+    func testChallengeAfterAFailedReadSaysConnectionNotEntry() async throws {
+        let (session, http, _, _) = try await setup()
+        await session.bootstrap()
+        session.presentation.selectedEntryID = "instance-one"; session.presentation.selectedOpponentID = "trainer-two"
+        await http.route("/v1/battles", Data(), status: 503)
+        await session.perform(.challenge)
+        XCTAssertEqual(session.presentation.notice, copy.onlineErrorGeneric)
+        let posts = await http.requests.filter { $0.httpMethod == "POST" }.count
+        XCTAssertEqual(posts, 0)
+    }
+    func testRoomActionAfterAFailedBackgroundReadReadsAgainAndGoesThrough() async throws {
+        for (action, path, trainer, room) in try roomActionCases() {
+            let (session, http, _, _) = try await setup([room], trainer: trainer)
+            await http.route("/v1/battles/\(room.battleId)/\(path)", try JSONEncoder().encode(room))
+            await session.bootstrap()
+            let good = OnlineBattleHTTPResponse(status: 200, body: try JSONEncoder().encode(OnlineBattlePage(battles: [room], before: nil)))
+            await http.queue("/v1/battles", [.init(status: 503, body: Data()), good])
+            await session.refresh()
+            XCTAssertEqual(session.presentation.notice, copy.onlineErrorGeneric, path)
+            await session.perform(action)
+            let sent = await http.count("/v1/battles/\(room.battleId)/\(path)")
+            XCTAssertEqual(sent, 1, "One failed background read must not silently block \(path)")
+            XCTAssertNil(session.presentation.notice, path)
+        }
+    }
+    func testRoomActionWhoseReadFailsAgainSendsNothingAndSaysConnection() async throws {
+        for (action, path, trainer, room) in try roomActionCases() {
+            let (session, http, _, _) = try await setup([room], trainer: trainer)
+            await http.route("/v1/battles/\(room.battleId)/\(path)", try JSONEncoder().encode(room))
+            await session.bootstrap()
+            await http.route("/v1/battles", Data(), status: 503)
+            await session.refresh(); await session.perform(action)
+            let sent = await http.count("/v1/battles/\(room.battleId)/\(path)")
+            XCTAssertEqual(sent, 0, path)
+            XCTAssertEqual(session.presentation.notice, copy.onlineErrorGeneric, path)
+        }
+    }
+    func testActionAfterAReadThatFailedForAnotherReasonKeepsThatReason() async throws {
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(battle())) as? [String: Any])
+        var result = object["result"] as! [String: Any]; result["logHash"] = "tampered"; object["result"] = result
+        let tampered = try JSONDecoder().decode(OnlineBattleView.self, from: JSONSerialization.data(withJSONObject: object))
+        let (session, _, _, _) = try await setup([tampered])
+        await session.bootstrap()
+        session.presentation.selectedEntryID = "instance-one"; session.presentation.selectedOpponentID = "trainer-two"
+        await session.perform(.challenge)
+        XCTAssertEqual(session.presentation.notice, copy.onlineErrorResultUnverified)
+    }
+    func testAccountRevokedDuringTheReadShowsNoExtraNotice() async throws {
+        let room = try pendingRoom()
+        let (session, http, _, _) = try await setup([room])
+        await session.bootstrap()
+        await http.route("/v1/me", Data(), status: 401)
+        await session.perform(.accept(room.battleId))
+        XCTAssertEqual(session.presentation.phase, .setup)
+        XCTAssertNil(session.presentation.notice)
+    }
+    func testRealEntryChangeStillSaysEntryChanged() async throws {
+        let room = try changed(confirmedRoom(), ["confirmed": false])
+        let (session, http, _, effects) = try await setup([room])
+        await session.bootstrap()
+        effects.setHealthShare(0.5, of: "instance-one")
+        await session.perform(.confirm(room.battleId))
+        XCTAssertEqual(session.presentation.notice, copy.onlineErrorEntryChanged)
+        let sent = await http.count("/v1/battles/\(room.battleId)/confirm")
+        XCTAssertEqual(sent, 0)
+    }
+    func testActionTheRoomNoLongerAllowsSaysTheRoomMovedOnNotEntry() async throws {
+        let room = try confirmedRoom()
+        let (session, http, _, _) = try await setup([room])
+        await session.bootstrap()
+        await session.perform(.decline(room.battleId)) // Only the receiver of a pending room can decline.
+        XCTAssertEqual(session.presentation.notice, copy.onlineErrorRoomChanged)
+        let posts = await http.requests.filter { $0.httpMethod == "POST" }.count
+        XCTAssertEqual(posts, 0)
+    }
 }
