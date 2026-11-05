@@ -1613,7 +1613,7 @@ read_when:
   `PokeTokenBarApp.swift`의 `[companion] in companion.l`은 암시적 언래핑 프로퍼티를 캡처 목록에 넣은 것으로, 로컬 Swift 6.4는
   통과시키지만 CI의 Swift 6.1은 거절한다. UI 폴더의 한글 문자열은 `LocalizedUILiteralTests`가 잡는데, 작업자와 운영자 모두
   관련 묶음만 돌려 이 테스트를 실행하지 않았다. 캡처는 `[companion = companion!]`로 고치고, 파싱 라벨을 가진 입력 타입은 UI가
-  아니므로 Core로 옮겼다. 작업 필터에 이 테스트를 항상 넣고(`pr14-online-ux-plan.md` §4), 통합할 때마다 푸시해 CI로 6.1을 확인한다.
+  아니므로 Core로 옮겼다. 작업 필터에 이 테스트를 항상 넣는다(`pr14-online-ux-plan.md` §4). 6.1은 작업이 끝난 뒤 CI에서 확인한다.
 
 - **로컬에서 통과하는 합성 클릭이 CI의 옛 macOS에서 끝없이 멈출 수 있다.** PR 14에서 `build-test (rest)`가 13분 예산을 넘겨 취소됐다.
   붙여넣기 렌더링 테스트가 `window.sendEvent`로 mouse-down을 보내는데, CI의 macOS 15에서는 이 기본 스타일 버튼이 NSButton으로
