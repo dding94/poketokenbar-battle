@@ -5,6 +5,10 @@ import Security
 struct OnlineBattleSettings: Codable, Equatable, Sendable {
     let profileID: String
     var serverURL: String?
+    /// Skeleton for T08: the embedded address is not honoured yet.
+    var serverIsEmbedded: Bool { false }
+    var storedServerURL: String? { serverURL }
+    static func load(from stateDirectory: URL, embeddedServerURL: String?) throws -> Self { try load(from: stateDirectory) }
     static func load(from stateDirectory: URL) throws -> Self {
         let url = stateDirectory.appendingPathComponent("online-battle-settings.json")
         if FileManager.default.fileExists(atPath: url.path) {
@@ -28,6 +32,12 @@ struct OnlineBattleSettings: Codable, Equatable, Sendable {
     mutating func setServer(_ value: String?) throws {
         serverURL = try value.map { try OnlineBattleOrigin($0).url.absoluteString }
     }
+}
+/// Build-time server address carried in Info.plist (skeleton for T08).
+enum OnlineBattleEmbeddedServer {
+    static let infoKey = "PTBBattleServerURL"
+    static func address(infoDictionary: [String: Any]?) -> String? { nil }
+    static var configured: String? { address(infoDictionary: Bundle.main.infoDictionary) }
 }
 struct OnlineBattleCredentialScope: Equatable, Sendable {
     static let service = "io.github.dding94.poketokenbar-battle.online-access"
