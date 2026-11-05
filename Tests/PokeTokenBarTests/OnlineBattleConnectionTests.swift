@@ -540,7 +540,7 @@ final class OnlineBattleConnectionTests: XCTestCase {
 @MainActor
 private final class OnlineSignalBox { var values: [OnlineBattleReconnectReason] = [] }
 @MainActor
-final class OnlineReconnectSignalsTests: XCTestCase {
+final class OnlineBattleReconnectSignalsTests: XCTestCase {
     func testWakeAndNetworkReturnBothSignal() async throws {
         let center = NotificationCenter(), received = expectation(description: "both signals"), box = OnlineSignalBox()
         received.expectedFulfillmentCount = 2
