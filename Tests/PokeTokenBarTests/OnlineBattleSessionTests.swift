@@ -971,6 +971,16 @@ final class OnlineBattleSessionTests: XCTestCase {
         let reads = await http.count("/v1/battles/\(final.battleId)"), me = await http.count("/v1/me"), advances = await http.count("/v1/battles/\(final.battleId)/advance")
         XCTAssertEqual(reads, before); XCTAssertEqual(me, meBefore); XCTAssertEqual(advances, 0)
     }
+    func testAReadThatStartedBeforeTheFirstChoiceDoesNotClearTheSignal() async throws {
+        let final = try battle(), observer = SessionObserver(), connection = SessionConnection()
+        let initial = try changed(final, ["state": "RUNNING", "result": NSNull(), "roundSeq": 1, "deadline": 60000, "journal": []])
+        let (session, http, _, _) = try await setup([initial], trainer: "trainer-two", connection: connection, observer: observer)
+        await http.route("/v1/battles/\(final.battleId)", try JSONEncoder().encode(initial)); await session.bootstrap()
+        try await notify(observer, connection, room: final, fields: signal(initial))
+        XCTAssertEqual(session.presentation.room?.opponentSubmitted, true)
+        await session.refresh()   // The list still carries the view from before the choice.
+        XCTAssertEqual(session.presentation.room?.opponentSubmitted, true, "A round cannot un-choose")
+    }
     func testFirstChoiceSignalIsIgnoredWhenOldMissingFalseOrForAnotherDeadline() async throws {
         let final = try battle(), observer = SessionObserver(), connection = SessionConnection()
         let initial = try changed(final, ["state": "RUNNING", "result": NSNull(), "roundSeq": 1, "deadline": 60000, "journal": []])

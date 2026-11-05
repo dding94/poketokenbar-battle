@@ -540,6 +540,9 @@ final class OnlineBattleSession {
             let previousView = views[room.battleId]
             guard accepts(room) else { return }
             guard let side = room.side(for: account.trainer.trainerId) else { throw OnlineBattleFailure.invalidResponse }
+            // The first-choice signal can land before a read that started earlier, and a round cannot un-choose.
+            if let previousView, previousView.opponentSubmitted == true, previousView.roundSeq == room.roundSeq,
+               previousView.journal.count == room.journal.count { room.opponentSubmitted = true }
             views[room.battleId] = room
             if let pending = fallback[room.battleId], room.state != .running || room.roundSeq > pending.work.seq {
                 cancelFallback(room.battleId)
