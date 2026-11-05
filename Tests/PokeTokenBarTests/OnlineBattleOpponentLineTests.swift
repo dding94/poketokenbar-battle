@@ -39,9 +39,10 @@ final class OnlineBattleOpponentLineTests: XCTestCase {
             battle("a", p1: me, p2: foe, winner: .p1),
             battle("b", p1: foe, p2: me, winner: .p2),
             battle("c", p1: me, p2: foe, winner: .p2),
-            battle("running", p1: me, p2: foe, state: .running),
-            battle("void", p1: me, p2: foe, state: .void),
-            battle("declined", p1: me, p2: foe, state: .declined),
+            // Even carrying a result, a game that is not completed counts for nothing.
+            battle("running", p1: me, p2: foe, state: .running, winner: .p1),
+            battle("void", p1: me, p2: foe, state: .void, winner: .p1),
+            battle("declined", p1: me, p2: foe, state: .declined, winner: .p1),
             battle("elsewhere", p1: me, p2: other, winner: .p1),
             battle("theirs", p1: foe, p2: other, winner: .p1),
         ])
