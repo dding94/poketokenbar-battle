@@ -44,6 +44,7 @@ struct OnlineBattleResultView: View {
             Text(screen.title)
                 .font(.system(size: 26, weight: .bold))
                 .foregroundStyle(won ? Color.accentColor : Color.primary)
+                .lineLimit(1).minimumScaleFactor(0.7)
                 .accessibilityIdentifier("online.result.title")
             if !screen.subtitle.isEmpty {
                 Text(screen.subtitle)
@@ -88,6 +89,10 @@ struct OnlineBattleResultView: View {
                     .buttonStyle(.bordered)
                     .accessibilityIdentifier("online.result.later")
             }
+            if let note = screen.note {
+                Text(note).font(.caption).foregroundStyle(.secondary).lineLimit(1).minimumScaleFactor(0.8)
+                    .accessibilityIdentifier("online.result.note")
+            }
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -96,6 +101,11 @@ struct OnlineBattleResultView: View {
     }
 
     /// Accepting needs a Pokémon that can fight, which `canAccept` already knows about.
+    private func isAnswer(_ screen: OnlineBattleResultScreen) -> Bool {
+        if case .answer = screen.rematch { return true }
+        return false
+    }
+
     private func canAnswer(_ screen: OnlineBattleResultScreen) -> Bool {
         guard case .answer(_, let id) = screen.rematch else { return false }
         return model.canAccept(model.actionRoom(id))
@@ -124,7 +134,8 @@ struct OnlineBattleResultView: View {
             case .open:
                 primary(l.onlineRematchOpenRoom, prominent: true, enabled: true, id: "online.result.rematchOpen", screen)
             }
-            if let note = screen.note {
+            // A request's own note sits inside its banner.
+            if let note = screen.note, !isAnswer(screen) {
                 Text(note).font(.caption).foregroundStyle(.secondary)
                     .lineLimit(1).minimumScaleFactor(0.8)
                     .frame(maxWidth: .infinity)
