@@ -372,6 +372,41 @@ bash scripts/package-battle-engines.sh "build/PokeTokenBattle.app/Contents/Resou
         self.assertIn(hashlib.sha256(b'fixture zip bytes').hexdigest(),published)
         self.assertNotIn('pkill ',self.calls())
 
+    def legacy_cask(self, version='2.6.0', sha='a'*64):
+        """The cask text published with 2.6.0 (before the PokeTokenBattle rename)."""
+        result=subprocess.run(['python3',str(self.repo/'scripts/release-validate.py'),'cask',version,sha],capture_output=True,text=True)
+        self.assertEqual(result.returncode,0,result.stderr)
+        text=result.stdout.replace('name "PokeTokenBattle"','name "PokeTokenBar Battle"').replace('app "PokeTokenBattle.app"','app "PokeTokenBar Battle.app"')
+        self.assertIn('app "PokeTokenBar Battle.app"',text)
+        return text
+
+    def test_publication_starts_from_the_pre_rename_tap_cask_and_writes_the_current_template(self):
+        # The real tap held this text when the rename release was prepared; a fixture rendered from the
+        # current template would pass even though the publication read of the tap rejected the real file.
+        self.fake_build()
+        cask=self.repo/'existing.rb'
+        cask.write_text(self.legacy_cask())
+        result=self.run_release('3.0.0',PTB_FORK_RELEASE_READY='1',BRANCH='main',FAKE_TAP=str(cask),ALLOW_PUBLICATION_STUB='1')
+        self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+        import base64, json
+        published=base64.b64decode(json.loads((self.repo/'calls.update.json').read_text())['content']).decode()
+        self.assertIn('app "PokeTokenBattle.app"',published)
+        self.assertNotIn('PokeTokenBar Battle',published)
+
+    def test_pre_rename_template_is_only_accepted_for_the_published_cask(self):
+        helper=self.repo/'scripts/release-validate.py'
+        legacy=self.repo/'legacy.rb';legacy.write_text(self.legacy_cask())
+        published=subprocess.run(['python3',str(helper),'check-published-cask',str(legacy)],capture_output=True,text=True)
+        self.assertEqual(published.returncode,0,published.stderr)
+        preview=subprocess.run(['python3',str(helper),'check-cask',str(legacy)],capture_output=True,text=True)
+        self.assertNotEqual(preview.returncode,0)  # a new build preview must never keep the old app folder
+        for old,new in (('dding94/poketokenbar-battle','chattymin/PokeTokenBar'),('>= :sequoia','>= :sonoma'),
+                        ('app "PokeTokenBar Battle.app"','app "PokeTokenBar.app"')):
+            with self.subTest(old=old):
+                tampered=self.repo/'tampered.rb';tampered.write_text(self.legacy_cask().replace(old,new))
+                check=subprocess.run(['python3',str(helper),'check-published-cask',str(tampered)],capture_output=True,text=True)
+                self.assertNotEqual(check.returncode,0)
+
     def test_prepare_build_never_runs_local_test_gate_or_ocr(self):
         self.fake_build()
         result=self.run_release('--prepare-build','3.0.0',PTB_CI_RUN_ID='12345')

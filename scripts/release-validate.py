@@ -16,6 +16,8 @@ EXEC = 'PokeTokenBarBattle'
 BUNDLE = 'io.github.dding94.poketokenbar-battle'
 LABEL = BUNDLE + '.login'
 CASK = 'poke-token-bar-battle'
+# Display name and app folder of the already published 2.6.0 cask (before the PokeTokenBattle rename).
+LEGACY_APP = 'PokeTokenBar Battle'
 
 
 def require(condition, message):
@@ -151,7 +153,7 @@ def bundle_check(root, app, target_version, leaf):
         require(path.is_file() and hashlib.sha256(path.read_bytes()).hexdigest() == pin, f'Packaged engine hash mismatch: {pin}')
 
 
-def cask_text(target_version, sha):
+def cask_text(target_version, sha, app=APP):
     version(target_version)
     require(re.fullmatch(r'[0-9a-f]{64}', sha), 'Cask SHA256 must be 64 lowercase hex digits')
     return f'''cask "{CASK}" do
@@ -159,12 +161,12 @@ def cask_text(target_version, sha):
   sha256 "{sha}"
 
   url "https://github.com/{REPO}/releases/download/v#{{version}}/{EXEC}.zip"
-  name "{APP}"
+  name "{app}"
   desc "Menu bar companion with local practice and online battles"
   homepage "https://github.com/{REPO}"
 
   depends_on macos: ">= :sequoia"
-  app "{APP}.app"
+  app "{app}.app"
 end
 '''
 
@@ -177,6 +179,19 @@ def check_cask(path):
     require(text == cask_text(ver[1], sha[1]), 'Cask must match fork URL/SHA/macOS15/app template exactly')
 
 
+def check_published_cask(path):
+    """The cask already in the tap before publication: the current template, or the pre-rename 2.6.0 template.
+
+    The publication step rewrites it with the current template, so the first release across the rename must be able
+    to start from the old `app` folder. Everything else (URL, minimum macOS, checksum form) is still pinned."""
+    text = Path(path).read_text()
+    ver = re.search(r'^  version "([^"]+)"$', text, re.M)
+    sha = re.search(r'^  sha256 "([^"]+)"$', text, re.M)
+    require(ver and sha, 'Missing cask version/SHA256')
+    require(text in (cask_text(ver[1], sha[1]), cask_text(ver[1], sha[1], LEGACY_APP)),
+            'Published cask must match the fork template (current or pre-rename) exactly')
+
+
 if __name__ == '__main__':
     try:
         mode, *args = sys.argv[1:]
@@ -184,6 +199,7 @@ if __name__ == '__main__':
         elif mode == 'bundle' and len(args) == 4: bundle_check(*args)
         elif mode == 'cask' and len(args) == 2: print(cask_text(*args), end='')
         elif mode == 'check-cask' and len(args) == 1: check_cask(*args)
+        elif mode == 'check-published-cask' and len(args) == 1: check_published_cask(*args)
         elif mode == 'version' and len(args) == 1: version(*args)
         elif mode == 'server-url' and len(args) == 1: print(server_url(*args))
         elif mode == 'addresses' and len(args) == 1: address_check(*args)

@@ -119,7 +119,8 @@ value=json.loads(pathlib.Path(sys.argv[1]).read_text())
 if not value.get('sha') or not value.get('content'): sys.exit('Fork tap cask is missing')
 pathlib.Path(sys.argv[2]).write_bytes(base64.b64decode(value['content'], validate=False))
 TAP
-  python3 scripts/release-validate.py check-cask "$TMP_RELEASE/cask.rb"
+  # The tap still holds the pre-rename template (app "PokeTokenBar Battle.app") until this publication rewrites it.
+  python3 scripts/release-validate.py check-published-cask "$TMP_RELEASE/cask.rb"
 fi
 
 # CI is the full-suite criterion. Do not run local OCR or an unisolated/opt-out native test gate.
