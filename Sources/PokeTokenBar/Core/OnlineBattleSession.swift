@@ -21,19 +21,40 @@ final class OnlineBattleSession {
     private let localization: @MainActor () -> L
     private var onlineAllowed: Bool { enabled && accessAllowed() }
     private var refreshAgain = false
-    private var prepared: [String: Int] = [:]
+    /// One press of "ready". The server binds ready and start to the socket that sent them, and its
+    /// `both` check only counts the peer's current socket, so a press holds on its own connection only.
+    private struct ReadyPress: Equatable {
+        let revision: Int
+        let connectionID: String
+    }
+    private var prepared: [String: ReadyPress] = [:]
+    /// Nil while no socket has said hello.
+    private var liveConnectionID: String?
     private var acknowledgedStarts = Set<String>()
     private var submittedReports = Set<String>()
     private var nextRecoveryRead: TimeInterval?
-    /// Battles this connection already pressed "ready" for at their current revision. The server view does not expose it.
     /// Battles whose staged display is still playing. A hidden stage skips to its end, so only the one on screen can be here.
     func stagingHeldBattleIDs() -> Set<String> {
         Set(stagings.filter { $0.value.isPlaying }.keys)
     }
+    /// Battles with nothing left for the person to press at their current revision. The server view does not expose it.
+    /// A press on an older socket counts while its resend is still owed, so a socket blip raises no notification.
     func preparedBattleIDs() -> Set<String> {
-        var ids = Set(presentation.battles.filter { prepared[$0.battleId] == $0.revision }.map(\.battleId))
-        if let room = presentation.room, prepared[room.battleId] == room.revision { ids.insert(room.battleId) }
+        var ids = Set(presentation.battles.filter { readyPressed($0) }.map(\.battleId))
+        if let room = presentation.room, readyPressed(room) { ids.insert(room.battleId) }
         return ids
+    }
+    private func readyPressed(_ room: OnlineBattleView) -> Bool {
+        prepared[room.battleId]?.revision == room.revision
+    }
+    /// The server still holds this press, so the button has nothing to add.
+    private func readyHeld(_ room: OnlineBattleView) -> Bool {
+        readyPressed(room) && prepared[room.battleId]?.connectionID == liveConnectionID
+    }
+    private func noteConnection(_ snapshot: OnlineBattleConnectionSnapshot) {
+        presentation.canStart = snapshot.state == .connected
+        liveConnectionID = snapshot.state == .connected ? snapshot.connectionId : nil
+        presentation.localReady = presentation.room.map { readyHeld($0) } ?? false
     }
     private struct RoundWork: Hashable {
         let generation: UInt64
@@ -114,7 +135,7 @@ final class OnlineBattleSession {
         ticker?.cancel(); ticker = nil
         let old = connection, oldAPI = api; connection = nil
         authenticated = false; reconciled = false; bootstrapped = false; actionInFlight = false
-        pendingGrant = nil; challengeIntent = nil; prepared = [:]; acknowledgedStarts = []; submittedReports = []
+        pendingGrant = nil; challengeIntent = nil; prepared = [:]; liveConnectionID = nil; acknowledgedStarts = []; submittedReports = []
         for resolver in resolvers.values { resolver.close() }; resolvers = [:]; views = [:]; historyViews = [:]; dropStagings()
         selectedBattleID = nil; resultByBattleID = [:]; prefersLobby = false; checkedDeadlines = [:]; nextRecoveryRead = nil
         presentation.account = nil; presentation.members = []; presentation.battles = []
@@ -160,7 +181,7 @@ final class OnlineBattleSession {
             resolvers = [:]; views = [:]; historyViews = [:]; selectedBattleID = nil; resultByBattleID = [:]; prefersLobby = false; checkedDeadlines = [:]
             api = nil; origin = nil; pendingGrant = nil; challengeIntent = nil
             authenticated = false; reconciled = false; actionInFlight = false
-            refreshAgain = false; prepared = [:]; acknowledgedStarts = []; submittedReports = []; nextRecoveryRead = nil
+            refreshAgain = false; prepared = [:]; liveConnectionID = nil; acknowledgedStarts = []; submittedReports = []; nextRecoveryRead = nil
             if settings.serverURL != nil, settings.serverURL != next.serverURL {
                 presentation.setupInput.recovery = ""; presentation.setupInput.reconnect = ""
             }
@@ -203,7 +224,7 @@ final class OnlineBattleSession {
         switch event {
         case .changed(let snapshot):
             guard let connection, snapshot == (await connection.snapshot()), epoch == generation else { return }
-            presentation.canStart = snapshot.state == .connected
+            noteConnection(snapshot)
             switch snapshot.state {
             case .unconfigured: presentation.connectionStatus = "서버 주소를 설정해 주세요"
             case .credentialsRequired: presentation.connectionStatus = "접속 정보가 필요해요"
@@ -393,7 +414,7 @@ final class OnlineBattleSession {
             dropStagings()
             resolvers = [:]; views = [:]; historyViews = [:]; resultByBattleID = [:]
             selectedBattleID = nil; prefersLobby = false; checkedDeadlines = [:]; nextRecoveryRead = nil
-            prepared = [:]; acknowledgedStarts = []; submittedReports = []; challengeIntent = nil
+            prepared = [:]; liveConnectionID = nil; acknowledgedStarts = []; submittedReports = []; challengeIntent = nil
             presentation.account = nil; presentation.members = []; presentation.battles = []
             resetBattleRuntime(); resetExtras(); clearHistory(); presentation.liveLogs = []
             presentation.room = nil; presentation.arena = nil; presentation.request = nil
@@ -467,10 +488,12 @@ final class OnlineBattleSession {
             }
             try current(epoch); reconciled = true
             try rebuildRoster(); _ = try await reconcileRematchIntent(account: account, api: api, epoch: epoch); publish()
-            if let connection { let snapshot = await connection.snapshot(); try current(epoch); presentation.canStart = snapshot.state == .connected }
+            if let connection { let snapshot = await connection.snapshot(); try current(epoch); noteConnection(snapshot) }
         } catch {
             guard epoch == generation, onlineAllowed else { return }
             reconciled = false
+            // This read owed the resend to any press left on an older socket. Nothing else will send it now.
+            if let liveConnectionID { prepared = prepared.filter { $0.value.connectionID == liveConnectionID } }
             // Do not republish cached rows after revocation or move unfinished onboarding to the lobby.
             // Only an authenticated account can expose the separately fetched archive summaries.
             if authenticated, presentation.account != nil { publish() }
@@ -526,6 +549,9 @@ final class OnlineBattleSession {
                 guard presentation.roster.contains(where: { $0.id == own.instanceId }) else { throw OnlineBattleFailure.invalidResponse }
                 try effects.holdOnlineBattle(key: key, instanceID: own.instanceId)
             }
+            if room.state == .accepted, room.confirmed, let resent = try await resendReady(room, account: account, api: api, epoch: epoch) {
+                room = resent; continue
+            }
             guard [.ready, .running, .reported].contains(room.state) else { publish(); return }
             let resolver: OnlineBattleResolver
             if let existing = resolvers[room.battleId] { resolver = existing }
@@ -551,14 +577,22 @@ final class OnlineBattleSession {
             // Every consumed round passes here: WebSocket, read and fallback alike.
             ingestStage(room, resolver: resolver)
             publish()
-            if room.state == .ready, prepared[room.battleId] == room.revision, let connection {
+            if room.state == .ready, readyPressed(room), let connection {
                 let snapshot = await connection.snapshot(); try current(epoch)
                 guard snapshot.state == .connected, snapshot.trainerId == account.trainer.trainerId,
                       snapshot.groupId == account.group.groupId, let connectionID = snapshot.connectionId else { return }
                 let acknowledgement = room.battleId + ":" + connectionID
+                prepared[room.battleId] = .init(revision: room.revision, connectionID: connectionID)
                 guard !acknowledgedStarts.contains(acknowledgement) else { return }
-                let updated = try await api.start(id: room.battleId, revision: room.revision, connectionId: connectionID,
-                                                 readyToken: room.config!.readyToken, engineHash: BattleEngineManifest.sha256)
+                let updated: OnlineBattleView
+                do {
+                    updated = try await api.start(id: room.battleId, revision: room.revision, connectionId: connectionID,
+                                                  readyToken: room.config!.readyToken, engineHash: BattleEngineManifest.sha256)
+                } catch {
+                    // A refused start must not read as "I am ready": no other control retries it on this screen.
+                    prepared[room.battleId] = nil
+                    throw error
+                }
                 try current(epoch); acknowledgedStarts.insert(acknowledgement)
                 guard updated != room else { return }
                 room = updated; continue
@@ -593,6 +627,28 @@ final class OnlineBattleSession {
             room = updated
         }
         throw OnlineBattleFailure.invalidResponse
+    }
+    /// A press left on an older socket no longer counts on the server, and the peer's ready does not
+    /// complete the room without it. The person already pressed, so the new socket answers for them.
+    /// Anything that stops it hands the choice back: the press is dropped and the button returns.
+    private func resendReady(_ room: OnlineBattleView, account: OnlineBattleAccount, api: OnlineBattleAPI, epoch: UInt64) async throws -> OnlineBattleView? {
+        guard readyPressed(room), let connection else { return nil }
+        let snapshot = await connection.snapshot(); try current(epoch)
+        guard snapshot.state == .connected, snapshot.trainerId == account.trainer.trainerId, snapshot.groupId == account.group.groupId,
+              let connectionID = snapshot.connectionId, readyPressed(room), prepared[room.battleId]?.connectionID != connectionID else { return nil }
+        let press = ReadyPress(revision: room.revision, connectionID: connectionID)
+        prepared[room.battleId] = press
+        do {
+            try validateConsent(room, account: account)
+            let updated = try await api.ready(id: room.battleId, revision: room.revision, connectionId: connectionID, engineHash: BattleEngineManifest.sha256, rulesVersion: BattleSnapshot.rules, policyVersion: BattleSnapshot.policy)
+            try current(epoch)
+            return updated
+        } catch {
+            try current(epoch)
+            if error as? OnlineBattleFailure == .unauthorized { throw error }
+            if prepared[room.battleId] == press { prepared[room.battleId] = nil }
+            return nil
+        }
     }
     private func settle(_ battle: OnlineBattleView, account: OnlineBattleAccount) throws {
         let key = try receiptKey(battle, account: account)
@@ -673,7 +729,7 @@ final class OnlineBattleSession {
         presentation.result = room.flatMap { resultByBattleID[$0.battleId] }
         presentation.arena = nil; presentation.request = nil; presentation.deadline = nil
         presentation.choiceSubmitted = false
-        presentation.localReady = room.map { prepared[$0.battleId] == $0.revision } ?? false
+        presentation.localReady = room.map { readyHeld($0) } ?? false
         presentation.moveSlugs = [:]; presentation.abilitySlugs = [:]
         presentation.liveLogs = []
         guard let room, let account = presentation.account else { presentation.phase = authenticated ? .lobby : .setup; return }
@@ -1090,19 +1146,21 @@ final class OnlineBattleSession {
                 let connected = await connection.snapshot(); try current(epoch)
                 guard connected.state == .connected, let connectionID = connected.connectionId,
                       connected.trainerId == account.trainer.trainerId, connected.groupId == account.group.groupId else { throw OnlineBattleFailure.invalidRequest }
+                noteConnection(connected)
+                let press = ReadyPress(revision: room.revision, connectionID: connectionID)
                 if room.state == .accepted, room.confirmed {
                     try validateConsent(room, account: account)
-                    prepared[room.battleId] = room.revision
+                    prepared[room.battleId] = press
                     do {
                         result = try await api.ready(id: room.battleId, revision: room.revision, connectionId: connectionID, engineHash: BattleEngineManifest.sha256, rulesVersion: BattleSnapshot.rules, policyVersion: BattleSnapshot.policy)
                     } catch {
                         // A refused ready call must not read as "I am ready" on the room screen.
-                        if prepared[room.battleId] == room.revision { prepared[room.battleId] = nil }
+                        if prepared[room.battleId] == press { prepared[room.battleId] = nil }
                         throw error
                     }
                 } else if room.state == .ready {
                     // The frozen inputs stay valid through later local growth. process validates both sets.
-                    prepared[room.battleId] = room.revision
+                    prepared[room.battleId] = press
                     result = room
                 } else { throw OnlineBattleFailure.invalidRequest }
             case .chooseMove(let slot):
