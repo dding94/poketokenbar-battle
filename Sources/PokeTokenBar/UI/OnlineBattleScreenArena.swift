@@ -65,10 +65,14 @@ struct OnlineBattleArena: View {
             }
         }
         .frame(maxWidth: .infinity, minHeight: Self.boardHeight, maxHeight: Self.boardHeight, alignment: .top)
-        .task(id: nameKey) {
-            guard let view = model.arena else { return }
-            for side in [PracticeSide.player, .opponent] { await speciesName(side, view: view).load() }
-        }
+        .task(id: nameKey) { await loadSpeciesNames() }
+    }
+
+    /// Fills the shared name cache for both species, so the cards and the beat lines speak the app's language.
+    private func loadSpeciesNames() async {
+        guard let view = model.arena else { return }
+        await speciesName(.player, view: view).load()
+        await speciesName(.opponent, view: view).load()
     }
 
     private var nameKey: [String] {
