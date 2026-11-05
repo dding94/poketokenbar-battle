@@ -1,6 +1,7 @@
 import SwiftUI
 
 /// The home "Online battle" row: the title, under it the one-line status, and the chevron.
+@MainActor
 struct OnlineEntryRow: View {
     let l: L
     let subtitle: String?

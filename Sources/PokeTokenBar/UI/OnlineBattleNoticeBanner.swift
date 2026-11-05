@@ -1,6 +1,7 @@
 import SwiftUI
 
 /// A notice the person can close: an ended challenge or an error. Closing only clears the banner.
+@MainActor
 struct OnlineBattleNoticeBanner: View {
     let text: String
     let l: L

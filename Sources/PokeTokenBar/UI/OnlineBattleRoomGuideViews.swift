@@ -73,6 +73,7 @@ struct OnlineBattleRoomGuide: View {
 }
 
 /// One short line under a disabled primary button saying why it is disabled.
+@MainActor
 struct OnlineBattleBlockReason: View {
     let block: OnlineActionBlock?
     let l: L
