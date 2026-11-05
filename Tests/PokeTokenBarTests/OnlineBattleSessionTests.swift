@@ -571,8 +571,11 @@ final class OnlineBattleSessionTests: XCTestCase {
         let bodies = await http.bodies(path)
         XCTAssertEqual(bodies.count, 2)
         if bodies.count == 2 { XCTAssertEqual(try JSONSerialization.jsonObject(with: bodies[0]) as? NSDictionary, try JSONSerialization.jsonObject(with: bodies[1]) as? NSDictionary) }
-        XCTAssertEqual(session.presentation.room?.state, .pending)
-        XCTAssertEqual(session.presentation.room?.confirmed, false)
+        // A rematch asked from the result waits beside that result, which stays on screen.
+        XCTAssertEqual(session.presentation.room?.battleId, source.battleId)
+        let offered = try XCTUnwrap(session.presentation.rematchOffer(for: source))
+        XCTAssertEqual(offered.room.state, .pending)
+        XCTAssertEqual(offered.room.confirmed, false)
         XCTAssertNil(session.presentation.rematchSourceID)
         XCTAssertEqual(effects.state.onlineBattleHolds.first?.key.battleID, "bt_rematch")
         let starts = await http.count("/v1/battles/bt_rematch/start"); XCTAssertEqual(starts, 0)
@@ -589,7 +592,8 @@ final class OnlineBattleSessionTests: XCTestCase {
         await http.route("/v1/battles", try JSONEncoder().encode(OnlineBattlePage(battles: [source, pending], before: nil)))
         await session.perform(.submitRematch)
         let posts = await http.count("/v1/battles/\(source.battleId)/rematch"); XCTAssertEqual(posts, 1)
-        XCTAssertEqual(session.presentation.room?.battleId, pending.battleId)
+        XCTAssertEqual(session.presentation.room?.battleId, source.battleId, "the result stays; the found room is its pending rematch")
+        XCTAssertEqual(session.presentation.rematchOffer(for: source)?.room.battleId, pending.battleId)
         XCTAssertNil(session.presentation.rematchSourceID)
         XCTAssertEqual(effects.state.onlineBattleHolds.count, 1)
     }
@@ -604,8 +608,9 @@ final class OnlineBattleSessionTests: XCTestCase {
         await http.route("/v1/battles", try JSONEncoder().encode(OnlineBattlePage(battles: [source, pending], before: nil)))
         await session.refresh()
         XCTAssertNil(session.presentation.rematchSourceID)
-        XCTAssertEqual(session.presentation.room?.battleId, pending.battleId)
-        XCTAssertEqual(session.presentation.phase, .room)
+        XCTAssertEqual(session.presentation.room?.battleId, source.battleId)
+        XCTAssertEqual(session.presentation.phase, .result, "the result stays; the found room waits beside it")
+        XCTAssertEqual(session.presentation.rematchOffer(for: source)?.room.battleId, pending.battleId)
         XCTAssertEqual(effects.state.onlineBattleHolds.count, 1)
         let posts = await http.count("/v1/battles/\(source.battleId)/rematch")
         XCTAssertEqual(posts, 1)
@@ -644,7 +649,8 @@ final class OnlineBattleSessionTests: XCTestCase {
         await session.refresh()
         await http.resume(.init(status: 503, body: Data())); await submit.value
         XCTAssertNil(session.presentation.rematchSourceID)
-        XCTAssertEqual(session.presentation.room?.battleId, pending.battleId)
+        XCTAssertEqual(session.presentation.room?.battleId, source.battleId)
+        XCTAssertEqual(session.presentation.rematchOffer(for: source)?.room.battleId, pending.battleId)
         XCTAssertNil(session.presentation.notice)
     }
 

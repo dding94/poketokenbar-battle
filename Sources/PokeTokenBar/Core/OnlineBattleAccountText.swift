@@ -18,6 +18,7 @@ extension L {
     }
     var onlineOtherSaveResultTitle: String { online("기록으로만 남겼어요", "Kept as a record") }
     var onlineOtherSaveResultDetail: String {
-        online("이 세이브에 없는 포켓몬의 경기라 체력과 경험치를 바꾸지 않았어요.", "This battle used a Pokémon this save does not have, so HP and XP did not change.")
+        // No settlement receipt exists in this save, so nothing is claimed about what it did or did not change.
+        online("이 세이브에 없는 포켓몬으로 치른 경기예요.", "This battle used a Pokémon this save does not have.")
     }
 }

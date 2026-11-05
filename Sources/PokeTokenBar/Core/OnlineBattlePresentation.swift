@@ -171,9 +171,14 @@ final class OnlineBattlePresentation {
               let opponent = selectedOpponent else { return false }
         return opponent.status == .active && opponent.trainerId != account.trainer.trainerId
     }
-    var canAccept: Bool {
-        guard !showsHistory, !showsStandings, rematchSourceID == nil, !isBusy, room?.state == .pending, localSide == .p2,
-              let selectedEntry else { return false }
+    var canAccept: Bool { canAccept(room) }
+    /// `target` is the room on screen or, beside a result, its open rematch (`actionRoom`).
+    func canAccept(_ target: OnlineBattleView?) -> Bool {
+        guard let target, !showsHistory, !showsStandings, rematchSourceID == nil, !isBusy, target.state == .pending,
+              side(in: target) == .p2 else { return false }
+        // Beside a result there is no roster to pick from: whoever `answerEntry` names enters.
+        if target.battleId != room?.battleId { return answerEntry != nil }
+        guard let selectedEntry else { return false }
         return entryIsEligible(selectedEntry)
     }
     var canConfirm: Bool { !showsHistory && !showsStandings && rematchSourceID == nil && !isBusy && room?.state == .accepted && localSide == .p1 && room?.confirmed == false }
@@ -254,7 +259,11 @@ final class OnlineBattlePresentation {
             // Pure presentation, like dismissNotice.
             dismissEnded(id)
             return
-        case .deferRematch:
+        case .deferRematch(let id):
+            // Pure presentation: only the request this result is showing can be put off, and it stays open.
+            if let room, room.state == .completed, case .received(let asked)? = rematchOffer(for: room), asked.battleId == id {
+                deferredRematchIDs.insert(id)
+            }
             return
         case .dismissNotice:
             // Pure presentation: closing a banner never reaches the session or the server.
@@ -288,15 +297,19 @@ final class OnlineBattlePresentation {
             guard !showsHistory, !showsStandings, rematchSourceID == nil else { return }
             self.mode = mode
         case .challenge: guard canChallenge else { return }
-        case .accept(let id): guard room?.battleId == id, canAccept else { return }
+        case .accept(let id): guard canAccept(actionRoom(id)) else { return }
         case .confirm(let id): guard room?.battleId == id, canConfirm else { return }
         case .prepareBattle(let id): guard room?.battleId == id, canPrepare else { return }
         case .chooseMove(let slot):
             guard canChooseMove(slot) else { return }
             if let room { localChoice = LocalChoice(battleID: room.battleId, roundSeq: room.roundSeq, slot: slot) }
             choiceSubmitted = true
-        case .decline(let id): guard room?.battleId == id, !showsHistory, !showsStandings, rematchSourceID == nil, !isBusy, localSide == .p2, room?.state == .pending else { return }
-        case .cancel(let id): guard room?.battleId == id, !showsHistory, !showsStandings, rematchSourceID == nil, !isBusy, [.pending, .accepted, .ready].contains(room?.state) else { return }
+        case .decline(let id):
+            guard let target = actionRoom(id), !showsHistory, !showsStandings, rematchSourceID == nil, !isBusy,
+                  side(in: target) == .p2, target.state == .pending else { return }
+        case .cancel(let id):
+            guard let target = actionRoom(id), !showsHistory, !showsStandings, rematchSourceID == nil, !isBusy,
+                  [.pending, .accepted, .ready].contains(target.state) else { return }
         case .retryCredentialSave: guard !isBusy, canRetryCredentialSave else { return }
         case .applyingServer(let address, let inner):
             // Manual builds only: the session saves this address, then runs the inner setup request against it.

@@ -195,7 +195,15 @@ enum OnlineAttentionCalculator {
 
     private static func isOnScreen(_ attention: OnlineAttention, _ input: OnlineAttentionInput) -> Bool {
         if attention.kind == .requestEnded { return lobbyIsShowing(input) }
+        if attention.kind == .rematchRequested, answeredOnResult(attention, input) { return true }
         return stageIsUncovered(input) && input.displayedRoom?.battleId == attention.battleId
+    }
+
+    /// A rematch of the finished room on screen is asked about on that result, with its own accept and later buttons, so
+    /// a second bar for it would say the same thing twice. Anything covering the result brings the bar back.
+    private static func answeredOnResult(_ attention: OnlineAttention, _ input: OnlineAttentionInput) -> Bool {
+        guard stageIsUncovered(input), input.phase == .result, let shown = input.displayedRoom, shown.state == .completed else { return false }
+        return input.battles.contains { $0.battleId == attention.battleId && $0.rematchOf == shown.battleId }
     }
 
     /// True once this person has taken a step in a room that has not started, so its ending is news to them:

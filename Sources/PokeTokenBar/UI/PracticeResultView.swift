@@ -90,19 +90,7 @@ struct PracticeResultView: View {
     }
 
     private func tile(_ label: String, _ value: String, tint: Color) -> some View {
-        VStack(spacing: 1) {
-            Text(value)
-                .font(.system(size: 17, weight: .bold).monospacedDigit())
-                .foregroundStyle(tint)
-                .lineLimit(1)
-            Text(label)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
-        }
-        .frame(maxWidth: .infinity)
-        .practiceCard(padding: 7)
+        PracticeResultTile(label: label, value: value, tint: tint)
     }
 
     private func stagedSummary(_ summary: PracticeSummary) -> some View {
@@ -270,5 +258,29 @@ struct PracticeResultView: View {
                 .lineLimit(1).minimumScaleFactor(0.75)
             Spacer(minLength: 0)
         }
+    }
+}
+
+/// One of the three result totals: a big value over its label. The online result draws the same tiles.
+@MainActor
+struct PracticeResultTile: View {
+    let label: String
+    let value: String
+    var tint: Color = .primary
+
+    var body: some View {
+        VStack(spacing: 1) {
+            Text(value)
+                .font(.system(size: 17, weight: .bold).monospacedDigit())
+                .foregroundStyle(tint)
+                .lineLimit(1)
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+        }
+        .frame(maxWidth: .infinity)
+        .practiceCard(padding: 7)
     }
 }

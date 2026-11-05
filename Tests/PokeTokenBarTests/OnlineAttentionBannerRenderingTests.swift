@@ -162,12 +162,14 @@ final class OnlineAttentionBannerRenderingTests: XCTestCase {
         }
     }
 
-    func testARematchOverAnOpenResultShowsTheBannerAndAnEndedRequestToo() async throws {
+    func testARematchOverAnOpenResultIsAskedInPlaceAndAnEndedRequestStillGetsABanner() async throws {
         let old = room("synthetic-old", .completed, mine: .p2)
         let result = model([old, incoming("synthetic-new", createdAt: 2, rematchOf: "synthetic-old")], displayed: old, phase: .result)
         result.result = .init(kind: .win, effects: .init(instanceID: "synthetic-pikachu", xp: 10, hpShare: 1))
         let onResult = try await bandHeight(result, setUp: { $0.showingOnlineBattle = true }, named: "F2-banner-rematch-over-result.png")
-        XCTAssertGreaterThan(onResult, 0)
+        XCTAssertEqual(onResult, 0, "the result asks in place with accept and later, so a bar above it would say it twice")
+        let onHomeToo = try await bandHeight(result, setUp: { _ in }, named: "F2-banner-rematch-over-home.png")
+        XCTAssertGreaterThan(onHomeToo, 0, "off the online screen the bar still tells it")
 
         let ended = model([room("synthetic-out", .declined, mine: .p1)])
         ended.unreadEndedBattleIDs = ["synthetic-out"]

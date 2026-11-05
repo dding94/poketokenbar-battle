@@ -1675,3 +1675,11 @@ read_when:
 - **스윕 결과.** `grep -rnE 'connectionStatus|onlineConnectedStatus|onlineReconnectingStatuses|"접속 중"|"연결 중"' Sources`에서 `connectionStatus`의 읽기는 화면 줄(`L` 경유), `connectionState`, `connectionBlock`뿐이고 문자열 비교는 없다.
 
 - **글자 인식(OCR) 단언은 OS마다 다른 결과를 낸다.** T17 렌더링 테스트가 주황 배지의 흰 글자 `×2`를 OCR로 읽도록 단언해 로컬 macOS 27에서는 통과하고 CI의 macOS 15에서는 실패했다. CI가 올린 렌더 이미지에는 배지가 제대로 그려져 있어 앱 결함이 아니었다. 대비가 낮은 작은 배지는 OCR로 단언하지 않고, 카드에 전달된 데이터로 단언한다. 실패하면 먼저 `screen-renders-*` 아티팩트로 실제 화면을 본다.
+
+## 온라인 결과 화면 (PR 14 T19)
+
+- **화면에 나갈 문구를 Core에서 한국어 리터럴로 만들면 `L`을 우회한다(부류 재발).** 결과 제목 "승리/패배/무승부/경기 무효"와 본문이 `OnlineBattleSession`의 리터럴이어서 영어 사용자도 한국어를 읽었다. `LocalizedUILiteralTests`는 `Sources/.../UI`만 훑으므로 Core의 리터럴은 구조적으로 보이지 않았다. 결과는 이제 종류(`OnlineBattleUIResult.Kind`)와 영수증 값만 들고, 문구는 전부 `L`에서 만든다. 스윕: `OnlineBattleSession.swift`에 남은 한국어 리터럴은 전적판 오류 1건과 다시보기 오류 5건(`standingsError`, `historyError`)이다. 이번 범위 밖이라 고치지 않았고 다음에 같은 방식으로 `L`로 옮긴다.
+- **영수증이 없는 기록에 효과를 말하지 않는다.** 정산된 결과면 모두 "체력 반영 완료"를 보였고, 다른 세이브의 경기는 "체력과 경험치를 바꾸지 않았어요"라고 말했다. 이 세이브에는 영수증이 없어 둘 다 확인된 사실이 아니다. 효과 줄은 영수증의 `grantedXP`와 `appliedHPShare`에서만 만든다(0이면 기절, 아니면 남은 체력 %). 영수증이 없는 기록은 효과 줄이 없고, 서버가 무효로 끝낸 경기만 규칙("아무것도 바꾸지 않는다")대로 그렇게 말한다. 경험치는 이긴 경기에서 0일 때만 "없어요"라고 말하고 무승부·패배에서는 말하지 않는다.
+- **요약 수치는 모든 라운드가 화면을 거쳤을 때만 보인다.** 로그를 다시 만들면(`markResync`) 박자를 만들지 않아 기록이 비고, 닫힌 팝오버는 박자를 건너뛴다. 마지막 박자의 턴이 서버 보고의 `terminalSeq`에 못 미치면 피해 합계가 모자라므로 타일을 숨긴다. `testTotalsAppearOnlyWhenEveryRoundReachedTheScreen`이 한 라운드 모자란 경우와 resync 뒤 빈 기록을 모두 밟는다.
+- **방 액션은 화면에 있는 방이나 그 끝난 방의 열린 재대결만 가리킬 수 있다.** 결과 위에서 수락·취소를 하려면 재대결 방의 id를 달고 가야 하는데, 리뷰 A의 "화면에 없는 방은 누르지 않는다"를 풀면 안 된다. `actionRoom`이 둘 외에는 nil이고(`testARoomActionMayNameTheShownRoomOrItsOpenRematchAndNothingElse`), 재대결을 끝내는 액션(취소·거절)은 결과 화면을 새 방으로 옮기지 않는다.
+- **SwiftUI의 bordered 버튼은 AppKit 트리에 NSButton으로 없다.** macOS 27에서 `.bordered`·`.borderedProminent` 버튼을 찾으면 0개였고, 위치로 버튼을 고르던 단언은 통째로 실패했다. 화면 상태(`OnlineBattleResultScreen`)가 문구와 각 버튼이 보내는 액션을 먼저 정하고 뷰는 그대로 그리게 해서, 단언은 그 구조체와 액션 매핑을 읽고 렌더링 테스트는 그림이 그려지고 상태마다 다르고 맞는지만 본다.

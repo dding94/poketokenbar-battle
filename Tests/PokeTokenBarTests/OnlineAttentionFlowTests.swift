@@ -68,10 +68,13 @@ final class OnlineAttentionFlowTests: XCTestCase {
         XCTAssertEqual(banner(model, screen: false)?.kind, .incomingChallenge)
     }
 
-    func testARematchWhileTheOldResultIsOpenShowsTheBanner() {
+    func testARematchWhileTheOldResultIsOpenIsAskedOnTheResultNotTwice() {
         let old = room("bt-old", .completed)
         let model = model([old, room("bt-new", .pending, createdAt: 2, rematchOf: "bt-old")], phase: .result, displayed: old, result: true)
-        XCTAssertEqual(banner(model, screen: true)?.battleId, "bt-new")
+        XCTAssertNil(banner(model, screen: true), "the result carries accept and later itself")
+        XCTAssertEqual(banner(model, screen: false)?.battleId, "bt-new", "anywhere else in the popover the bar still says it")
+        model.showsHistory = true
+        XCTAssertEqual(banner(model, screen: true)?.battleId, "bt-new", "something covering the result brings the bar back")
     }
 
     func testAnEventInAnotherRoomShowsTheBanner() {

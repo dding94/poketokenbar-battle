@@ -4,8 +4,10 @@ import XCTest
 @testable import PokeTokenBar
 
 /// T19 on the real screen: the result's controls follow the rematch beside it. Synthetic data only. What the screen
-/// says is read from `resultScreen(l:)`, which the view draws without adding words; controls are pressed by position
-/// and no small text is read back from pixels. Set PTB_SNAPSHOT_SCREENSHOT_DIR to keep the 720px PNGs.
+/// says and what each control sends is read from `resultScreen(l:)`, which the view draws without adding words or
+/// logic; SwiftUI keeps bordered buttons out of the AppKit tree, so nothing here presses or searches pixels for small
+/// text. The renders prove each state draws, differs from the others and fits. Set PTB_SNAPSHOT_SCREENSHOT_DIR to keep
+/// the 720px PNGs.
 @MainActor
 final class OnlineBattleResultRenderingTests: XCTestCase {
     private var window: NSWindow?
@@ -25,12 +27,12 @@ final class OnlineBattleResultRenderingTests: XCTestCase {
                      config: nil, roundSeq: 5, deadline: nil, ownChoice: nil, journal: [], result: report, reason: nil, rematchOf: rematchOf)
     }
     private func resultModel(_ kind: OnlineBattleUIResult.Kind = .loss, effects: OnlineBattleResultEffects? = .init(instanceID: "synthetic-pikachu", xp: 0, hpShare: 0),
-                             others: [OnlineBattleView] = []) -> (OnlineBattlePresentation, OnlineBattleView) {
+                             others: [OnlineBattleView] = []) -> OnlineBattlePresentation {
         let source = view(Self.sourceID, .completed, winner: kind == .win ? .p1 : .p2)
         let model = OnlineBattleScreenRenderingTests.model()
         model.battles = [source] + others; model.room = source; model.phase = .result
         model.result = .init(kind: kind, effects: effects)
-        return (model, source)
+        return model
     }
     /// The golden battle as the finished room, seen by its first player, with the real staged rounds behind it.
     private func adoptGolden(_ model: OnlineBattlePresentation, _ arena: OnlineBattleArenaFixture.Arena, rematch state: OnlineBattleState? = nil) throws {
@@ -63,17 +65,13 @@ final class OnlineBattleResultRenderingTests: XCTestCase {
         host.frame = NSRect(x: 0, y: 0, width: 360, height: 610)
         let window = NSWindow(contentRect: NSRect(x: -10000, y: -10000, width: 360, height: 610), styleMask: .borderless, backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false; window.appearance = NSAppearance(named: .aqua)
-        window.contentView = host; window.orderFront(nil); self.window = window
+        window.contentView = host; window.orderFront(nil); self.window?.close(); self.window = window
         try? await Task.sleep(for: .milliseconds(200))
         host.layoutSubtreeIfNeeded()
         return host
     }
-    private func settle(_ host: NSView) async {
-        try? await Task.sleep(for: .milliseconds(150))
-        host.layoutSubtreeIfNeeded()
-    }
-    private func capture(_ host: NSView, named name: String) async throws -> Data {
-        await settle(host)
+    private func capture(_ model: OnlineBattlePresentation, l: L = L(.ko), named name: String) async throws -> Data {
+        let host = await host(model, l: l)
         XCTAssertEqual(host.fittingSize.width, 360, accuracy: 0.5)
         let bitmap = try PracticeScreenRenderingTests.capture2x(host)
         XCTAssertEqual(bitmap.pixelsWide, 720)
@@ -86,16 +84,6 @@ final class OnlineBattleResultRenderingTests: XCTestCase {
         }
         return data
     }
-
-    private func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap { descendants($0) } }
-    /// Top to bottom. The first is always the header's Home button.
-    private func buttons(in host: NSView) -> [NSButton] {
-        func top(_ button: NSButton) -> CGFloat {
-            let y = host.convert(button.bounds, from: button).minY
-            return host.isFlipped ? y : -y
-        }
-        return descendants(host).compactMap { $0 as? NSButton }.sorted { top($0) < top($1) }
-    }
     private func screen(_ model: OnlineBattlePresentation, _ l: L? = nil, file: StaticString = #filePath, line: UInt = #line) throws -> OnlineBattleResultScreen {
         try XCTUnwrap(model.resultScreen(l: l ?? ko), "no result screen", file: file, line: line)
     }
@@ -104,7 +92,7 @@ final class OnlineBattleResultRenderingTests: XCTestCase {
     // MARK: the loss
 
     func testALossRendersItsLocalizedTitleTheFaintedLineAndTheRematchButton() async throws {
-        let (model, _) = resultModel(.loss)
+        let model = resultModel(.loss)
         let shown = try screen(model)
         XCTAssertEqual(shown.title, ko.onlineResultTitle(.loss))
         XCTAssertEqual(shown.title, "패배")
@@ -112,142 +100,145 @@ final class OnlineBattleResultRenderingTests: XCTestCase {
         XCTAssertTrue(shown.effects.first?.contains("기절했어요") == true, "the receipt says 0 HP: \(shown.effects)")
         XCTAssertFalse(shown.effects.joined().contains("경험치"), "a loss has no XP line")
         XCTAssertEqual(shown.rematch, .request(enabled: true))
+        XCTAssertTrue(shown.primaryEnabled)
         XCTAssertNil(shown.note)
         XCTAssertTrue(shown.opponent.contains("연습친구"))
-        let host = await host(model)
-        XCTAssertEqual(buttons(in: host).count, 3, "Home, the rematch and back to the lobby")
-        _ = try await capture(host, named: "t19-result-loss.png")
+        guard case .prepareRematch(let id)? = shown.primaryAction else { return XCTFail("the main button asks for a rematch: \(String(describing: shown.primaryAction))") }
+        XCTAssertEqual(id, Self.sourceID, "it names the finished room")
+        XCTAssertNil(shown.secondaryAction)
+        let korean = try await capture(model, named: "t19-result-loss.png")
         let english = try screen(model, L(.en))
         XCTAssertEqual(english.title, "Defeat")
-        XCTAssertFalse(hasHangul(english.title + english.effects.joined() + (english.note ?? "")), "\(english)")
-        let englishHost = await self.host(model, l: L(.en))
-        XCTAssertEqual(buttons(in: englishHost).count, 3)
-    }
-
-    func testPressingTheRematchButtonOpensTheDraftForThisBattle() async throws {
-        let (model, _) = resultModel(.win, effects: .init(instanceID: "synthetic-pikachu", xp: 10_000_000, hpShare: 0.8))
-        var sent: [String] = []
-        model.onAction = { action in if case .prepareRematch(let id) = action { sent.append(id) }; if case .dismissResult = action { sent.append("dismiss") } }
-        let host = await host(model)
-        let all = buttons(in: host)
-        XCTAssertEqual(all.count, 3)
-        guard all.count == 3 else { return }
-        all[1].performClick(nil)
-        XCTAssertEqual(sent, [Self.sourceID])
-        all[2].performClick(nil)
-        XCTAssertEqual(sent, [Self.sourceID, "dismiss"])
+        XCTAssertTrue(english.effects.first?.contains("fainted") == true, "\(english.effects)")
+        XCTAssertFalse(hasHangul(english.title + (english.note ?? "")), "\(english)")
+        let englishData = try await capture(model, l: L(.en), named: "t19-result-loss-en.png")
+        XCTAssertNotEqual(korean, englishData, "the view draws the language it is given")
     }
 
     // MARK: waiting
 
     func testAfterTheRequestTheSameButtonWaitsAndCancelsTheRematchRoom() async throws {
-        let (model, _) = resultModel(.loss, others: [rematch(me: .p1)])
-        XCTAssertEqual(try screen(model).rematch, .waiting(label: ko.onlineRematchWaitingCancel("연습친구"), battleID: "synthetic-rematch"),
+        let model = resultModel(.loss, others: [rematch(me: .p1)])
+        let before = try await capture(resultModel(.loss), named: "t19-result-before-request.png")
+        let shown = try screen(model)
+        XCTAssertEqual(shown.rematch, .waiting(label: ko.onlineRematchWaitingCancel("연습친구"), battleID: "synthetic-rematch"),
                        "the request button is gone while one is out")
+        XCTAssertTrue(shown.primaryEnabled)
+        guard case .cancel(let id)? = shown.primaryAction else { return XCTFail("the same button now cancels: \(String(describing: shown.primaryAction))") }
+        XCTAssertEqual(id, "synthetic-rematch", "cancel names the rematch room, not the result")
         var sent: [String] = []
-        model.onAction = { action in if case .cancel(let id) = action { sent.append("cancel \(id)") }; if case .prepareRematch = action { sent.append("prepare") } }
-        let host = await host(model)
-        let all = buttons(in: host)
-        XCTAssertEqual(all.count, 3)
-        guard all.count == 3 else { return }
-        all[1].performClick(nil)
-        XCTAssertEqual(sent, ["cancel synthetic-rematch"], "cancel names the rematch room, not the result")
-        _ = try await capture(host, named: "t19-result-waiting.png")
+        model.onAction = { action in if case .cancel(let id) = action { sent.append("cancel \(id)") } }
+        model.send(.cancel(id))
+        XCTAssertEqual(sent, ["cancel synthetic-rematch"])
+        let waiting = try await capture(model, named: "t19-result-waiting.png")
+        XCTAssertNotEqual(before, waiting)
     }
 
     // MARK: a request over the result
 
     func testAnIncomingRematchShowsABannerWithAcceptAndLater() async throws {
-        let (model, _) = resultModel(.loss, others: [rematch(me: .p2)])
-        XCTAssertEqual(try screen(model).rematch, .answer(banner: ko.onlineRematchReceived("연습친구"), battleID: "synthetic-rematch"))
+        let model = resultModel(.loss, others: [rematch(me: .p2)])
+        let shown = try screen(model)
+        XCTAssertEqual(shown.rematch, .answer(banner: ko.onlineRematchReceived("연습친구"), battleID: "synthetic-rematch"))
+        XCTAssertEqual(shown.note, ko.onlineRematchAnswerEntry("피카츄"), "who enters is said next to the button")
         var sent: [String] = []
         model.onAction = { action in
             if case .accept(let id) = action { sent.append("accept \(id)") }
-            if case .deferRematch(let id) = action { sent.append("later \(id)") }
+            if case .deferRematch = action { sent.append("later reached the session") }
         }
-        let host = await host(model)
-        let all = buttons(in: host)
-        XCTAssertEqual(all.count, 4, "Home, accept, later and back to the lobby")
-        guard all.count == 4 else { return }
-        let withBanner = try await capture(host, named: "t19-result-incoming.png")
-        all[1].performClick(nil)
-        all[2].performClick(nil)
-        XCTAssertEqual(sent, ["accept synthetic-rematch", "later synthetic-rematch"])
-        await settle(host)
+        guard case .accept(let acceptID)? = shown.primaryAction, case .deferRematch(let laterID)? = shown.secondaryAction else {
+            return XCTFail("accept and later: \(String(describing: shown.primaryAction)) \(String(describing: shown.secondaryAction))")
+        }
+        XCTAssertEqual([acceptID, laterID], ["synthetic-rematch", "synthetic-rematch"])
+        let withBanner = try await capture(model, named: "t19-result-incoming.png")
+        model.send(.accept(acceptID))
+        model.send(.deferRematch(laterID))
+        XCTAssertEqual(sent, ["accept synthetic-rematch"], "later is pure presentation and sends nothing")
+        XCTAssertEqual(model.deferredRematchIDs, ["synthetic-rematch"])
         let later = try screen(model)
         XCTAssertEqual(later.rematch, .request(enabled: false), "later puts the banner away; asking again would cross their request")
+        XCTAssertFalse(later.primaryEnabled)
         XCTAssertEqual(later.note, ko.onlineRematchBlockLine(.requestWaiting))
-        XCTAssertEqual(buttons(in: host).count, 3)
-        let after = try await capture(host, named: "t19-result-incoming-later.png")
+        let after = try await capture(model, named: "t19-result-incoming-later.png")
         XCTAssertNotEqual(withBanner, after)
     }
 
-    func testARematchThatMovedOnIsAnOpenRoomButton() async throws {
-        let (model, _) = resultModel(.loss, others: [rematch(me: .p1, state: .accepted)])
-        XCTAssertEqual(try screen(model).rematch, .open(battleID: "synthetic-rematch"))
-        var followed: [String] = []
-        model.onAction = { action in if case .followAttention(let id) = action { followed.append(id) } }
-        let host = await host(model)
-        let all = buttons(in: host)
-        XCTAssertEqual(all.count, 3)
-        guard all.count == 3 else { return }
-        all[1].performClick(nil)
-        XCTAssertEqual(followed, ["synthetic-rematch"])
+    func testARequestWithNobodyHealthyCannotBeAcceptedAndSaysWhy() throws {
+        let model = resultModel(.loss, others: [rematch(me: .p2)])
+        model.entryHP = ["synthetic-pikachu": 0]
+        let shown = try screen(model)
+        XCTAssertEqual(shown.note, ko.onlineRematchBlockLine(.noHealthyPokemon))
+        var reached = false
+        model.onAction = { _ in reached = true }
+        model.send(.accept("synthetic-rematch"))
+        XCTAssertFalse(reached, "nobody can enter, so accepting is refused before it is sent")
+    }
+
+    func testARematchThatMovedOnIsAnOpenRoomButton() throws {
+        let model = resultModel(.loss, others: [rematch(me: .p1, state: .accepted)])
+        let shown = try screen(model)
+        XCTAssertEqual(shown.rematch, .open(battleID: "synthetic-rematch"))
+        guard case .followAttention(let id)? = shown.primaryAction else { return XCTFail("\(String(describing: shown.primaryAction))") }
+        XCTAssertEqual(id, "synthetic-rematch")
     }
 
     // MARK: why it is off
 
     func testAFaintedTeamTurnsTheButtonOffAndSaysWhyBelowIt() async throws {
-        let (model, _) = resultModel(.loss)
+        let model = resultModel(.loss)
         model.entryHP = ["synthetic-pikachu": 0]
         let shown = try screen(model)
         XCTAssertEqual(shown.rematch, .request(enabled: false))
+        XCTAssertFalse(shown.primaryEnabled)
         XCTAssertEqual(shown.note, ko.onlineRematchBlockLine(.noHealthyPokemon))
-        let host = await host(model)
-        let all = buttons(in: host)
-        XCTAssertEqual(all.count, 3)
-        guard all.count == 3 else { return }
-        XCTAssertFalse(all[1].isEnabled)
-        XCTAssertTrue(all[2].isEnabled)
-        _ = try await capture(host, named: "t19-result-blocked.png")
+        var reached = false
+        model.onAction = { _ in reached = true }
+        model.send(.prepareRematch(Self.sourceID))
+        XCTAssertFalse(reached, "an off button sends nothing even if something presses it")
+        let blocked = try await capture(model, named: "t19-result-blocked.png")
+        let ready = try await capture(resultModel(.loss), named: "t19-result-ready.png")
+        XCTAssertNotEqual(blocked, ready)
     }
 
-    func testAnOfflineOpponentIsToldButTheButtonStaysOn() async throws {
-        let (model, _) = resultModel(.win, effects: .init(instanceID: "synthetic-pikachu", xp: 10_000_000, hpShare: 0.8))
+    func testAnOfflineOpponentIsToldButTheButtonStaysOn() throws {
+        let model = resultModel(.win, effects: .init(instanceID: "synthetic-pikachu", xp: 10_000_000, hpShare: 0.8))
         model.members = [.init(trainerId: "synthetic-foe", displayEmail: "연습친구", role: .host, status: .active, joinedAt: 0, online: false)]
         let shown = try screen(model)
         XCTAssertEqual(shown.rematch, .request(enabled: true))
+        XCTAssertTrue(shown.primaryEnabled)
         XCTAssertEqual(shown.note, ko.onlineRematchOpponentOffline)
-        let host = await host(model)
-        XCTAssertTrue(buttons(in: host).dropFirst().first?.isEnabled == true)
     }
 
     // MARK: effects are the receipt's
 
     func testTheEffectLinesFollowTheReceiptAndAnOtherSaveRecordClaimsNone() async throws {
-        let (win, _) = resultModel(.win, effects: .init(instanceID: "synthetic-pikachu", xp: 10_000_000, hpShare: 0.8))
+        let win = resultModel(.win, effects: .init(instanceID: "synthetic-pikachu", xp: 10_000_000, hpShare: 0.8))
         let winScreen = try screen(win)
         XCTAssertEqual(winScreen.effects, [ko.onlineXP(10_000_000), "남은 체력 80%를 반영했어요"])
         XCTAssertEqual(winScreen.title, "승리")
-        _ = try await capture(await host(win), named: "t19-result-win.png")
+        let winData = try await capture(win, named: "t19-result-win.png")
 
-        let (record, _) = resultModel(.record, effects: nil)
+        let record = resultModel(.record, effects: nil)
         let recordScreen = try screen(record)
         XCTAssertEqual(recordScreen.title, ko.onlineResultTitle(.record))
         XCTAssertEqual(recordScreen.effects, [])
         for claim in ["체력", "경험치", "기절"] {
             XCTAssertFalse((recordScreen.title + recordScreen.subtitle + (recordScreen.note ?? "")).contains(claim), claim)
         }
-        _ = try await capture(await host(record), named: "t19-result-record.png")
+        let recordData = try await capture(record, named: "t19-result-record.png")
 
-        let (void, _) = resultModel(.void, effects: nil)
+        let void = resultModel(.void, effects: nil)
         void.room = view(Self.sourceID, .void)
         let voidScreen = try screen(void)
         XCTAssertEqual(voidScreen.title, ko.onlineResultTitle(.void))
         XCTAssertEqual(voidScreen.rematch, .none, "a voided match has no rematch")
-        let voidHost = await host(void)
-        XCTAssertEqual(buttons(in: voidHost).count, 2, "Home and back to the lobby")
-        _ = try await capture(voidHost, named: "t19-result-void.png")
+        XCTAssertNil(voidScreen.primaryAction)
+        let voidData = try await capture(void, named: "t19-result-void.png")
+        XCTAssertNotEqual(winData, recordData); XCTAssertNotEqual(recordData, voidData)
+
+        let draw = resultModel(.draw, effects: .init(instanceID: "synthetic-pikachu", xp: 0, hpShare: 0.5))
+        XCTAssertEqual(try screen(draw).effects, ["남은 체력 50%를 반영했어요"])
+        _ = try await capture(draw, named: "t19-result-draw.png")
     }
 
     // MARK: totals
@@ -255,17 +246,18 @@ final class OnlineBattleResultRenderingTests: XCTestCase {
     func testTotalsShowOnlyWhenTheStageIsWhole() async throws {
         let arena = try OnlineBattleArenaFixture.arena(seat: .p1)
         defer { arena.close() }
-        let (model, _) = resultModel(.win, effects: .init(instanceID: "synthetic-pikachu", xp: 10_000_000, hpShare: 0.8))
+        let model = resultModel(.win, effects: .init(instanceID: "synthetic-pikachu", xp: 10_000_000, hpShare: 0.8))
         try adoptGolden(model, arena)
         model.stage = arena.staging
         XCTAssertNil(try screen(model).totals, "nothing was staged")
+        let bare = try await capture(model, named: "t19-result-without-totals.png")
         try arena.play(rounds: arena.battle.journal.count)
         arena.staging.skipToEnd()
         model.stage = arena.staging
         let totals = try XCTUnwrap(try screen(model).totals)
         XCTAssertGreaterThanOrEqual(totals.turns, arena.battle.result?.terminalSeq ?? Int.max)
-        let host = await host(model)
-        _ = try await capture(host, named: "t19-result-totals.png")
+        let withTotals = try await capture(model, named: "t19-result-totals.png")
+        XCTAssertNotEqual(bare, withTotals)
     }
 
     // MARK: fit
@@ -273,7 +265,7 @@ final class OnlineBattleResultRenderingTests: XCTestCase {
     func testTheHeaviestResultStillFitsTheScrollArea() async throws {
         let arena = try OnlineBattleArenaFixture.arena(seat: .p1)
         defer { arena.close() }
-        let (model, _) = resultModel(.win, effects: .init(instanceID: "synthetic-pikachu", xp: 10_000_000, hpShare: 0.8))
+        let model = resultModel(.win, effects: .init(instanceID: "synthetic-pikachu", xp: 10_000_000, hpShare: 0.8))
         try adoptGolden(model, arena, rematch: .pending)
         try arena.play(rounds: arena.battle.journal.count); arena.staging.skipToEnd()
         model.stage = arena.staging
@@ -290,5 +282,6 @@ final class OnlineBattleResultRenderingTests: XCTestCase {
         probe.layoutSubtreeIfNeeded()
         XCTAssertLessThanOrEqual(probe.fittingSize.height, 520, "the result must not need the scroll bar in its heaviest state")
         XCTAssertEqual(probe.fittingSize.width, PopoverMetrics.scrollContentWidth, accuracy: 0.5)
+        _ = try await capture(model, named: "t19-result-heaviest.png")
     }
 }

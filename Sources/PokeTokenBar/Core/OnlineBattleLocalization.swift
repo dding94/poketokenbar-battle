@@ -127,8 +127,6 @@ extension L {
     var onlineVerifying: String { online("결과를 확인하고 있어요", "Verifying the result") }
     var onlineVerifyingHint: String { online("양쪽 결과가 일치하고 저장이 끝나야 체력과 경험치가 반영돼요.", "HP and XP apply after both results match and the save completes.") }
     var onlineResult: String { online("정식전 결과", "Battle result") }
-    var onlineHPApplied: String { online("체력 반영 완료", "HP saved") }
-    var onlineNoEffects: String { online("체력과 경험치 변화 없음", "No HP or XP changes") }
     var onlineDone: String { online("그룹으로 돌아가기", "Back to group") }
     var onlineCaption: String { online("온라인 정식전", "Official online battle") }
     var onlineStakesHint: String { online("승리하면 현재 키우는 포켓몬이 경험치 1천만을 받아요(온라인 하루 10회). 패배하면 출전 포켓몬이 기절해요.", "A win grants your current companion 10 million XP (10 online wins per day). A loss faints your battle entry.") }

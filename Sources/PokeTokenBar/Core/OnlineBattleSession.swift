@@ -944,6 +944,7 @@ final class OnlineBattleSession {
             await refreshStandings(); return
         case .refreshStandings: await refreshStandings(); return
         case .prepareRematch(let id): prepareRematch(id); return
+        case .deferRematch: return
         case .cancelRematch:
             presentation.rematchSourceID = nil
             presentation.showsHistory = rematchFromHistory
@@ -1092,9 +1093,10 @@ final class OnlineBattleSession {
             try await cancelChangedRematch(room, account: account, api: api, epoch: epoch)
             throw OnlineBattleFailure.entryChanged
         }
+        let staysOnSource = !rematchFromHistory && presentation.room?.battleId == sourceID
         challengeIntent = nil; presentation.rematchSourceID = nil; rematchFromHistory = false
         presentation.notice = nil
-        clearHistory(); prefersLobby = false; selectedBattleID = room.battleId
+        clearHistory(); prefersLobby = false; selectedBattleID = staysOnSource ? sourceID : room.battleId
         return true
     }
     private func cancelChangedRematch(_ room: OnlineBattleView, account: OnlineBattleAccount,
@@ -1197,8 +1199,12 @@ final class OnlineBattleSession {
         if isChallenge || isRematch || isAccept || !reconciled { await refresh(); try current(epoch) }
         guard onlineAllowed, authenticated, reconciled, let api, let account = presentation.account else { throw OnlineBattleFailure.connectionUnavailable }
         var result: OnlineBattleView
+        let shownID = presentation.room?.battleId
+        // A rematch asked from a finished room's own result waits on that result; one asked from the archive opens its room.
+        var staysOnSourceID: String?
         if isChallenge || isRematch {
             let sourceID = isRematch ? presentation.rematchSourceID : nil
+            if isRematch, !rematchFromHistory, sourceID == shownID { staysOnSourceID = sourceID }
             if isRematch {
                 guard let sourceID, let source = historyViews[sourceID] ?? views[sourceID], source.state == .completed,
                       let side = source.side(for: account.trainer.trainerId) else { throw OnlineBattleFailure.invalidRequest }
@@ -1233,9 +1239,23 @@ final class OnlineBattleSession {
                 presentation.rematchSourceID = nil; rematchFromHistory = false; clearHistory()
             }
         } else {
-            // Addressed by the battle the press was made on. Whatever is on screen now must still be it.
-            guard let room = presentation.room, roomActionTarget(action).map({ $0 == room.battleId }) ?? true else {
-                throw OnlineBattleFailure.invalidRequest
+            // Addressed by the battle the press was made on. It must still be the room on screen or, beside a
+            // finished room's result, that room's open rematch: nothing else the person was not looking at.
+            let room: OnlineBattleView
+            if let target = roomActionTarget(action) {
+                guard let found = presentation.actionRoom(target) else {
+                    // A rematch request that ended while the result was open is told as what happened to it.
+                    if case .accept = action, let gone = presentation.battles.first(where: { $0.battleId == target }),
+                       gone.side(for: account.trainer.trainerId) == .p2 {
+                        if gone.state == .cancelled { throw OnlineBattleFailure.peerCancelled }
+                        if gone.state == .expired { throw OnlineBattleFailure.peerExpired }
+                    }
+                    throw OnlineBattleFailure.invalidRequest
+                }
+                room = found
+            } else {
+                guard let shown = presentation.room else { throw OnlineBattleFailure.invalidRequest }
+                room = shown
             }
             // A press that ends the room is not news when its ending arrives, whichever way that comes first.
             let endsRoom = isEndingAction(action)
@@ -1248,6 +1268,8 @@ final class OnlineBattleSession {
                         if room.state == .expired { throw OnlineBattleFailure.peerExpired }
                     }
                     guard room.state == .pending, room.side(for: account.trainer.trainerId) == .p2 else { throw OnlineBattleFailure.invalidRequest }
+                    // Beside a result nobody picked a Pokémon for this request; the one the result named enters.
+                    if room.battleId != shownID, let entry = presentation.answerEntry { presentation.selectedEntryID = entry.id }
                     let snapshot = try selectedSnapshot(allow: receiptKey(room, account: account))
                     result = try await api.accept(id: room.battleId, revision: room.revision, snapshot: snapshot)
                     try current(epoch)
@@ -1307,7 +1329,9 @@ final class OnlineBattleSession {
             }
             try current(epoch)
         }
-        if navigation == navigationRevision { prefersLobby = false; selectedBattleID = result.battleId }
+        // Ending a rematch request beside the result leaves the result where it is.
+        let endsBesideResult = isEndingAction(action) && result.battleId != shownID
+        if navigation == navigationRevision, !endsBesideResult { prefersLobby = false; selectedBattleID = staysOnSourceID ?? result.battleId }
         try await process(result, account: account, api: api, epoch: epoch)
         try rebuildRoster(); publish()
     }
