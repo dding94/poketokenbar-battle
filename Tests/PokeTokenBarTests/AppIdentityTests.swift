@@ -18,12 +18,82 @@ final class AppIdentityTests: XCTestCase {
     func testForkIdentityNeverReusesUpstreamValues() {
         XCTAssertNotEqual(AppIdentity.bundleID, AppIdentity.Upstream.bundleID)
         XCTAssertNotEqual(AppIdentity.appName, AppIdentity.Upstream.appName)
+        // Substring matches (pkill, path globs, LaunchServices lookups) must not mistake the fork for upstream.
+        XCTAssertFalse(AppIdentity.appName.contains(AppIdentity.Upstream.appName))
+        XCTAssertFalse(AppIdentity.Upstream.appName.contains(AppIdentity.appName))
         XCTAssertNotEqual(AppIdentity.executableName, AppIdentity.Upstream.executableName)
         XCTAssertNotEqual(AppIdentity.stateDirectoryName, AppIdentity.Upstream.stateDirectoryName)
         XCTAssertNotEqual(AppIdentity.loginAgentLabel, AppIdentity.Upstream.loginAgentLabel)
         XCTAssertNotEqual(AppIdentity.releaseRepo, AppIdentity.Upstream.releaseRepo)
         XCTAssertNotEqual(AppIdentity.caskName, AppIdentity.Upstream.caskName)
         XCTAssertFalse(AppIdentity.loginAgentLabel.hasPrefix(AppIdentity.Upstream.bundleID))
+    }
+
+    /// T22: only the display name changes. Every identifier that keys saves, Keychain items, the login
+    /// agent, updates and the server stays at its 2.6.0 value.
+    func testDisplayNameIsPokeTokenBattleAndInternalIdentifiersAreFrozen() {
+        XCTAssertEqual(AppIdentity.appName, "PokeTokenBattle")
+        XCTAssertEqual(AppIdentity.bundleID, "io.github.dding94.poketokenbar-battle")
+        XCTAssertEqual(AppIdentity.executableName, "PokeTokenBarBattle")
+        XCTAssertEqual(AppIdentity.stateDirectoryName, "PokeTokenBarBattle")
+        XCTAssertEqual(AppIdentity.loginAgentLabel, "io.github.dding94.poketokenbar-battle.login")
+        XCTAssertEqual(AppIdentity.releaseRepo, "dding94/poketokenbar-battle")
+        XCTAssertEqual(AppIdentity.caskName, "poke-token-bar-battle")
+        XCTAssertEqual(OnlineBattleCredentialScope.service, "io.github.dding94.poketokenbar-battle.online-access")
+    }
+
+    func testFixedWorkerNamesAreUnchanged() throws {
+        let config = try String(contentsOf: Self.repoRoot.appendingPathComponent("server/wrangler.jsonc"), encoding: .utf8)
+        XCTAssertTrue(config.contains("\"name\": \"ptb-battle-league\""))
+        XCTAssertTrue(config.contains("\"name\": \"ptb-battle-league-dev\""))
+    }
+
+    func testUserVisibleCopyUsesDisplayNameAndKeepsOriginalCredit() {
+        let l = L(.en)
+        XCTAssertTrue(l.forkDisclaimer.hasPrefix("PokeTokenBattle is an unofficial"))
+        XCTAssertTrue(l.forkDisclaimer.contains("based on PokeTokenBar"), "original project must stay credited")
+        XCTAssertTrue(l.thirdPartyNotice.contains("Original app: PokeTokenBar"))
+        XCTAssertEqual(l.basedOnUpstream, "Original PokeTokenBar")
+    }
+
+    func testBuildAndReleaseScriptsShareTheDisplayName() throws {
+        XCTAssertTrue(try script("release.sh").contains("APP_NAME=\"\(AppIdentity.appName)\""))
+        let validate = try String(contentsOf: Self.repoRoot.appendingPathComponent("scripts/release-validate.py"), encoding: .utf8)
+        XCTAssertTrue(validate.contains("APP = '\(AppIdentity.appName)'"))
+    }
+
+    // MARK: login item path check
+
+    @MainActor
+    func testLoginItemReregistersWhenRecordedPathDiffers() {
+        let old = "/Applications/PokeTokenBar Battle.app", new = "/Applications/PokeTokenBattle.app"
+        XCTAssertTrue(LoginItem.needsReregistration(isEnabled: true, recordedPath: old, currentPath: new))
+        XCTAssertTrue(LoginItem.needsReregistration(isEnabled: true, recordedPath: nil, currentPath: new),
+                      "2.6.0 installs never recorded a path")
+        XCTAssertFalse(LoginItem.needsReregistration(isEnabled: true, recordedPath: new, currentPath: new))
+        XCTAssertFalse(LoginItem.needsReregistration(isEnabled: false, recordedPath: old, currentPath: new),
+                       "a login item the user turned off must stay off")
+    }
+
+    @MainActor
+    func testReconcileRecordsPathOnlyAfterSuccessfulReregister() {
+        var calls = 0, recorded: String?
+        let ok = LoginItem.reconcileRegisteredPath(isEnabled: true, recordedPath: "/old", currentPath: "/new",
+            reregister: { calls += 1 }, record: { recorded = $0 })
+        XCTAssertEqual(ok, .reregistered); XCTAssertEqual(calls, 1); XCTAssertEqual(recorded, "/new")
+
+        recorded = nil
+        struct Boom: Error {}
+        let bad = LoginItem.reconcileRegisteredPath(isEnabled: true, recordedPath: "/old", currentPath: "/new",
+            reregister: { throw Boom() }, record: { recorded = $0 })
+        XCTAssertEqual(bad, .failed); XCTAssertNil(recorded, "failed registration must be retried next launch")
+
+        calls = 0
+        XCTAssertEqual(LoginItem.reconcileRegisteredPath(isEnabled: true, recordedPath: "/new", currentPath: "/new",
+            reregister: { calls += 1 }, record: { _ in }), .upToDate)
+        XCTAssertEqual(LoginItem.reconcileRegisteredPath(isEnabled: false, recordedPath: nil, currentPath: "/new",
+            reregister: { calls += 1 }, record: { _ in }), .notEnabled)
+        XCTAssertEqual(calls, 0)
     }
 
     @MainActor

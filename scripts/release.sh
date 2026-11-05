@@ -7,7 +7,7 @@ REPO="dding94/poketokenbar-battle"
 TAP_REPO="dding94/homebrew-tap"
 CASK_NAME="poke-token-bar-battle"
 CASK_PATH="Casks/$CASK_NAME.rb"
-APP_NAME="PokeTokenBar Battle"
+APP_NAME="PokeTokenBattle"
 EXEC_NAME="PokeTokenBarBattle"
 MODE="${1:-}"
 case "$MODE" in
@@ -171,7 +171,7 @@ git add scripts/build-app.sh
 git commit -q -m "$COMMIT_MESSAGE"
 git push -q origin main
 gh release create "v$VERSION" "$ZIP" --repo "$REPO" \
-  --title "PokeTokenBar Battle v$VERSION" --target main --notes-file "$NOTES_FILE"
+  --title "$APP_NAME v$VERSION" --target main --notes-file "$NOTES_FILE"
 # Update both version and checksum from the validated artifact, with optimistic tap SHA.
 python3 - "$TMP_RELEASE/tap.json" "build/release/$CASK_NAME.rb" "$TMP_RELEASE/update.json" <<'UPDATE'
 import base64,json,pathlib,sys

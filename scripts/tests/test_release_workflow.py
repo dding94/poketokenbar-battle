@@ -20,8 +20,8 @@ Release preparation.
 ## Contributors
 No external contributors in this release.
 ---
-**Install:** Download `PokeTokenBarBattle.zip` from this fork's release and move `PokeTokenBar Battle.app` to `/Applications`.
-**Upgrade:** Replace only `/Applications/PokeTokenBar Battle.app` after backing up `PokeTokenBarBattle` state. Homebrew is not available until the fork tap is published.
+**Install:** Download `PokeTokenBarBattle.zip` from this fork's release and move `PokeTokenBattle.app` to `/Applications`.
+**Upgrade:** Replace only `/Applications/PokeTokenBattle.app` after backing up `PokeTokenBarBattle` state. Homebrew is not available until the fork tap is published.
 '''
 MOCK = r'''#!/usr/bin/env python3
 import os, sys, pathlib, plistlib, base64, json
@@ -150,17 +150,17 @@ class ReleaseWorkflowTests(unittest.TestCase):
 printf 'build:skip-install=%s version=%s\\n' "$PTB_SKIP_INSTALL" "$PTB_RELEASE_VERSION" >> "$CALLS"
 python3 - <<'BUILD'
 import os, pathlib, plistlib
-app=pathlib.Path('build/PokeTokenBar Battle.app/Contents')
+app=pathlib.Path('build/PokeTokenBattle.app/Contents')
 (app/'MacOS').mkdir(parents=True,exist_ok=True)
 (app/'MacOS/PokeTokenBarBattle').write_text('fixture binary')
-plist={'CFBundleIdentifier':'io.github.dding94.poketokenbar-battle','CFBundleName':'PokeTokenBar Battle', 'CFBundleExecutable':'PokeTokenBarBattle','CFBundleShortVersionString':os.environ['PTB_RELEASE_VERSION'],'LSMinimumSystemVersion':'15.0'}
+plist={'CFBundleIdentifier':'io.github.dding94.poketokenbar-battle','CFBundleName':'PokeTokenBattle', 'CFBundleExecutable':'PokeTokenBarBattle','CFBundleShortVersionString':os.environ['PTB_RELEASE_VERSION'],'LSMinimumSystemVersion':'15.0'}
 (app/'Info.plist').write_bytes(plistlib.dumps(plist))
 (app/'Resources').mkdir(exist_ok=True)
 (app/'Library/LaunchAgents').mkdir(parents=True,exist_ok=True)
-(app/'Library/LaunchAgents/io.github.dding94.poketokenbar-battle.login.plist').write_bytes(plistlib.dumps({'Label':'io.github.dding94.poketokenbar-battle.login','ProgramArguments':['/Applications/PokeTokenBar Battle.app/Contents/MacOS/PokeTokenBarBattle']}))
+(app/'Library/LaunchAgents/io.github.dding94.poketokenbar-battle.login.plist').write_bytes(plistlib.dumps({'Label':'io.github.dding94.poketokenbar-battle.login','ProgramArguments':['/Applications/PokeTokenBattle.app/Contents/MacOS/PokeTokenBarBattle']}))
 BUILD
-bash scripts/package-battle-engines.sh "build/PokeTokenBar Battle.app/Contents/Resources"
-[[ "${CORRUPT_ENGINE:-0}" != 1 ]] || printf corrupt > "build/PokeTokenBar Battle.app/Contents/Resources/battle-engine.js"
+bash scripts/package-battle-engines.sh "build/PokeTokenBattle.app/Contents/Resources"
+[[ "${CORRUPT_ENGINE:-0}" != 1 ]] || printf corrupt > "build/PokeTokenBattle.app/Contents/Resources/battle-engine.js"
 '''
         path=self.repo/'scripts/build-app.sh';path.write_text(header+body);path.chmod(0o755)
         (self.repo/'engine/LICENSE.pokemon-showdown').write_text('fixture license')
@@ -212,7 +212,7 @@ bash scripts/package-battle-engines.sh "build/PokeTokenBar Battle.app/Contents/R
         self.assertIn(hashlib.sha256(b'fixture zip bytes').hexdigest(),cask)
         self.assertIn('https://github.com/dding94/poketokenbar-battle/releases/download/v#{version}/PokeTokenBarBattle.zip',cask)
         self.assertIn('depends_on macos: ">= :sequoia"',cask)
-        self.assertIn('app "PokeTokenBar Battle.app"',cask)
+        self.assertIn('app "PokeTokenBattle.app"',cask)
         self.assertIn('build:skip-install=1 version=3.0.0',self.calls())
         self.assertNotRegex(self.calls(),r'(?m)^gh release |^gh api -X |^pkill |^git (add|commit|push|tag) ')
 
@@ -264,7 +264,7 @@ bash scripts/package-battle-engines.sh "build/PokeTokenBar Battle.app/Contents/R
         self.fake_build()
         result = self.run_release('--prepare-build', '3.0.0')
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertRegex(self.calls(), r'(?m)^codesign -d --extract-certificates=.+/cert build/PokeTokenBar Battle.app$')
+        self.assertRegex(self.calls(), r'(?m)^codesign -d --extract-certificates=.+/cert build/PokeTokenBattle.app$')
         self.assertNotIn('codesign -d --extract-certificates ', self.calls())
         self.assertTrue((self.repo/'build/release/PokeTokenBarBattle.zip').exists())
 
@@ -335,7 +335,7 @@ bash scripts/package-battle-engines.sh "build/PokeTokenBar Battle.app/Contents/R
         self.assertEqual(result.returncode,0,result.stderr)
         for old,new in (('dding94/poketokenbar-battle','chattymin/PokeTokenBar'),
                         ('a'*64,'no_check'), ('>= :sequoia','>= :sonoma'),
-                        ('app "PokeTokenBar Battle.app"','app "PokeTokenBar.app"')):
+                        ('app "PokeTokenBattle.app"','app "PokeTokenBar.app"')):
             with self.subTest(old=old):
                 cask=self.repo/'invalid.rb';cask.write_text(result.stdout.replace(old,new))
                 check=subprocess.run(['python3',str(helper),'check-cask',str(cask)],capture_output=True,text=True)

@@ -11,7 +11,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 REPO = 'dding94/poketokenbar-battle'
-APP = 'PokeTokenBar Battle'
+APP = 'PokeTokenBattle'
 EXEC = 'PokeTokenBarBattle'
 BUNDLE = 'io.github.dding94.poketokenbar-battle'
 LABEL = BUNDLE + '.login'

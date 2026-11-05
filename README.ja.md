@@ -1,10 +1,12 @@
+> **非公式ファンプロジェクト:** PokeTokenBattle は The Pokémon Company、任天堂、元の PokeTokenBar とは関係がなく、承認・後援を受けていません。
+
 > **Battle フォーク:** このリポジトリは `dding94/poketokenbar-battle`、必要環境は macOS 15 以降です。以下の育成アプリの紹介は upstream 由来です。オンライン機能の現在の実装・検証状況は [AI_HANDOFF](docs/AI_HANDOFF.md)、インストール・公開の境界は [RELEASE.md](RELEASE.md) を参照してください。2.6.0テスト版を公開しました。2台のMacによる実機検証は未完了です。
 
 <div align="center">
 
 <img src="assets/icon.png" width="128" alt="PokeTokenBar アイコン">
 
-# PokeTokenBar Battle
+# PokeTokenBattle
 
 **あなたのAIコーディングトークンを、ポケモンに — メニューバーで。**
 
@@ -221,7 +223,7 @@ Pi は複数のモデルを一つのセッションログに流すことがあ�
 
 ```bash
 brew install --cask dding94/tap/poke-token-bar-battle
-open -a "PokeTokenBar Battle"
+open -a "PokeTokenBattle"
 ```
 
 更新は `brew update` の後に `brew upgrade --cask poke-token-bar-battle` を実行します。手動インストール済みの場合はアプリとフォークのセーブを先にバックアップしてください。Apple公証はありません。初回起動が制限された場合は[Appleの案内](https://support.apple.com/en-gb/102445)に従って設定から許可してください。証明書の追加やGatekeeperの無効化は不要です。管理されたMacでは利用が制限される場合があります。
@@ -236,7 +238,7 @@ open -a "PokeTokenBar Battle"
 PTB_SKIP_INSTALL=1 ./scripts/build-app.sh
 ```
 
-出力は `build/PokeTokenBar Battle.app` です。証明書がなければ ad-hoc 開発署名であり、公開配布の署名・公証を意味しません。開発時は別のテストアカウントと `PTB_STATE_DIR` で実際のセーブを分離してください。元のアプリやセーブを上書きしないでください。
+出力は `build/PokeTokenBattle.app` です。証明書がなければ ad-hoc 開発署名であり、公開配布の署名・公証を意味しません。開発時は別のテストアカウントと `PTB_STATE_DIR` で実際のセーブを分離してください。元のアプリやセーブを上書きしないでください。
 
 ## データソース
 

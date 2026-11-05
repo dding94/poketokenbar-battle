@@ -1,10 +1,12 @@
+> **비공식 팬 프로젝트:** PokeTokenBattle은 The Pokémon Company, Nintendo 및 원본 PokeTokenBar와 무관하며 이들의 승인·후원을 받지 않았습니다.
+
 > **Battle 포크 안내:** 이 저장소는 `dding94/poketokenbar-battle`이며 최소 macOS 15입니다. 아래 기존 육성 앱 소개는 upstream에서 가져온 설명입니다. 온라인 기능의 최신 구현/검증 상태는 [AI_HANDOFF](docs/AI_HANDOFF.md), 설치·공개 경계는 [RELEASE.md](RELEASE.md)를 따릅니다. 2.6.0 테스트판을 공개했으며 실제 두 맥 검증은 아직 완료되지 않았습니다.
 
 <div align="center">
 
 <img src="assets/icon.png" width="128" alt="PokeTokenBar 아이콘">
 
-# PokeTokenBar Battle
+# PokeTokenBattle
 
 **당신의 AI 코딩 토큰을 포켓몬으로 — 메뉴바에서.**
 
@@ -221,7 +223,7 @@ Pi는 모델 여러 개를 세션 로그 하나로 흘려보낼 수 있습니다
 
 ```bash
 brew install --cask dding94/tap/poke-token-bar-battle
-open -a "PokeTokenBar Battle"
+open -a "PokeTokenBattle"
 ```
 
 업데이트는 `brew update` 후 `brew upgrade --cask poke-token-bar-battle`입니다. 수동 설치한 포크가 이미 있으면 먼저 앱과 포크 세이브를 백업하세요. 강제 덮어쓰기는 하지 마세요.
@@ -238,7 +240,7 @@ Apple 공증된 앱은 아닙니다. 첫 실행이 차단되면 [Apple 안내](h
 PTB_SKIP_INSTALL=1 ./scripts/build-app.sh
 ```
 
-생성 위치는 `build/PokeTokenBar Battle.app`입니다. 인증서가 없으면 ad-hoc 개발 서명이며 공개 배포의 서명·공증을 의미하지 않습니다. 개발 실행은 별도 시험 계정과 `PTB_STATE_DIR`로 실제 세이브를 분리해야 합니다. 원본 앱이나 세이브를 덮어쓰지 마세요.
+생성 위치는 `build/PokeTokenBattle.app`입니다. 인증서가 없으면 ad-hoc 개발 서명이며 공개 배포의 서명·공증을 의미하지 않습니다. 개발 실행은 별도 시험 계정과 `PTB_STATE_DIR`로 실제 세이브를 분리해야 합니다. 원본 앱이나 세이브를 덮어쓰지 마세요.
 
 ## 데이터 소스
 

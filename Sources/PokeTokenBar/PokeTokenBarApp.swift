@@ -153,6 +153,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         // 포크는 원본 앱 폴더를 옮기거나 쓰지 않는다(원본의 TokenMac → PokeTokenBar 이관도 원본 몫).
         // 첫 실행에만 원본 세이브를 포크 폴더로 복사해 온다.
         Self.importUpstreamSaveIfNeeded()
+        LoginItem.reconcileRegisteredPathAtLaunch()   // 앱 폴더 이름/위치가 바뀐 설치본의 로그인 에이전트 경로 재등록
         LoginItem.migrateFromLegacyLoginItemIfNeeded()   // 로그인아이템 → KeepAlive 에이전트(크래시 자동 재실행)
         store = UsageStore()
         companion = CompanionStore()

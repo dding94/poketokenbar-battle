@@ -14,7 +14,7 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
-APP="/Applications/PokeTokenBar Battle.app"
+APP="/Applications/PokeTokenBattle.app"
 STATE_DIR="${PTB_STATE_DIR:-$HOME/Library/Application Support/PokeTokenBarBattle}"
 LOG="$STATE_DIR/Logs/PokeTokenBar.log"
 SNAP="$STATE_DIR/last-snapshot.json"
@@ -62,7 +62,7 @@ cat > /tmp/ptb-e2e-win.swift <<'SWIFT'
 import CoreGraphics
 let list = CGWindowListCopyWindowInfo([.optionAll], kCGNullWindowID) as? [[String: Any]] ?? []
 var status = 0, tall = 0
-for w in list where (w[kCGWindowOwnerName as String] as? String) == "PokeTokenBar Battle" {
+for w in list where (w[kCGWindowOwnerName as String] as? String) == "PokeTokenBattle" {
     let layer = w[kCGWindowLayer as String] as? Int ?? 0
     let bounds = w[kCGWindowBounds as String] as? [String: Any]
     let h = bounds?["Height"] as? Double ?? 0
@@ -76,7 +76,7 @@ swiftc -O -o /tmp/ptb-e2e-win /tmp/ptb-e2e-win.swift 2>/dev/null
 winprobe() { /tmp/ptb-e2e-win 2>/dev/null; }
 # 1차: AX 로 status item 존재 확인(결정적). AX 미허용이면 window server 폴백
 # (주의: status 윈도우는 앱 최초 활성화 전 CGWindowList 에 안 잡힐 수 있음 — 관측된 macOS 동작).
-AXCNT=$(osascript -e 'tell application "System Events" to tell process "PokeTokenBar Battle" to get count of menu bar items of menu bar 2' 2>/dev/null)
+AXCNT=$(osascript -e 'tell application "System Events" to tell process "PokeTokenBattle" to get count of menu bar items of menu bar 2' 2>/dev/null)
 if [[ "${AXCNT:-}" =~ ^[0-9]+$ ]]; then
   if [[ "$AXCNT" -ge 1 ]]; then ok "status item 존재 (AX, count=$AXCNT)"; else bad "status item 없음 (AX count=0)"; fi
 else
@@ -87,7 +87,7 @@ fi
 
 echo "▶ 5/5 팝오버 오픈 (Accessibility)"
 # click 이 아니라 AXPress — click 은 좌표 기반이라 비활성 앱에서 액션이 발화되지 않는 경우가 있음(관측).
-press() { osascript -e 'tell application "System Events" to tell process "PokeTokenBar Battle" to perform action "AXPress" of menu bar item 1 of menu bar 2' >/dev/null 2>&1; }
+press() { osascript -e 'tell application "System Events" to tell process "PokeTokenBattle" to perform action "AXPress" of menu bar item 1 of menu bar 2' >/dev/null 2>&1; }
 polltall() { # $1=횟수(0.5s 간격)
   TALL=0
   for _ in $(seq 1 "$1"); do

@@ -28,9 +28,9 @@ Thank you all.
 
 ---
 
-**Install:** Download `PokeTokenBarBattle.zip` and move `PokeTokenBar Battle.app` into `/Applications`.
+**Install:** Download `PokeTokenBarBattle.zip` and move `PokeTokenBattle.app` into `/Applications`.
 
-**Upgrade:** Back up state and replace only `/Applications/PokeTokenBar Battle.app`. Homebrew availability must be confirmed before publication.
+**Upgrade:** Back up state and replace only `/Applications/PokeTokenBattle.app`. Homebrew availability must be confirmed before publication.
 """
 
 

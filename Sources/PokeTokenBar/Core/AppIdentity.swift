@@ -5,7 +5,8 @@ import Foundation
 /// `AppIdentityTests` 가 두 쪽이 어긋나거나 원본 값으로 되돌아가면 실패한다.
 enum AppIdentity {
     static let bundleID = "io.github.dding94.poketokenbar-battle"
-    static let appName = "PokeTokenBar Battle"
+    /// The only user-visible name. `scripts/build-app.sh` APP_NAME, `release.sh` and `release-validate.py` must match.
+    static let appName = "PokeTokenBattle"
     /// 번들 안 실행 파일 이름. 원본(`PokeTokenBar`)과 달라야 `pkill -x` 가 원본 프로세스를 건드리지 않는다.
     static let executableName = "PokeTokenBarBattle"
     /// Application Support 아래 상태 폴더 이름. 원본 `PokeTokenBar` 폴더와 분리한다.

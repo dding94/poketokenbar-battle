@@ -21,7 +21,7 @@ def check_notes(notes_path, contributors_path):
     for name in ("New", "Fixed", "Other", "Contributors"):
         if not sections.get(name):
             raise ValueError(f"Release notes need a nonempty '## {name}' section")
-    for command in ("**Install:**", "PokeTokenBarBattle.zip", "PokeTokenBar Battle.app", "**Upgrade:**", "/Applications/PokeTokenBar Battle.app"):
+    for command in ("**Install:**", "PokeTokenBarBattle.zip", "PokeTokenBattle.app", "**Upgrade:**", "/Applications/PokeTokenBattle.app"):
         if command not in visible:
             raise ValueError(f"Release notes are missing: {command}")
 

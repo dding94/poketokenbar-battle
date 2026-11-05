@@ -253,4 +253,14 @@ final class UpdateCheckerTests: XCTestCase {
         XCTAssertTrue(script.contains("\"$1\" upgrade"), "must execute brew upgrade via $1 positional arg")
         XCTAssertTrue(script.contains("open \"$2\""), "must open bundlePath via $2 positional arg")
     }
+
+    /// T22: after the first brew upgrade across the folder rename the old bundle path no longer exists.
+    /// The script must not kickstart a login agent that still points at it, and must fall back to
+    /// opening the app by bundle identifier.
+    func testDetachedUpgradeScriptSurvivesBundleFolderRename() {
+        let script = UpdateChecker.detachedUpgradeScript
+        XCTAssertTrue(script.contains("[ -d \"$2\" ] && launchctl kickstart"),
+                      "kickstart only while the old bundle path still exists")
+        XCTAssertTrue(script.contains("open -b \(AppIdentity.bundleID)"), "fallback by bundle id")
+    }
 }
