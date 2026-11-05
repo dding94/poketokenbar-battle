@@ -92,6 +92,17 @@ final class OnlineBattleOnboardingRenderingTests: XCTestCase {
         return (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }.joined(separator: " ")
     }
     private func compact(_ text: String) -> String { text.filter { !$0.isWhitespace }.uppercased() }
+    /// Pixels close to one solid colour: the fill of a badge capsule, which the pale row tint never reaches.
+    private func solid(_ bitmap: NSBitmapImageRep, red: ClosedRange<CGFloat>, green: ClosedRange<CGFloat>, blue: ClosedRange<CGFloat>) -> Int {
+        var count = 0
+        for y in 0..<bitmap.pixelsHigh {
+            for x in 0..<bitmap.pixelsWide {
+                guard let c = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB) else { continue }
+                if red.contains(c.redComponent), green.contains(c.greenComponent), blue.contains(c.blueComponent) { count += 1 }
+            }
+        }
+        return count
+    }
     /// Dark pixels (near-black text) in the rows from `top` down, in 2x pixels. A disabled control draws its words grey.
     private func darkPixels(_ bitmap: NSBitmapImageRep, fromRow top: Int) -> Int {
         var count = 0
@@ -194,6 +205,11 @@ final class OnlineBattleOnboardingRenderingTests: XCTestCase {
         let withBadges = try await capture(await lobby(model), named: "t11-09-lobby-row-badges.png")
         let without = try await capture(await lobby(model, badges: [:]), named: "t11-10-lobby-rows-no-badges.png")
         XCTAssertNotEqual(try pixels(withBadges), try pixels(without), "the badges and the row tint are drawn")
+        let blue = (0...0.15, 0.4...0.6, 0.9...1.0) as (ClosedRange<CGFloat>, ClosedRange<CGFloat>, ClosedRange<CGFloat>)
+        let orange = (0.85...1.0, 0.35...0.8, 0...0.25) as (ClosedRange<CGFloat>, ClosedRange<CGFloat>, ClosedRange<CGFloat>)
+        XCTAssertGreaterThan(solid(withBadges, red: blue.0, green: blue.1, blue: blue.2), 800, "the received capsule is drawn in its blue")
+        XCTAssertGreaterThan(solid(withBadges, red: orange.0, green: orange.1, blue: orange.2), 800, "the my-turn capsule is drawn in its orange")
+        XCTAssertEqual(solid(without, red: blue.0, green: blue.1, blue: blue.2), 0, "no capsule without a badge")
         XCTAssertEqual(withBadges.pixelsHigh, without.pixelsHigh, "a badge sits inside the row and never makes it taller")
         let calm = try await capture(await lobby(model, badges: [:]), named: "t11-11-lobby-rows-calm.png")
         XCTAssertEqual(try pixels(calm), try pixels(without))

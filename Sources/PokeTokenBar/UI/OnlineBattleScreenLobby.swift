@@ -48,7 +48,7 @@ struct OnlineBattleLobby: View {
                     }.buttonStyle(.plain)
                     .accessibilityIdentifier("online.member.\(member.trainerId)")
                 }
-            }.practiceCard()
+            }.frame(maxWidth: .infinity, alignment: .leading).practiceCard()
             OnlineBattleRoster(model: model, l: l, artwork: artwork)
             VStack(alignment: .leading, spacing: 7) {
                 Picker(l.onlineMode, selection: Binding(get: { model.mode }, set: { model.send(.setMode($0)) })) {
