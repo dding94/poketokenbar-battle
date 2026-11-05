@@ -2311,4 +2311,126 @@ final class OnlineBattleSessionTests: XCTestCase {
         let posts = await http.requests.filter { $0.httpMethod == "POST" }.count
         XCTAssertEqual(posts, 0)
     }
+    // MARK: Review A F1.5: crossed responses
+    func testCancelThatCrossedTheOpponentsAcceptSaysSoAndLaterEndingsStillAnnounce() async throws {
+        let pending = try pendingRoom()
+        let accepted = try changed(pending, ["state": "ACCEPTED", "revision": pending.revision + 1])
+        let (session, http, _, _) = try await setup([pending]); try await namedOpponent(http, trainer: "trainer-one")
+        await session.bootstrap()
+        await http.queue("POST /v1/battles/\(pending.battleId)/cancel", [.init(status: 409, body: errorBody("stale_revision"))])
+        try await list(http, [accepted])
+        await session.perform(.cancel(pending.battleId))
+        XCTAssertEqual(session.presentation.notice, copy.onlineErrorRoomChanged, "It was not a connection problem")
+        XCTAssertEqual(session.presentation.room?.state, .accepted, "The screen shows what actually happened")
+        XCTAssertEqual(session.presentation.phase, .room)
+        // The refused cancel must not silence the opponent's own ending later on.
+        try await list(http, [try changed(accepted, ["state": "CANCELLED"])])
+        await session.refresh()
+        XCTAssertTrue(session.presentation.notice?.contains("하늘") == true && session.presentation.notice?.contains("취소") == true, session.presentation.notice ?? "<nil>")
+    }
+    func testDeclineThatCrossedTheOpponentsCancelAnnouncesTheirEnding() async throws {
+        let pending = try pendingRoom()
+        let (session, http, _, _) = try await setup([pending], trainer: "trainer-two"); try await namedOpponent(http, trainer: "trainer-two")
+        await session.bootstrap()
+        await http.queue("POST /v1/battles/\(pending.battleId)/decline", [.init(status: 409, body: errorBody("invalid_state"))])
+        try await list(http, [try changed(pending, ["state": "CANCELLED"])])
+        await session.perform(.decline(pending.battleId))
+        XCTAssertTrue(session.presentation.notice?.contains("하늘") == true && session.presentation.notice?.contains("취소") == true, session.presentation.notice ?? "<nil>")
+        XCTAssertEqual(session.presentation.phase, .lobby)
+    }
+    func testCancelLostToAFailureKeepsLaterEndingsAnnounced() async throws {
+        let pending = try pendingRoom()
+        let (session, http, _, _) = try await setup([pending]); try await namedOpponent(http, trainer: "trainer-one")
+        await session.bootstrap()
+        await http.queue("POST /v1/battles/\(pending.battleId)/cancel", [.init(status: 503, body: Data())])
+        await session.perform(.cancel(pending.battleId))
+        XCTAssertEqual(session.presentation.notice, copy.onlineErrorGeneric)
+        try await list(http, [try changed(pending, ["state": "DECLINED"])])
+        await session.refresh()
+        XCTAssertTrue(session.presentation.notice?.contains("거절") == true, session.presentation.notice ?? "<nil>")
+    }
+    func testMyAcceptedCancelSeenFirstOnAReadIsNotAnnouncedBack() async throws {
+        let pending = try pendingRoom(), cancelled = try changed(pending, ["state": "CANCELLED"])
+        let (session, http, _, _) = try await setup([pending]); try await namedOpponent(http, trainer: "trainer-one")
+        await session.bootstrap()
+        await http.suspendNext("POST /v1/battles/\(pending.battleId)/cancel")
+        let cancelling = Task { await session.perform(.cancel(pending.battleId)) }
+        await http.waitUntilBlocked()
+        try await list(http, [cancelled])
+        await session.refresh()
+        XCTAssertNil(session.presentation.notice, "The press is on its way; its own ending is not news")
+        await http.resume(try response(cancelled)); await cancelling.value
+        XCTAssertNil(session.presentation.notice)
+    }
+    func testRefusedCancelAfterTheEndingArrivedOnAReadStillNamesIt() async throws {
+        let pending = try pendingRoom()
+        let (session, http, _, _) = try await setup([pending]); try await namedOpponent(http, trainer: "trainer-one")
+        await session.bootstrap()
+        await http.suspendNext("POST /v1/battles/\(pending.battleId)/cancel")
+        let cancelling = Task { await session.perform(.cancel(pending.battleId)) }
+        await http.waitUntilBlocked()
+        try await list(http, [try changed(pending, ["state": "DECLINED"])])
+        await session.refresh()
+        await http.resume(.init(status: 409, body: errorBody("invalid_state"))); await cancelling.value
+        XCTAssertTrue(session.presentation.notice?.contains("거절") == true, session.presentation.notice ?? "<nil>")
+    }
+    func testConfirmAndReadyThatCrossedAnEndingAreExplainedNotBlamedOnTheConnection() async throws {
+        let confirmed = try confirmedRoom(), unconfirmed = try changed(confirmed, ["confirmed": false])
+        for (action, path, room) in [(OnlineBattleUIAction.confirm(unconfirmed.battleId), "confirm", unconfirmed), (.prepareBattle(confirmed.battleId), "ready", confirmed)] {
+            let (session, http, _, _) = try await setup([room]); try await namedOpponent(http, trainer: "trainer-one")
+            await session.bootstrap()
+            await http.queue("POST /v1/battles/\(room.battleId)/\(path)", [.init(status: 409, body: errorBody("invalid_state"))])
+            try await list(http, [try changed(room, ["state": "CANCELLED"])])
+            await session.perform(action)
+            XCTAssertTrue(session.presentation.notice?.contains("하늘") == true && session.presentation.notice?.contains("취소") == true, "\(path): \(session.presentation.notice ?? "<nil>")")
+        }
+    }
+    func testRefusedActionWhoseRereadFailsSaysConnection() async throws {
+        let pending = try pendingRoom()
+        let (session, http, _, _) = try await setup([pending])
+        await session.bootstrap()
+        await http.queue("POST /v1/battles/\(pending.battleId)/cancel", [.init(status: 409, body: errorBody("stale_revision"))])
+        await http.route("/v1/battles", Data(), status: 503)
+        await session.perform(.cancel(pending.battleId))
+        XCTAssertEqual(session.presentation.notice, copy.onlineErrorGeneric)
+    }
+    func testWithdrawingChangedConsentThatFailsKeepsLaterEndingsAnnounced() async throws {
+        let pending = try pendingRoom()
+        let (session, http, _, effects) = try await setup(); try await namedOpponent(http, trainer: "trainer-one")
+        await session.bootstrap()
+        session.presentation.selectedEntryID = "instance-one"; session.presentation.selectedOpponentID = "trainer-two"
+        await http.queue("POST /v1/battles/\(pending.battleId)/cancel", [.init(status: 503, body: Data())])
+        await http.suspendNext("POST /v1/battles")
+        let challenge = Task { await session.perform(.challenge) }; await http.waitUntilBlocked()
+        effects.setHealthShare(0.5, of: "instance-one")
+        await http.resume(try response(pending)); await challenge.value
+        try await list(http, [pending]); await session.refresh()
+        try await list(http, [try changed(pending, ["state": "DECLINED"])])
+        await session.refresh()
+        XCTAssertTrue(session.presentation.notice?.contains("거절") == true, session.presentation.notice ?? "<nil>")
+    }
+    func testOlderListRowCannotUndoConfirmAtTheSameRevision() async throws {
+        let confirmed = try confirmedRoom(), unconfirmed = try changed(confirmed, ["confirmed": false])
+        let (session, http, _, _) = try await setup([unconfirmed])
+        await http.route("/v1/battles/\(confirmed.battleId)/confirm", try JSONEncoder().encode(confirmed))
+        await session.bootstrap()
+        await http.suspendNext("/v1/battles")
+        let refresh = Task { await session.refresh() }
+        await http.waitUntilBlocked()
+        await session.perform(.confirm(confirmed.battleId))
+        XCTAssertEqual(session.presentation.room?.confirmed, true)
+        await http.resume(.init(status: 200, body: try JSONEncoder().encode(OnlineBattlePage(battles: [unconfirmed], before: nil))))
+        await refresh.value
+        XCTAssertEqual(session.presentation.room?.confirmed, true, "confirm does not bump the revision, so only the flag can order these")
+        XCTAssertEqual(session.presentation.roomProgress?.step, .ready)
+    }
+    func testChangedEntryAfterANewerRevisionMayStillClearConfirm() async throws {
+        let confirmed = try confirmedRoom()
+        let (session, http, _, _) = try await setup([confirmed])
+        await session.bootstrap()
+        XCTAssertEqual(session.presentation.room?.confirmed, true)
+        try await list(http, [try changed(confirmed, ["confirmed": false, "revision": confirmed.revision + 1])])
+        await session.refresh()
+        XCTAssertEqual(session.presentation.room?.confirmed, false)
+    }
 }
