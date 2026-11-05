@@ -187,7 +187,9 @@ final class OnlineBattleResolver {
         for move in request.moves {
             guard let info = data.moves[move.id] else { continue }
             let chart = Self.chartBreakingMoves.contains(info.id) ? nil : data.chart
-            hints[move.slot] = PracticeMoveHint(info: info, chart: chart, attackerTypes: own.types, defenderTypes: foe.types)
+            // STAB is a damage bonus, so a status move never shows it (the practice board still does, unchanged).
+            hints[move.slot] = PracticeMoveHint(info: info, chart: chart, attackerTypes: info.isStatus ? nil : own.types,
+                                                defenderTypes: foe.types)
         }
         return hints
     }
