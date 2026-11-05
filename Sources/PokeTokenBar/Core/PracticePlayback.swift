@@ -4,6 +4,24 @@ import Observation
 /// A side of a practice battle from the player's (p1) viewpoint.
 enum PracticeSide: String, Hashable, Sendable { case player = "p1", opponent = "p2" }
 
+struct BattleSeatFrame: Equatable, Sendable {
+    let local: OnlineBattleSide
+    static let practice = BattleSeatFrame(local: .p1)
+    func side(ident: String) -> PracticeSide? {
+        if ident.hasPrefix("p1") { return .player }
+        if ident.hasPrefix("p2") { return .opponent }
+        return nil
+    }
+    func seat(_ side: PracticeSide) -> OnlineBattleSide { side == .player ? .p1 : .p2 }
+    func pokemon(_ side: PracticeSide, in view: BattleView) -> BattleView.Pokemon { side == .player ? view.p1 : view.p2 }
+}
+struct BattleLogReveal: Decodable, Equatable, Sendable {
+    let kind: String
+    let side: String
+    let id: String
+    let turn: Int
+}
+
 /// One fact from the engine's p1-viewer protocol log, typed so the screen can stage it.
 /// HP is what p1 sees: exact for the player, percent (max 100) for the opponent.
 enum PracticeEvent: Equatable, Sendable {
@@ -46,6 +64,9 @@ enum PracticeEvent: Equatable, Sendable {
 struct PracticeEventParser {
     private var maxHP: [PracticeSide: Int] = [:]
     private var lastHP: [PracticeSide: Int] = [:]
+    init(frame: BattleSeatFrame = .practice) {}
+
+    func merging(_ reveals: [BattleLogReveal], into parsed: [PracticeEvent]) -> [PracticeEvent] { parsed }
 
     mutating func parse(_ lines: [String]) -> [PracticeEvent] {
         var events: [PracticeEvent] = []
