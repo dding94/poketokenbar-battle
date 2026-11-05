@@ -214,6 +214,19 @@ extension OnlineBattlePresentationTests {
         model.room = OnlineBattleScreenRenderingTests.room(state: .running); model.send(.cancel(model.room?.battleId ?? ""))
         XCTAssertEqual(events, ["accept", "decline", "confirm", "prepare", "cancel"])
     }
+    func testRoomActionNamingARoomThatIsNotOnScreenIsDropped() {
+        let model = OnlineBattleScreenRenderingTests.model()
+        var sent = 0
+        model.onAction = { _ in sent += 1 }
+        model.canStart = true
+        model.room = OnlineBattleScreenRenderingTests.room(state: .pending, confirmed: false); model.localSide = .p2
+        model.send(.accept("another-battle")); model.send(.decline("another-battle")); model.send(.cancel("another-battle"))
+        model.room = OnlineBattleScreenRenderingTests.room(state: .accepted, confirmed: false); model.localSide = .p1
+        model.send(.confirm("another-battle"))
+        model.room = OnlineBattleScreenRenderingTests.room(state: .accepted, confirmed: true)
+        model.send(.prepareBattle("another-battle"))
+        XCTAssertEqual(sent, 0)
+    }
     func testSelectionsRejectUnknownAndReservedIDsAndVisibilityAlwaysReachesSession() {
         let model = OnlineBattleScreenRenderingTests.model()
         var visible = false

@@ -2041,6 +2041,18 @@ final class OnlineBattleSessionTests: XCTestCase {
         XCTAssertEqual(session.preparedBattleIDs(), [], "The mark asks for the press again")
         XCTAssertEqual(session.presentation.phase, .room)
     }
+    func testResendRefusedForARevokedKeyEndsTheAccount() async throws {
+        let accepted = try confirmedRoom()
+        let connection = SessionConnection(), observer = SessionObserver()
+        let (session, http, _, _) = try await setup([accepted], connection: connection, observer: observer)
+        await http.route("/v1/battles/\(accepted.battleId)/ready", try JSONEncoder().encode(accepted))
+        await session.bootstrap(); await session.perform(.prepareBattle(accepted.battleId))
+        await reconnect(connection, observer: observer, id: "connection-b")
+        await http.route("/v1/battles/\(accepted.battleId)/ready", Data(), status: 401)
+        await session.refresh()
+        XCTAssertNil(session.presentation.account, "A dead key is not something to hand back as a button")
+        XCTAssertEqual(session.presentation.phase, .setup)
+    }
     func testResendSkipsWhenTheEntryChangedAndLeavesTheChoiceToThePerson() async throws {
         let accepted = try confirmedRoom()
         let connection = SessionConnection(), observer = SessionObserver()
@@ -2309,13 +2321,27 @@ final class OnlineBattleSessionTests: XCTestCase {
         XCTAssertEqual(sent, 0)
     }
     func testActionTheRoomNoLongerAllowsSaysTheRoomMovedOnNotEntry() async throws {
-        let room = try confirmedRoom()
-        let (session, http, _, _) = try await setup([room])
-        await session.bootstrap()
-        await session.perform(.decline(room.battleId)) // Only the receiver of a pending room can decline.
-        XCTAssertEqual(session.presentation.notice, copy.onlineErrorRoomChanged)
-        let posts = await http.requests.filter { $0.httpMethod == "POST" }.count
-        XCTAssertEqual(posts, 0)
+        let confirmed = try confirmedRoom(), pending = try pendingRoom()
+        let running = try changed(battle(), ["state": "RUNNING", "result": NSNull(), "roundSeq": 1, "journal": [], "mode": "auto"])
+        let id = confirmed.battleId
+        let cases: [(OnlineBattleUIAction, OnlineBattleView, String)] = [
+            (.decline(id), confirmed, "trainer-one"), // Only the receiver of a pending room can decline.
+            (.accept(id), confirmed, "trainer-two"),
+            (.confirm(id), pending, "trainer-one"),
+            (.prepareBattle(id), pending, "trainer-one"),
+            (.cancel(id), running, "trainer-one"),
+            (.chooseMove(1), running, "trainer-one"),
+        ]
+        for (action, room, trainer) in cases {
+            let (session, http, _, _) = try await setup([room], trainer: trainer)
+            await http.route("/v1/battles/\(id)/advance", try JSONEncoder().encode(room))
+            await session.bootstrap()
+            let before = await http.requests.filter { $0.httpMethod == "POST" }.count
+            await session.perform(action)
+            XCTAssertEqual(session.presentation.notice, copy.onlineErrorRoomChanged, "\(action)")
+            let posts = await http.requests.filter { $0.httpMethod == "POST" }.count
+            XCTAssertEqual(posts, before, "\(action)")
+        }
     }
     // MARK: Review A F1.5: crossed responses
     func testCancelThatCrossedTheOpponentsAcceptSaysSoAndLaterEndingsStillAnnounce() async throws {
