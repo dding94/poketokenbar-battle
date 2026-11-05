@@ -78,6 +78,13 @@ struct PracticeMoveHint: Equatable, Sendable {
     let stab: Bool
 }
 
+extension PracticeMoveHint {
+    /// RED stub: filled in by the implementation commit.
+    init(info: PracticeMoveInfo, chart: PracticeTypeChart?, attackerTypes: [String]?, defenderTypes: [String]?) {
+        self.init(info: info, multiplier: nil, stab: false)
+    }
+}
+
 /// How fast turns are staged. `instant` skips the staging like a hidden screen does.
 enum PracticePlaybackSpeed: String, CaseIterable, Sendable {
     case normal, fast, instant

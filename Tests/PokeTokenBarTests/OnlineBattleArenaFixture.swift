@@ -28,6 +28,7 @@ enum OnlineBattleArenaFixture {
             model.stage = staging
             model.arena = resolver.view ?? staging.lastView
             model.request = resolver.request
+            model.moveHints = resolver.moveHints()
             model.liveLogs = OnlineBattleHistoryText.logs(resolver.logs, localSide: model.localSide)
         }
     }
@@ -44,7 +45,10 @@ enum OnlineBattleArenaFixture {
 
     /// The golden battle as a live room: running, no result, and the other seat's frozen set hidden as the server does.
     static func liveRoom(_ name: String, seat: OnlineBattleSide, deadline: Double?, ownChoice: Bool = false) throws -> OnlineBattleView {
-        let archived = try golden(name)
+        try liveRoom(of: golden(name), seat: seat, deadline: deadline, ownChoice: ownChoice)
+    }
+
+    static func liveRoom(of archived: OnlineBattleView, seat: OnlineBattleSide, deadline: Double?, ownChoice: Bool = false) throws -> OnlineBattleView {
         var json = try XCTUnwrap(JSONSerialization.jsonObject(with: BattleJSON.encoder().encode(archived)) as? [String: Any])
         json["state"] = "RUNNING"; json["result"] = NSNull(); json["reason"] = NSNull()
         json["createdAt"] = 1_793_683_500_000
@@ -57,16 +61,17 @@ enum OnlineBattleArenaFixture {
         return try JSONDecoder().decode(OnlineBattleView.self, from: JSONSerialization.data(withJSONObject: json))
     }
 
+    /// `custom` replaces the golden battle with one built for the test (`OnlineBattleHintFixture`).
     static func arena(seat: OnlineBattleSide = .p1, name: String = "manual", mode: OnlineBattleMode? = nil,
-                      ownChoice: Bool = false) throws -> Arena {
-        let battle = try golden(name)
+                      ownChoice: Bool = false, custom: OnlineBattleView? = nil) throws -> Arena {
+        let battle = try custom ?? golden(name)
         let trainer = seat == .p1 ? "trainer-one" : "trainer-two"
         let resolver = try OnlineBattleResolver(battle: battle, localTrainerID: trainer, engine: BattleEngine(url: engineURL))
         let clock = Clock()
         let staging = OnlineBattleStaging(resolver: resolver, clock: { clock.now })
         staging.ingest(resolver, mode: mode ?? battle.mode, visible: true, secondsLeft: 30)
         let model = OnlineBattleScreenRenderingTests.model()
-        let room = try liveRoom(name, seat: seat, deadline: (Date().timeIntervalSince1970 + 30) * 1000, ownChoice: ownChoice)
+        let room = try liveRoom(of: battle, seat: seat, deadline: (Date().timeIntervalSince1970 + 30) * 1000, ownChoice: ownChoice)
         model.phase = .arena; model.room = room; model.localSide = seat
         model.deadline = Date().addingTimeInterval(30)
         model.choiceSubmitted = ownChoice

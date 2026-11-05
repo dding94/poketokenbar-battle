@@ -145,6 +145,14 @@ final class OnlineBattleResolver {
                                   winner: report.winner, localSide: localSide)
     }
 
+    /// What a move card needs to hint at a choice. RED stub: filled in by the implementation commit.
+    struct HintData: Equatable {
+        var chart: PracticeTypeChart?
+        var moves: [String: PracticeMoveInfo] = [:]
+    }
+    static func loadHintData(engine: BattleEngine, ownMoves: [String]) -> HintData { HintData() }
+    func moveHints() -> [Int: PracticeMoveHint] { [:] }
+
     /// Explicitly release on navigation/session replacement. No further reports can be produced afterwards.
     func close() {
         if let engineID { _ = try? engine.call(.destroy, arguments: [BattleJSON.encode(engineID)]) }

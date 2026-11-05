@@ -715,6 +715,31 @@ final class OnlineBattleSessionTests: XCTestCase {
         XCTAssertEqual(after, requests)
     }
 
+    /// T17: the session publishes the hints of my own move request with it, and no hint outlives its request.
+    func testTheSessionPublishesMoveHintsWithTheMoveRequestOnly() async throws {
+        let open = try battle(0)
+        let choosing = try changed(open, ["state": "RUNNING", "result": NSNull(), "roundSeq": 1, "deadline": 60000, "journal": []])
+        let (session, _, _, _) = try await setup([choosing])
+        await session.bootstrap()
+        XCTAssertEqual(session.presentation.request?.kind, "move")
+        let slots = Set(session.presentation.request?.moves.map(\.slot) ?? [])
+        XCTAssertFalse(slots.isEmpty)
+        XCTAssertEqual(Set(session.presentation.moveHints.keys), slots, "one hint for each of my own moves")
+        // Pikachu's Thunderbolt against Blissey: neutral, with STAB. Quick Attack goes first and has no STAB.
+        XCTAssertEqual(session.presentation.moveHints[1]?.multiplier, 1)
+        XCTAssertEqual(session.presentation.moveHints[1]?.stab, true)
+        XCTAssertEqual(session.presentation.moveHints[2]?.info.priority, 1)
+        XCTAssertEqual(session.presentation.moveHints[2]?.stab, false)
+
+        let final = try battle(4)
+        let forced = try changed(final, ["state": "RUNNING", "result": NSNull(), "roundSeq": 9, "deadline": 60000,
+            "journal": JSONSerialization.jsonObject(with: JSONEncoder().encode(Array(final.journal.prefix(8))))])
+        let (other, _, _, _) = try await setup([forced], trainer: "trainer-two", rosterOverride: roster(final))
+        await other.bootstrap()
+        XCTAssertEqual(other.presentation.request?.kind, "forced")
+        XCTAssertTrue(other.presentation.moveHints.isEmpty, "a forced action has nothing to hint at")
+    }
+
     func testOnlineBattleSetupDraftSeedsSavedServerOnceAndKeepsFailedGrantUntilSaveSucceeds() async throws {
         let credentials = SessionCredentials(); await credentials.setKey(nil)
         let (session, http, _, _) = try await setup(credential: credentials)

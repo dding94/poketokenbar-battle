@@ -87,6 +87,8 @@ final class OnlineBattlePresentation {
     /// Only the resolver's view, whose opponent moves/ability are already revealed.
     var arena: BattleView?
     var request: BattleRequest?
+    /// Hints for my own request's moves by slot (type matchup, STAB, power). Public data only.
+    var moveHints: [Int: PracticeMoveHint] = [:]
     /// Exact original slugs for IDs already exposed by resolver.view (and my own request).
     /// These maps must never enumerate the opponent's undisclosed set.
     var moveSlugs: [OnlineBattleSide: [String: String]] = [:]
