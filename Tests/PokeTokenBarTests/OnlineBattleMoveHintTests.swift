@@ -153,16 +153,22 @@ final class OnlineBattleMoveHintTests: XCTestCase {
         }
     }
 
-    /// Freeze-Dry and Flying Press ignore the plain chart, so a multiplier from it would contradict the engine.
-    /// Their card shows power and accuracy but no matchup.
+    /// Freeze-Dry, Flying Press and Thousand Arrows ignore the plain chart, so a multiplier from it would contradict
+    /// the engine. The test plays each one and shows that the chart's word and the engine's differ; their card
+    /// shows power and accuracy but no matchup.
     func testMovesThatBreakTheTypeChartShowNoMatchup() throws {
-        let rows: [(Int, String, Int)] = [(144, "freeze-dry", 7), (214, "flying-press", 1), (644, "thousand-arrows", 6)]
+        let rows: [(Int, String, Int)] = [(144, "freeze-dry", 7), (214, "flying-press", 1), (25, "thousand-arrows", 6)]
         for (species, move, foeSpecies) in rows {
             let resolver = try resolver(Mon(species: species, moves: [move]), Mon(species: foeSpecies, moves: ["splash"]))
             defer { resolver.close() }
             let hint = try XCTUnwrap(resolver.moveHints()[1], move)
             XCTAssertNil(hint.multiplier, "\(move) has no chart-based matchup")
             XCTAssertGreaterThan(hint.info.basePower, 0)
+            let chart = try XCTUnwrap(OnlineBattleResolver.loadHintData(engine: BattleEngine(url: OnlineBattleArenaFixture.engineURL), ownMoves: [move]).chart)
+            let foeTypes = try XCTUnwrap(resolver.view?.p2.types)
+            let plain = chart.multiplier(attack: hint.info.type, defenders: foeTypes)
+            try playFirstRound(resolver)
+            XCTAssertNotEqual(verdict(plain), try engineVerdict(resolver.logs), "\(move): the chart would have contradicted the engine")
         }
     }
 
@@ -186,8 +192,10 @@ final class OnlineBattleMoveHintTests: XCTestCase {
     func testTheMatchupFollowsTheFoesPublicTypesAndStabMyOwn() throws {
         let water = try resolver(charmander, Mon(species: 7, moves: ["splash"])); defer { water.close() }
         XCTAssertEqual(water.moveHints()[1]?.multiplier, 0.5, "Fire against Water")
-        let flying = try resolver(charmander, Mon(species: 149, moves: ["splash"])); defer { flying.close() }
-        XCTAssertEqual(flying.moveHints()[1]?.multiplier, 1, "Fire against Dragon/Flying")
+        let flying = try resolver(charmander, Mon(species: 18, moves: ["splash"])); defer { flying.close() }
+        XCTAssertEqual(flying.moveHints()[1]?.multiplier, 1, "Fire against Normal/Flying")
+        let steel = try resolver(charmander, Mon(species: 598, moves: ["splash"])); defer { steel.close() }
+        XCTAssertEqual(steel.moveHints()[1]?.multiplier, 4, "Fire against Grass/Steel")
         let psychic = try resolver(Mon(species: 151, moves: ["ember", "psychic"]), bulbasaur); defer { psychic.close() }
         XCTAssertEqual(psychic.moveHints()[1]?.stab, false, "Mew is not a Fire type"); XCTAssertEqual(psychic.moveHints()[2]?.stab, true)
     }
@@ -231,7 +239,7 @@ final class OnlineBattleMoveHintTests: XCTestCase {
         let engine = try stubEngine("""
             globalThis.PTBEngine = {
               typeChart: () => JSON.stringify({ok: false, error: 'engine_failure'}),
-              describeMoves: (ids) => JSON.stringify({moves: ids.map(id => ({id: id, name: id, type: 'Fire', category: 'Special',
+              describeMoves: (ids) => JSON.stringify({moves: JSON.parse(ids).map(id => ({id: id, name: id, type: 'Fire', category: 'Special',
                 basePower: 40, accuracy: 100, priority: 0, pp: 25, fixedDamage: false, variableType: false}))}),
             };
             """)

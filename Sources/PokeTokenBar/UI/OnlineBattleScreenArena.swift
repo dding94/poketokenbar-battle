@@ -250,8 +250,8 @@ struct OnlineBattleArena: View {
 
     /// Internal and concrete so tests can check what each card is given.
     func moveCard(_ move: BattleMove) -> PracticeMoveCard {
-        PracticeMoveCard(move: namedMove(move), key: move.slot, snapshot: ownSnapshot, l: l, artwork: artwork,
-                         locked: movesLocked(move.slot), chosen: moveChosen(move.slot)) {
+        PracticeMoveCard(move: namedMove(move), key: move.slot, snapshot: ownSnapshot, hint: model.moveHints[move.slot],
+                         l: l, artwork: artwork, locked: movesLocked(move.slot), chosen: moveChosen(move.slot)) {
             model.send(.chooseMove(move.slot))
         }
     }

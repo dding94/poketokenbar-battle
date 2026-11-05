@@ -750,7 +750,7 @@ final class OnlineBattleSession {
         presentation.stage = staging
         presentation.room = room
         presentation.result = room.flatMap { resultByBattleID[$0.battleId] }
-        presentation.arena = nil; presentation.request = nil; presentation.deadline = nil
+        presentation.arena = nil; presentation.request = nil; presentation.moveHints = [:]; presentation.deadline = nil
         presentation.choiceSubmitted = false
         presentation.localReady = room.map { readyHeld($0) } ?? false
         presentation.moveSlugs = [:]; presentation.abilitySlugs = [:]
@@ -761,6 +761,8 @@ final class OnlineBattleSession {
         presentation.choiceSubmitted = room.ownChoice != nil
         presentation.arena = resolvers[room.battleId]?.view ?? staging?.lastView
         presentation.request = resolvers[room.battleId]?.request ?? staging?.lastRequest
+        // Hints belong to the resolver's live request; a staged request that outlived its resolver has none.
+        presentation.moveHints = resolvers[room.battleId]?.moveHints() ?? [:]
         presentation.liveLogs = OnlineBattleHistoryText.logs(resolvers[room.battleId]?.logs ?? [], localSide: presentation.localSide)
         publishDisclosedNames(room)
         switch room.state {
