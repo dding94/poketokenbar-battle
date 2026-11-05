@@ -11,6 +11,11 @@ final class OnlineBattlePresentation {
     var notice: String?
     /// macOS notification guidance owned by the online notifier; nil when nothing needs saying.
     var notificationHint: OnlineNotificationHint?
+    /// Set with an ended-challenge notice so a background refresh does not wipe it before it is read.
+    var stickyNotice: String?
+    /// Battles whose ending was already announced (or was caused by this app's own cancel/decline).
+    var endedNoticeIDs: Set<String> = []
+    var noticeSurvivesRefresh: Bool { stickyNotice != nil && notice == stickyNotice }
     var isBusy = false
     var serverAddress = ""
     /// True when the build fixed the server address (T08); T09 hides manual address entry.
@@ -117,6 +122,8 @@ final class OnlineBattlePresentation {
         case .cancelRematch: guard rematchSourceID != nil else { return }
         case .setPopoverVisible:
             break
+        case .dismissNotice:
+            return
         case .backToLobby:
             break
         case .showHistory:
@@ -186,5 +193,5 @@ enum OnlineBattleUIAction {
     case challenge, openBattle(String), accept, confirm, prepareBattle, decline, cancel
     case showStandings, refreshStandings, prepareRematch(String), submitRematch, cancelRematch
     case showHistory, openReplay(String), seekReplay(Int), closeReplay
-    case chooseMove(Int), dismissResult, backToLobby
+    case chooseMove(Int), dismissResult, backToLobby, dismissNotice
 }

@@ -1724,6 +1724,78 @@ final class OnlineBattleSessionTests: XCTestCase {
         XCTAssertEqual(accepts, 1)
         XCTAssertTrue(session.presentation.notice?.contains("취소") == true, session.presentation.notice ?? "<nil>")
     }
+    // MARK: T07 ended-challenge notices
+    private func namedOpponent(_ http: SessionHTTP, trainer: String) async throws {
+        let other = trainer == "trainer-one" ? "trainer-two" : "trainer-one"
+        let member = OnlineBattleMember(trainerId: other, displayEmail: "하늘", role: .member, status: .active, joinedAt: 0, online: true)
+        await http.route("/v1/group", try JSONEncoder().encode(OnlineBattleGroupMembers(group: account.group, members: [member])))
+    }
+    private func pendingRoom() throws -> OnlineBattleView {
+        try changed(battle(), ["state": "PENDING", "config": NSNull(), "result": NSNull(), "confirmed": false, "roundSeq": 0, "journal": []])
+    }
+    func testPeerDeclineCancelAndExpiryEachShowADistinctNamedNoticeAndReturnToTheLobby() async throws {
+        var notices: [String: String] = [:]
+        for (state, trainer, part) in [("DECLINED", "trainer-one", "거절"), ("CANCELLED", "trainer-one", "취소"), ("CANCELLED", "trainer-two", "취소"), ("EXPIRED", "trainer-one", "시간이 지났"), ("EXPIRED", "trainer-two", "시간이 지났")] {
+            let pending = try pendingRoom()
+            let (session, http, _, _) = try await setup([pending], trainer: trainer)
+            try await namedOpponent(http, trainer: trainer)
+            await session.bootstrap()
+            XCTAssertEqual(session.presentation.phase, .room, state)
+            XCTAssertNil(session.presentation.notice)
+            await http.route("/v1/battles", try JSONEncoder().encode(OnlineBattlePage(battles: [try changed(pending, ["state": state, "revision": pending.revision + 1])], before: nil)))
+            await session.refresh()
+            XCTAssertEqual(session.presentation.phase, .lobby, "\(state) \(trainer)")
+            let notice = try XCTUnwrap(session.presentation.notice, "\(state) \(trainer)")
+            XCTAssertTrue(notice.contains("하늘") && notice.contains(part), notice)
+            notices[state + trainer] = notice
+        }
+        XCTAssertEqual(Set(notices.values).count, 3, "\(notices)")
+    }
+    func testLeavingTheGroupCancelsWithAReasonThatIsNotThePeerCancelling() async throws {
+        let pending = try pendingRoom()
+        let (session, http, _, _) = try await setup([pending]); try await namedOpponent(http, trainer: "trainer-one")
+        await session.bootstrap()
+        await http.route("/v1/battles", try JSONEncoder().encode(OnlineBattlePage(battles: [try changed(pending, ["state": "CANCELLED", "revision": pending.revision + 1, "reason": "participant_left"])], before: nil)))
+        await session.refresh()
+        let notice = try XCTUnwrap(session.presentation.notice)
+        XCTAssertTrue(notice.contains("하늘") && notice.contains("떠나"), notice)
+    }
+    func testMyOwnCancelAndDeclineDoNotAnnounceThemselvesBack() async throws {
+        for (action, name, trainer, state) in [(OnlineBattleUIAction.cancel, "cancel", "trainer-one", "CANCELLED"), (.decline, "decline", "trainer-two", "DECLINED")] {
+            let pending = try pendingRoom()
+            let (session, http, _, _) = try await setup([pending], trainer: trainer); try await namedOpponent(http, trainer: trainer)
+            await http.route("/v1/battles/\(pending.battleId)/\(name)", try JSONEncoder().encode(try changed(pending, ["state": state, "revision": pending.revision + 1])))
+            await session.bootstrap(); await session.perform(.openBattle(pending.battleId)); await session.perform(action)
+            XCTAssertEqual(session.presentation.phase, .lobby, name)
+            XCTAssertNil(session.presentation.notice, name)
+            // The same ending arriving again through a refresh is still not news.
+            await http.route("/v1/battles", try JSONEncoder().encode(OnlineBattlePage(battles: [try changed(pending, ["state": state, "revision": pending.revision + 1])], before: nil)))
+            await session.refresh()
+            XCTAssertNil(session.presentation.notice, name)
+        }
+    }
+    func testEndedNoticeSurvivesRefreshesUntilClosedAndIsNotRepeated() async throws {
+        let pending = try pendingRoom()
+        let (session, http, _, _) = try await setup([pending]); try await namedOpponent(http, trainer: "trainer-one")
+        await session.bootstrap()
+        await http.route("/v1/battles", try JSONEncoder().encode(OnlineBattlePage(battles: [try changed(pending, ["state": "DECLINED", "revision": pending.revision + 1])], before: nil)))
+        await session.refresh()
+        let first = try XCTUnwrap(session.presentation.notice)
+        await session.refresh(); await session.refresh()
+        XCTAssertEqual(session.presentation.notice, first, "A background refresh must not wipe an unread notice")
+        await session.perform(.dismissNotice)
+        XCTAssertNil(session.presentation.notice)
+        await session.refresh()
+        XCTAssertNil(session.presentation.notice, "Announced once")
+    }
+    func testEndingsAlreadyInHistoryAtLaunchDoNotRaiseNotices() async throws {
+        let rooms = try ["DECLINED", "CANCELLED", "EXPIRED"].enumerated().map { index, state in
+            try changed(battle(), ["state": state, "config": NSNull(), "result": NSNull(), "journal": [], "roundSeq": 0, "battleId": "bt_old\(index)"])
+        }
+        let (session, http, _, _) = try await setup(rooms); try await namedOpponent(http, trainer: "trainer-one")
+        await session.bootstrap()
+        XCTAssertNil(session.presentation.notice)
+    }
     func testErrorNoticesFollowTheAppLanguage() async throws {
         let credentials = SessionCredentials(); await credentials.setKey(nil)
         let http = SessionHTTP(), room = try battle()
