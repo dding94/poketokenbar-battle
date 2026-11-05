@@ -114,9 +114,11 @@ struct OnlineAttentionInput: Sendable {
     var unreadEndedBattleIDs: Set<String>
     /// True only while the popover is open on the online screen.
     let onlineScreenShowing: Bool
-    /// History, standings or a rematch draft covers the room.
+    /// History, standings, a rematch draft or the host panel covers the room.
     let overlayShowing: Bool
     let recoveryCodeShowing: Bool
+    /// The host panel holds a code nobody has copied yet (an invite code or a member's reconnect code).
+    let hostCodeShowing: Bool
     let now: Date
 
     @MainActor
@@ -136,8 +138,9 @@ struct OnlineAttentionInput: Sendable {
         acknowledgedEndedBattleIDs = presentation.acknowledgedEndedBattleIDs
         unreadEndedBattleIDs = presentation.unreadEndedBattleIDs
         self.onlineScreenShowing = onlineScreenShowing
-        overlayShowing = presentation.showsHistory || presentation.showsStandings || presentation.rematchSourceID != nil
+        overlayShowing = presentation.showsHistory || presentation.showsStandings || presentation.rematchSourceID != nil || presentation.showsHostPanel
         recoveryCodeShowing = presentation.recoveryCode != nil
+        hostCodeShowing = presentation.hostSecretShowing
         self.now = now
     }
 }
@@ -350,10 +353,11 @@ private extension OnlineAttentionSeenRecord {
 enum OnlinePopoverPinning {
     /// Entry, waiting and battle steps pin. The lobby list, a result and the home screen stay transient.
     /// A recovery code pins on any phase: it is shown once, and copying it means clicking another app.
+    /// So does a code on the host panel (an invite code, a member's reconnect code) until it is copied or hidden.
     @MainActor
     static func isPinned(_ model: OnlineBattlePresentation, onlineScreenShowing: Bool) -> Bool {
         guard onlineScreenShowing else { return false }
-        if model.recoveryCode != nil { return true }
+        if model.recoveryCode != nil || model.hostSecretShowing { return true }
         switch model.phase {
         case .setup, .room, .arena, .verifying: return true
         case .lobby, .result: return false
@@ -372,7 +376,8 @@ enum OnlinePopoverPinning {
     /// brings the person back from there.
     static func openRoute(_ input: OnlineAttentionInput) -> OnlineOpenRoute? {
         // The code is on no other screen and is gone for good once the app quits. It keeps whichever room is selected.
-        if input.recoveryCodeShowing { return .init(battleId: nil) }
+        // A host code is the same: its screen is the only place that shows it.
+        if input.recoveryCodeShowing || input.hostCodeShowing { return .init(battleId: nil) }
         let current = OnlineAttentionCalculator.current(input)
         if current?.kind == .myTurn { return current.map { .init(battleId: $0.battleId) } }
         switch input.phase {

@@ -47,7 +47,10 @@ final class OnlineBattlePresentation {
     var showsHostPanel: Bool { host.visible && isHost }
     /// A copyable code is on screen: it is gone if the popover closes before it is copied, so the popover stays open.
     var hostSecretShowing: Bool { showsHostPanel && host.secret != nil }
-    var canOpenHostPanel: Bool { false }
+    /// A host in the lobby with nothing covering it. The panel is a lobby tool: a room or a match keeps the screen.
+    var canOpenHostPanel: Bool {
+        isHost && phase == .lobby && !isBusy && !showsHistory && !showsStandings && rematchSourceID == nil
+    }
     /// Who the host can act on: every active member but the host.
     var hostMembers: [OnlineBattleMember] {
         members.filter { $0.status == .active && $0.trainerId != account?.trainer.trainerId }
@@ -168,6 +171,32 @@ final class OnlineBattlePresentation {
         !showsHistory && !showsStandings && rematchSourceID == nil && phase == .arena && room?.state == .running && room?.mode == .manual && !isBusy && !choiceSubmitted &&
         request?.kind == "move" && request?.moves.contains { $0.slot == slot && !$0.disabled && $0.pp > 0 } == true
     }
+    /// Host actions that only change what is on screen are applied here and stop; the rest are checked and go on.
+    /// Removing a member is two steps, and the second must name the member the first asked about.
+    private func applyHost(_ action: OnlineBattleHostAction) -> Bool {
+        guard isHost else { return false }
+        func isMember(_ id: String) -> Bool { hostMembers.contains { $0.trainerId == id } }
+        switch action {
+        case .open: return canOpenHostPanel
+        case .close: host.close(); return false
+        case .chooseInvite(let choice):
+            if showsHostPanel { host.choice = choice }
+            return false
+        case .refreshInvites, .createInvite, .revokeInvite: return showsHostPanel && !host.busy
+        case .issueReconnect(let id): return showsHostPanel && !host.busy && isMember(id)
+        case .askRemove(let id):
+            if showsHostPanel, !host.busy, isMember(id) { host.pendingRemoval = id; host.notice = nil }
+            return false
+        case .cancelRemove: host.pendingRemoval = nil; return false
+        case .confirmRemove(let id): return showsHostPanel && !host.busy && host.pendingRemoval == id && isMember(id)
+        case .copied:
+            if let secret = host.secret { host.copied = secret.kind; host.secret = nil }
+            return false
+        case .dismissSecret: host.secret = nil; host.copied = nil; return false
+        case .dismissNotice: host.notice = nil; return false
+        }
+    }
+
     func send(_ action: OnlineBattleUIAction) {
         // These are presentation guards. The session independently validates server state and replay state.
         switch action {
@@ -249,7 +278,7 @@ final class OnlineBattlePresentation {
             recoveryCode = nil
         case .openBattle(let id): guard !showsHistory, !showsStandings, rematchSourceID == nil, !isBusy, battles.contains(where: { $0.battleId == id && $0.state.isActive }) else { return }
         case .refresh, .dismissResult: guard !isBusy else { return }
-        case .host: return
+        case .host(let hostAction): guard applyHost(hostAction) else { return }
         }
         onAction(action)
     }

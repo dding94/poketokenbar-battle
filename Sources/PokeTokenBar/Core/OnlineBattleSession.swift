@@ -889,7 +889,7 @@ final class OnlineBattleSession {
         case .acknowledgeRecoveryCode: presentation.recoveryCode = nil; return
         case .dismissResult, .backToLobby: resetExtras(); clearHistory(); prefersLobby = true; navigationRevision &+= 1; selectedBattleID = nil; pinnedBattleID = nil; publish(); return
         case .openBattle(let id): selectBattle(id); return
-        case .host: return
+        case .host(let hostAction): await performHost(hostAction); return
         // A lobby row cannot be pressed behind an overlay; an event can. The rematch draft's picks live outside its page.
         case .followAttention(let id): resetExtras(); clearHistory(); selectBattle(id); return
         case .configureServer(let value): await configureServer(value); return
@@ -961,6 +961,7 @@ final class OnlineBattleSession {
         invalidateStandingsRead()
         presentation.showsStandings = false; presentation.standings = nil; presentation.standingsError = nil
         presentation.rematchSourceID = nil; rematchFromHistory = false
+        presentation.host.close()
     }
     private func requestStandingsRefresh() {
         guard standingsVisible else { return }
@@ -1312,6 +1313,112 @@ final class OnlineBattleAccessObservation {
                 await self.changed(self.read())
             }
         }
+    }
+}
+
+// MARK: Host panel (T10)
+
+/// The host's calls: invite codes, members, reconnect codes. Each runs under its own busy flag, so a host call never
+/// blocks a battle action, and every result is dropped when the account changed or the panel is no longer on screen.
+/// Codes are held only in `presentation.host.secret`; nothing here logs, prints or stores one.
+extension OnlineBattleSession {
+    private func performHost(_ action: OnlineBattleHostAction) async {
+        guard onlineAllowed, authenticated, let api, presentation.isHost else { return }
+        let epoch = generation
+        switch action {
+        case .open:
+            presentation.host.visible = true
+            guard beginHostCall() else { return }
+            defer { endHostCall(epoch) }
+            await readInvites(api: api, epoch: epoch)
+        case .refreshInvites:
+            guard beginHostCall() else { return }
+            defer { endHostCall(epoch) }
+            await readInvites(api: api, epoch: epoch)
+        case .createInvite(let choice):
+            guard beginHostCall() else { return }
+            defer { endHostCall(epoch) }
+            presentation.host.copied = nil
+            do {
+                let issued = try await api.createInvite(ttlSeconds: OnlineBattleHostInviteChoice.ttlSeconds, maxUses: choice.maxUses)
+                guard epoch == generation, presentation.showsHostPanel else { return }
+                presentation.host.secret = .init(kind: .invite(maxUses: issued.invite.maxUses), code: issued.inviteCode, expiresAt: issued.invite.expiresAt)
+                // A list that was never read stays unread: a one-row list would pass for the whole.
+                if let known = presentation.host.invites {
+                    presentation.host.invites = [issued.invite] + known.filter { $0.inviteId != issued.invite.inviteId }
+                }
+            } catch { await hostFailed(error, epoch: epoch) }
+        case .revokeInvite(let id):
+            guard beginHostCall() else { return }
+            defer { endHostCall(epoch) }
+            do {
+                let revoked = try await api.revokeInvite(inviteId: id)
+                guard epoch == generation, presentation.showsHostPanel else { return }
+                presentation.host.invites = presentation.host.invites?.map { $0.inviteId == revoked.inviteId ? revoked : $0 }
+                presentation.host.notice = localization().onlineHostRevoked
+            } catch { await hostFailed(error, epoch: epoch) }
+        case .issueReconnect(let id):
+            guard presentation.hostMembers.contains(where: { $0.trainerId == id }), beginHostCall() else { return }
+            defer { endHostCall(epoch) }
+            presentation.host.copied = nil
+            do {
+                let issued = try await api.issueReconnectCode(trainerId: id)
+                guard epoch == generation, presentation.showsHostPanel else { return }
+                presentation.host.secret = .init(kind: .reconnect(trainerId: issued.trainerId), code: issued.reconnectCode, expiresAt: issued.expiresAt)
+            } catch { await hostFailed(error, epoch: epoch) }
+        case .confirmRemove(let id):
+            guard presentation.host.pendingRemoval == id, let member = presentation.hostMembers.first(where: { $0.trainerId == id }),
+                  beginHostCall() else { return }
+            defer { endHostCall(epoch) }
+            let name = member.displayEmail ?? localization().onlineAnonymous
+            presentation.host.pendingRemoval = nil
+            do {
+                let revokedInvites = try await api.removeMember(trainerId: id)
+                try current(epoch)
+                // The server revoked every open invite with the removal, so both lists change.
+                await refresh()
+                guard epoch == generation, presentation.showsHostPanel else { return }
+                await readInvites(api: api, epoch: epoch)
+                presentation.host.notice = localization().onlineHostRemoved(name: name, revokedInvites: revokedInvites)
+            } catch { await hostFailed(error, epoch: epoch) }
+        // Pure presentation: applied by the presentation and never sent here.
+        case .close, .chooseInvite, .askRemove, .cancelRemove, .copied, .dismissSecret, .dismissNotice: return
+        }
+    }
+
+    /// False while another host call runs or the panel is not on screen. Taking the flag clears the last notice.
+    private func beginHostCall() -> Bool {
+        guard presentation.showsHostPanel, !presentation.host.busy else { return false }
+        presentation.host.busy = true; presentation.host.notice = nil
+        return true
+    }
+    private func endHostCall(_ epoch: UInt64) {
+        if epoch == generation { presentation.host.busy = false }
+    }
+    private func readInvites(api: OnlineBattleAPI, epoch: UInt64) async {
+        do {
+            let list = try await api.invites()
+            guard epoch == generation, presentation.showsHostPanel else { return }
+            presentation.host.invites = list.invites; presentation.host.invitesFailed = false
+        } catch {
+            guard epoch == generation, presentation.showsHostPanel else { return }
+            if error as? OnlineBattleFailure == .unauthorized || (error as? OnlineBattleServerError)?.code == .forbidden {
+                await hostFailed(error, epoch: epoch)
+            } else if !(error is CancellationError), error as? OnlineBattleFailure != .staleGeneration {
+                presentation.host.invitesFailed = true
+            }
+        }
+    }
+    /// A refusal the panel can word stays in the panel; anything else takes the general path (revocation included).
+    private func hostFailed(_ error: Error, epoch: UInt64) async {
+        guard epoch == generation, presentation.showsHostPanel else { return }
+        if let server = error as? OnlineBattleServerError, let text = localization().onlineHostServerError(server) {
+            presentation.host.notice = text
+            // A refusal usually means the group changed under the host: read it again.
+            if server.code == .forbidden || server.code == .notFound { requestRefresh() }
+            return
+        }
+        await handle(error, epoch: epoch)
     }
 }
 

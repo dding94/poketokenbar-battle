@@ -26,6 +26,7 @@ final class OnlineBattleHostPanelRenderingTests: XCTestCase {
                               group: .init(groupId: "synthetic-group", name: "동료들의 배틀", hostTrainerId: "synthetic-me"))
         model.members = members ?? [peer("synthetic-foe", "연습친구"), peer("synthetic-two", "다온", online: false)]
         model.roster = []; model.entryHP = [:]; model.selectedEntryID = nil; model.battles = []; model.phase = .lobby
+        model.serverIsEmbedded = true   // the usual build: a copied invite is the code alone
         model.host.visible = open
         model.host.invites = invites ?? [invite("inv_1", uses: 3), invite("inv_2", uses: 0, maxUses: 1, createdHoursAgo: 1, expiresInDays: 6)]
         return model

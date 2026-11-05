@@ -157,6 +157,7 @@ extension L {
             return online("동료와 겨루기 · 아직 가입 안 함", "Battle your group · Not joined yet")
         }
         if input.recoveryCodeShowing { return online("복구코드를 저장해 주세요", "Save your recovery code") }
+        if input.hostCodeShowing { return online("복사하지 않은 코드가 있어요", "A code is waiting to be copied") }
         if Self.onlineReconnectingStatuses.contains(connectionStatus) { return online("다시 연결하는 중", "Reconnecting") }
         let active = OnlineAttentionCalculator.active(input)
         if let current = active.first {

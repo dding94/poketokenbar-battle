@@ -18,10 +18,12 @@ struct OnlineBattleScreen: View {
     var onClosePopover: () -> Void = {}
     let onClose: () -> Void
 
-    var showsGroupBack: Bool { !model.showsHistory && !model.showsStandings && model.rematchSourceID == nil && [.room, .arena, .verifying].contains(model.phase) }
+    var showsGroupBack: Bool {
+        !model.showsHistory && !model.showsStandings && model.rematchSourceID == nil && !model.showsHostPanel && [.room, .arena, .verifying].contains(model.phase)
+    }
     func returnToGroup() { model.send(.backToLobby) }
-    /// The header entry to the host panel: a host in the lobby only.
-    var showsHostEntry: Bool { false }
+    /// The header entry to the host panel: a host in the lobby, while the panel is not already open.
+    var showsHostEntry: Bool { model.isHost && model.phase == .lobby && !model.showsHostPanel }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -78,10 +80,17 @@ struct OnlineBattleScreen: View {
         .padding(PopoverMetrics.padding)
     }
 
-    /// A fixed-width slot, so pinning never moves the title or changes the 360pt layout.
+    /// A fixed-width slot, so pinning never moves the title or changes the 360pt layout. A host's slot is wider by
+    /// the member-management button, whether or not it shows right now, so the title stays put for a host as well.
     private var pinnedHeaderTrailing: some View {
         HStack(spacing: 6) {
             if model.isBusy { ProgressView().controlSize(.small) }
+            if showsHostEntry {
+                Button { model.send(.host(.open)) } label: { Image(systemName: "person.2.badge.gearshape") }
+                    .buttonStyle(.borderless).disabled(!model.canOpenHostPanel)
+                    .help(l.onlineHostOpen).accessibilityLabel(l.onlineHostOpen)
+                    .accessibilityIdentifier("online.host.open")
+            }
             if model.popoverPinned {
                 Label(l.onlinePinned, systemImage: "pin.fill")
                     .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
@@ -93,11 +102,13 @@ struct OnlineBattleScreen: View {
                     .accessibilityIdentifier("online.closePopover")
             }
         }
-        .frame(width: 104, alignment: .trailing)
+        .frame(width: model.isHost ? 132 : 104, alignment: .trailing)
     }
 
     @ViewBuilder private var stage: some View {
-        if model.rematchSourceID != nil {
+        if model.showsHostPanel {
+            OnlineBattleHostPanel(model: model, l: l, writeClipboard: writeClipboard)
+        } else if model.rematchSourceID != nil {
             OnlineBattleRematchPreparation(model: model, l: l, artwork: artwork)
         } else if model.showsStandings {
             OnlineBattleStandingsScreen(model: model, l: l)
