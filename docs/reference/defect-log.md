@@ -1614,3 +1614,15 @@ read_when:
   통과시키지만 CI의 Swift 6.1은 거절한다. UI 폴더의 한글 문자열은 `LocalizedUILiteralTests`가 잡는데, 작업자와 운영자 모두
   관련 묶음만 돌려 이 테스트를 실행하지 않았다. 캡처는 `[companion = companion!]`로 고치고, 파싱 라벨을 가진 입력 타입은 UI가
   아니므로 Core로 옮겼다. 작업 필터에 이 테스트를 항상 넣고(`pr14-online-ux-plan.md` §4), 통합할 때마다 푸시해 CI로 6.1을 확인한다.
+
+- **로컬에서 통과하는 합성 클릭이 CI의 옛 macOS에서 끝없이 멈출 수 있다.** PR 14에서 `build-test (rest)`가 13분 예산을 넘겨 취소됐다.
+  붙여넣기 렌더링 테스트가 `window.sendEvent`로 mouse-down을 보내는데, CI의 macOS 15에서는 이 기본 스타일 버튼이 NSButton으로
+  보이고 그 추적 루프가 mouse-up을 기다린다. 다음 줄의 mouse-up은 `sendEvent`가 돌아와야 보낼 수 있어 영원히 멈춘다. 이 맥은
+  macOS 27이라 재현되지 않았고, XCTest 출력 버퍼링 때문에 마지막 줄이 다른 테스트로 보여 범인을 가렸다. 그동안 Swift 6.1 컴파일
+  오류가 두 번 먼저 터져 이 지점까지 가지 못한 것도 시간이 걸린 이유다. `NSUnbufferedIO`로 멈춘 테스트 이름을 확인한 뒤, NSButton이면
+  `performClick`을 쓰도록 고쳐 CI 41955008997에서 통과했다. CI에 `NSUnbufferedIO`를 남겨 다음 멈춤의 이름이 바로 보이게 했다.
+  로컬 macOS 27에는 NSButton이 없어 이 수정의 NSButton 경로는 CI에서만 밟힌다.
+- **Swift 6.1 격리 오류를 완료 핸들러로 피하면 실행 중 멈출 위험을 대신 얻는다.** T04의 `UNUserNotificationCenter` async 호출이 6.1에서
+  `sending 'self.center'`로 거절돼 `@MainActor` 메서드 안의 완료 핸들러로 바꿨다. SDK 헤더에 `@Sendable` 표시가 없어 그 클로저는
+  main actor로 추론되고, 시스템이 다른 큐에서 부르면 격리 검사에 걸릴 수 있다. 테스트는 가짜 센터를 써서 이 경로를 못 밟는다. 메서드 전체를
+  `nonisolated`로 두고 async API를 그대로 쓰도록 고쳤다. 컴파일을 통과시키려고 형태를 바꿀 때는 실행 시 격리까지 함께 확인한다.

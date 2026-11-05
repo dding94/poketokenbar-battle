@@ -87,6 +87,7 @@ MIT가 주지 않는 것: 이름은 라이선스와 별개의 상표 문제입�
 - 기능 변경은 RED(단언 실패) → GREEN → REFACTOR로 커밋을 나눈다. 새 가드는 결함을 일부러 넣어 실패하는지 한 번 확인하고, 가드에 실제로 도달하는 전제 조건을 갖춘다.
 - 커밋은 영어 Conventional Commits이며 co-author trailer를 넣지 않는다.
 - 로컬 Swift 테스트: `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer PTB_STATE_DIR=<임시 폴더> swift test --filter …`. `xcode-select`는 바꾸지 않는다. 통과 기준은 CI(macOS 15, Swift 6.1)다. 로컬 Swift 6.4가 통과시켜도 CI의 6.1은 막을 수 있고, 관련 테스트만 고르면 소스 검사 테스트를 놓치므로 필터에 항상 `LocalizedUILiteralTests`를 넣는다(2026-11-05 CI 실패).
+- 합성 클릭: `window.sendEvent`로 기본 스타일 버튼을 누르면 CI의 macOS 15에서 테스트가 끝없이 멈출 수 있다. NSButton이면 `performClick`을 쓴다(defect-log). 필터에 `SwiftUIIsolationTests`도 항상 넣는다.
 - 서버 테스트: `npm ci --prefix server`, `npm run typecheck --prefix server`, `npm test --prefix server`.
 - 실제 세이브와 `/Applications/PokeTokenBar.app`을 건드리지 않는다. 설치, 배포, 릴리스, Homebrew tap 변경, 비밀값 입력은 사용자 승인 뒤에만 한다.
 - 화면은 메뉴바 팝오버 안에서만 진행한다. 공식 게임 화면을 닮게 만들지 않고 닌텐도 자산을 저장소에 넣지 않는다.
