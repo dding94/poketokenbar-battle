@@ -11,6 +11,8 @@ final class OnlineBattlePresentation {
     var notice: String?
     var isBusy = false
     var serverAddress = ""
+    /// True when the build fixed the server address (T08); T09 hides manual address entry.
+    var serverIsEmbedded = false
     /// Memory-only drafts survive popover disposal; never encode these in settings or saves.
     var setupInput = OnlineBattleSetupInput()
     var setupRecoveryExpanded = false

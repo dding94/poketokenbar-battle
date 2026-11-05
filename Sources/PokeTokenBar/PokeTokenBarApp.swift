@@ -254,7 +254,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private func prepareOnlineBattle() {
         do {
             let directory = AppStatePaths.directory()
-            let settings = try OnlineBattleSettings.load(from: directory)
+            let settings = try OnlineBattleSettings.load(from: directory, embeddedServerURL: OnlineBattleEmbeddedServer.configured)
             let engineURL = Bundle.main.url(forResource: "battle-engine", withExtension: "js")
             let session = OnlineBattleSession(settings: settings,
                 credentials: OnlineBattleCredentials(gate: .init(allowsAccess: { !KeychainAccessGate.isDisabled })),

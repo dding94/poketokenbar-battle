@@ -86,6 +86,7 @@ final class OnlineBattleSession {
         self.clock = clock; self.automaticTicks = automaticTicks
         self.enabled = enabled; self.accessAllowed = accessAllowed; self.localization = localization
         presentation.serverAddress = settings.serverURL ?? ""
+        presentation.serverIsEmbedded = settings.serverIsEmbedded
         presentation.setupInput.server = presentation.serverAddress
         presentation.onAction = { [weak self] action in Task { await self?.perform(action) } }
     }

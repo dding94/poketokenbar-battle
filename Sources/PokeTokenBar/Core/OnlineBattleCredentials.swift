@@ -4,17 +4,34 @@ import Security
 /// Not part of CompanionState or its exports. No credentials are ever written here.
 struct OnlineBattleSettings: Codable, Equatable, Sendable {
     let profileID: String
-    var serverURL: String?
-    /// Skeleton for T08: the embedded address is not honoured yet.
-    var serverIsEmbedded: Bool { false }
-    var storedServerURL: String? { serverURL }
-    static func load(from stateDirectory: URL, embeddedServerURL: String?) throws -> Self { try load(from: stateDirectory) }
-    static func load(from stateDirectory: URL) throws -> Self {
+    /// What the user typed and saved. The JSON key stays `serverURL`; an embedded address never overwrites it.
+    private(set) var storedServerURL: String?
+    /// Build-time address (Info.plist), normalized. Never encoded; it wins over the stored one while present.
+    private(set) var embeddedServerURL: String?
+    private enum CodingKeys: String, CodingKey { case profileID, storedServerURL = "serverURL" }
+
+    init(profileID: String, serverURL: String?, embeddedServerURL: String? = nil) {
+        self.profileID = profileID; storedServerURL = serverURL
+        self.embeddedServerURL = embeddedServerURL.flatMap(Self.normalizedOrigin)
+    }
+    /// The address the session connects to. The Keychain scope hashes this normalized origin, so an embedded
+    /// address equal to the stored one keeps using the already saved key.
+    var serverURL: String? { embeddedServerURL ?? storedServerURL }
+    /// True when the build fixed the server; the setup UI should hide manual address entry.
+    var serverIsEmbedded: Bool { embeddedServerURL != nil }
+
+    private static func normalizedOrigin(_ value: String) -> String? { (try? OnlineBattleOrigin(value))?.url.absoluteString }
+    static func load(from stateDirectory: URL, embeddedServerURL: String? = nil) throws -> Self {
+        var value = try loadStored(from: stateDirectory)
+        value.embeddedServerURL = embeddedServerURL.flatMap(normalizedOrigin)
+        return value
+    }
+    private static func loadStored(from stateDirectory: URL) throws -> Self {
         let url = stateDirectory.appendingPathComponent("online-battle-settings.json")
         if FileManager.default.fileExists(atPath: url.path) {
             let value = try JSONDecoder().decode(Self.self, from: Data(contentsOf: url))
             guard UUID(uuidString: value.profileID) != nil else { throw OnlineBattleFailure.invalidSettings }
-            if let serverURL = value.serverURL { _ = try OnlineBattleOrigin(serverURL) }
+            if let serverURL = value.storedServerURL { _ = try OnlineBattleOrigin(serverURL) }
             return value
         }
         let value = Self(profileID: UUID().uuidString, serverURL: nil)
@@ -23,20 +40,25 @@ struct OnlineBattleSettings: Codable, Equatable, Sendable {
     }
     func save(to stateDirectory: URL) throws {
         guard UUID(uuidString: profileID) != nil else { throw OnlineBattleFailure.invalidSettings }
-        if let serverURL { _ = try OnlineBattleOrigin(serverURL) }
+        if let storedServerURL { _ = try OnlineBattleOrigin(storedServerURL) }
         try FileManager.default.createDirectory(at: stateDirectory, withIntermediateDirectories: true)
         let url = stateDirectory.appendingPathComponent("online-battle-settings.json")
         try JSONEncoder().encode(self).write(to: url, options: .atomic)
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
     }
     mutating func setServer(_ value: String?) throws {
-        serverURL = try value.map { try OnlineBattleOrigin($0).url.absoluteString }
+        guard embeddedServerURL == nil else { throw OnlineBattleFailure.invalidSettings }
+        storedServerURL = try value.map { try OnlineBattleOrigin($0).url.absoluteString }
     }
 }
-/// Build-time server address carried in Info.plist (skeleton for T08).
+/// Build-time server address carried in Info.plist (`PTB_BATTLE_SERVER_URL` at build time, never committed).
 enum OnlineBattleEmbeddedServer {
     static let infoKey = "PTBBattleServerURL"
-    static func address(infoDictionary: [String: Any]?) -> String? { nil }
+    /// A valid HTTPS origin string, normalized; anything else (absent, empty, unexpanded placeholder) means manual entry.
+    static func address(infoDictionary: [String: Any]?) -> String? {
+        guard let value = infoDictionary?[infoKey] as? String else { return nil }
+        return (try? OnlineBattleOrigin(value))?.url.absoluteString
+    }
     static var configured: String? { address(infoDictionary: Bundle.main.infoDictionary) }
 }
 struct OnlineBattleCredentialScope: Equatable, Sendable {
