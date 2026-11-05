@@ -8,6 +8,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 VALIDATE = ROOT / 'scripts/release-validate.py'
+# Assembled at runtime so this file itself never looks like a committed address to the scan.
+ACCOUNT, SUFFIX = 'some-account', '.workers' + '.dev'
 
 
 def validate(*args, cwd=None):
@@ -60,18 +62,18 @@ class CommittedAddressScanTests(unittest.TestCase):
             with self.subTest(name=name):
                 path = self.repo / name
                 path.parent.mkdir(parents=True, exist_ok=True)
-                path.write_text('url = https://ptb-battle-league.some-account.workers.dev/v1\n')
+                path.write_text('url = https://ptb-battle-league.' + ACCOUNT + SUFFIX + '/v1\n')
                 result = self.scan()
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn(name, result.stderr)
-                self.assertNotIn('some-account', result.stderr, 'the offending address must not be echoed')
+                self.assertNotIn(ACCOUNT, result.stderr, 'the offending address must not be echoed')
                 path.unlink()
 
     def test_ignores_generated_dependency_directories(self):
         for directory in ('node_modules', '.build', 'build', '.git'):
             path = self.repo / directory / 'x.txt'
             path.parent.mkdir()
-            path.write_text('https://w.some-account.workers.dev\n')
+            path.write_text('https://w.' + ACCOUNT + SUFFIX + '\n')
         self.assertEqual(self.scan().returncode, 0)
 
     def test_the_real_repository_is_clean(self):

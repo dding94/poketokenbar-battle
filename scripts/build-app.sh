@@ -13,6 +13,12 @@ if [[ -n "${PTB_RELEASE_VERSION:-}" ]]; then
     [[ "$PTB_RELEASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'Invalid PTB_RELEASE_VERSION' >&2; exit 1; }
     VERSION="$PTB_RELEASE_VERSION"
 fi
+# Optional build-time server address (never committed). Unset = the app keeps manual address entry.
+SERVER_URL_PLIST=""
+if [[ -n "${PTB_BATTLE_SERVER_URL:-}" ]]; then
+    SERVER_URL="$(python3 scripts/release-validate.py server-url "$PTB_BATTLE_SERVER_URL")" || exit 1
+    SERVER_URL_PLIST="<key>PTBBattleServerURL</key><string>$SERVER_URL</string>"
+fi
 APP_NAME="PokeTokenBar Battle"
 EXEC_NAME="PokeTokenBarBattle"
 BUNDLE_ID="io.github.dding94.poketokenbar-battle"
@@ -80,6 +86,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>CFBundleIconFile</key><string>AppIcon</string>
     <key>LSUIElement</key><true/>
     <key>NSHighResolutionCapable</key><true/>
+    $SERVER_URL_PLIST
 </dict>
 </plist>
 PLIST

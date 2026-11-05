@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """Local fork release validation. Reads only source, artifacts, and public signing metadata."""
 import hashlib
+import os
 import plistlib
 import re
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from urllib.parse import urlsplit
 
 REPO = 'dding94/poketokenbar-battle'
 APP = 'PokeTokenBar Battle'
@@ -31,8 +33,50 @@ def run(*args):
     return result.stdout + result.stderr
 
 
+def server_url(value):
+    """Plain https origin for the build-time server address; the value is never echoed (it may be the real one)."""
+    message = 'Server URL must be a plain https origin (host and optional port; no path, query, fragment or credentials)'
+    require(value and value == value.strip() and '?' not in value and '#' not in value, message)
+    try:
+        parts = urlsplit(value)
+        port = parts.port
+    except ValueError:
+        raise ValueError(message) from None
+    host = parts.hostname or ''
+    require(parts.scheme == 'https' and '@' not in parts.netloc and parts.path in ('', '/')
+            and re.fullmatch(r'[a-z0-9]([a-z0-9.-]*[a-z0-9])?', host) and (port is None or 1 <= port <= 65535), message)
+    return f'https://{host}' + (f':{port}' if port not in (None, 443) else '')
+
+
+# Account labels that are documentation placeholders; any other <worker>.<account>.workers.dev is treated as real.
+PLACEHOLDER_ACCOUNTS = {b'example', b'secret-sub', b'subdomain'}
+WORKERS_DEV = re.compile(rb'[A-Za-z0-9][A-Za-z0-9-]*\.([A-Za-z0-9][A-Za-z0-9-]*)\.workers\.dev', re.I)
+SKIPPED_DIRECTORIES = {'.git', 'node_modules', '.build', 'build', '.wrangler', '.swiftpm', 'DerivedData'}
+
+
+def address_check(root):
+    """The real server address lives only in a local build input. Report file names, never the address."""
+    root = Path(root)
+    found = []
+    for directory, names, files in os.walk(root):
+        relative = Path(directory).relative_to(root)
+        names[:] = [n for n in names if n not in SKIPPED_DIRECTORIES and not (relative.parts[-1:] == ('.claude',) and n == 'worktrees')]
+        for name in files:
+            path = Path(directory) / name
+            try:
+                if path.is_symlink() or path.stat().st_size > 20_000_000: continue
+                data = path.read_bytes()
+            except OSError:
+                continue
+            if any(m[1].lower() not in PLACEHOLDER_ACCOUNTS for m in WORKERS_DEV.finditer(data)):
+                found.append(str(path.relative_to(root)))
+    require(not found, 'Real workers.dev address must not be committed (keep it in the local PTB_BATTLE_SERVER_URL build input): '
+            + ', '.join(sorted(found)))
+
+
 def source_check(root):
     root = Path(root)
+    address_check(root)
     identity = (root/'Sources/PokeTokenBar/Core/AppIdentity.swift').read_text().split('enum Upstream {')[0]
     values = {'bundleID': BUNDLE, 'appName': APP, 'executableName': EXEC, 'stateDirectoryName': EXEC,
               'loginAgentLabel': LABEL, 'releaseRepo': REPO, 'caskName': CASK}
@@ -85,6 +129,9 @@ def bundle_check(root, app, target_version, leaf):
         field = 'minos' if command.strip() == 'LC_BUILD_VERSION' else 'version'
         minima = [value.strip() for value in re.findall(rf'^\s*{field}\b([^\n]*)$', body, re.M)]
         require(len(minima) == 1 and minima[0] in ('15.0','15.0.0'), f'{arch} deployment target must be macOS 15.0')
+    if 'PTBBattleServerURL' in info:  # embedded by build-app.sh; absent in builds that keep manual entry
+        require(isinstance(info['PTBBattleServerURL'], str) and server_url(info['PTBBattleServerURL']) == info['PTBBattleServerURL'],
+                'Embedded server URL is not a normalized https origin')
     run('codesign', '--verify', '--deep', '--strict', str(app))
     entitlement_output = run('codesign', '-d', '--entitlements', ':-', str(app))
     xml = re.search(rb'<\?xml.*?</plist>', entitlement_output, re.S)
@@ -138,6 +185,8 @@ if __name__ == '__main__':
         elif mode == 'cask' and len(args) == 2: print(cask_text(*args), end='')
         elif mode == 'check-cask' and len(args) == 1: check_cask(*args)
         elif mode == 'version' and len(args) == 1: version(*args)
+        elif mode == 'server-url' and len(args) == 1: print(server_url(*args))
+        elif mode == 'addresses' and len(args) == 1: address_check(*args)
         else: raise ValueError('Use source ROOT | bundle ROOT APP VERSION LEAF | cask VERSION SHA | check-cask FILE | version VERSION')
     except (ValueError, OSError, subprocess.CalledProcessError, plistlib.InvalidFileException) as error:
         sys.exit(f'Release validation: {error}')
