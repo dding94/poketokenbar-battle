@@ -19,12 +19,13 @@ struct OnlineBattleScreen: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
+                // Esc leaves the screen, except while pinned: then it closes the popover (the close button owns it).
                 Button(action: onClose) { Label(l.home, systemImage: "chevron.left") }
-                    .buttonStyle(.borderless).keyboardShortcut(.cancelAction)
+                    .buttonStyle(.borderless).keyboardShortcut(model.popoverPinned ? nil : .cancelAction)
                 Spacer(minLength: 4)
                 Text(l.onlineTitle).font(.headline)
                 Spacer(minLength: 4)
-                if model.isBusy { ProgressView().controlSize(.small) }
+                pinnedHeaderTrailing
             }.frame(height: 22)
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
@@ -68,6 +69,24 @@ struct OnlineBattleScreen: View {
         }
         .frame(width: PopoverMetrics.contentWidth)
         .padding(PopoverMetrics.padding)
+    }
+
+    /// A fixed-width slot, so pinning never moves the title or changes the 360pt layout.
+    private var pinnedHeaderTrailing: some View {
+        HStack(spacing: 6) {
+            if model.isBusy { ProgressView().controlSize(.small) }
+            if model.popoverPinned {
+                Label(l.onlinePinned, systemImage: "pin.fill")
+                    .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                    .accessibilityElement(children: .ignore).accessibilityLabel(l.onlinePinned)
+                    .accessibilityIdentifier("online.pinned")
+                Button(action: onClosePopover) { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }
+                    .buttonStyle(.borderless).keyboardShortcut(.cancelAction)
+                    .help(l.close).accessibilityLabel(l.close)
+                    .accessibilityIdentifier("online.closePopover")
+            }
+        }
+        .frame(width: 104, alignment: .trailing)
     }
 
     @ViewBuilder private var stage: some View {

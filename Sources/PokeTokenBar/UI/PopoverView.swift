@@ -44,6 +44,8 @@ final class PopoverNavigation {
     /// again after `reset()` while `PracticeSession.isActive`, so a battle reopens where it was.
     var showingPractice = false { didSet { if showingPractice { dexDetailCollectionID = nil } } }
     var showingOnlineBattle = false { didSet { if showingOnlineBattle { dexDetailCollectionID = nil } } }
+    /// Closes the popover itself (the pinned header's close button). Set by `AppDelegate`; not view state.
+    @ObservationIgnored var closePopover: () -> Void = {}
     /// The Collection tab's open Pokédex detail page (`DexSpecies.collectionID`); nil = grid or log.
     /// It lives here so Home sprites can open it, but it only lasts while the collection content is
     /// on screen: leaving the tab, switching segment, or covering it with Settings/Recap drops it —
@@ -124,7 +126,7 @@ struct PopoverView: View {
             } else if nav.showingRecap {
                 RecapScreen(store: store, companion: companion) { nav.showingRecap = false }
             } else if nav.showingOnlineBattle, let onlineBattle {
-                OnlineBattleScreen(model: onlineBattle, l: l) { nav.showingOnlineBattle = false }
+                OnlineBattleScreen(model: onlineBattle, l: l, onClosePopover: { nav.closePopover() }) { nav.showingOnlineBattle = false }
             } else if nav.showingPractice, let practice {
                 // Back only leaves the screen; the session keeps the battle (and pauses manual turns).
                 PracticeScreen(session: practice, bag: companion, l: l) { nav.showingPractice = false }

@@ -237,11 +237,18 @@ private extension OnlineAttentionSeenRecord {
 enum OnlinePopoverPinning {
     /// Entry, waiting and battle steps pin. The lobby list, a result and the home screen stay transient.
     static func isPinned(phase: OnlineBattlePresentation.Phase, onlineScreenShowing: Bool) -> Bool {
-        false
+        guard onlineScreenShowing else { return false }
+        switch phase {
+        case .setup, .room, .arena, .verifying: return true
+        case .lobby, .result: return false
+        }
     }
 
     /// A relaunched or reopened popover returns to a match that is still being played or verified.
     static func routesToOnlineScreenOnOpen(phase: OnlineBattlePresentation.Phase) -> Bool {
-        false
+        switch phase {
+        case .arena, .verifying: return true
+        case .setup, .lobby, .room, .result: return false
+        }
     }
 }

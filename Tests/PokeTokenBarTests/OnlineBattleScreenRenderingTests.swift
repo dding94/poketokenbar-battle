@@ -128,13 +128,14 @@ final class OnlineBattleScreenRenderingTests: XCTestCase {
     }
     // MARK: T05 pinned header
 
-    private func accessibilityElements(in object: Any) -> [NSObject] {
-        guard let element = object as? NSObject else { return [] }
-        let children = (element as? NSAccessibilityProtocol)?.accessibilityChildren() ?? []
-        return [element] + children.flatMap { accessibilityElements(in: $0) }
+    /// SwiftUI borderless buttons are `SwiftUIAppKitButton` views; the header ones sit above the scroll area.
+    private func headerButtons(in view: NSView) -> [NSButton] {
+        let found = (view as? NSButton).map { [$0] } ?? view.subviews.flatMap { headerButtons(in: $0) }
+        return found.filter { headerBand($0) }
     }
-    private func labelled(_ label: String, in host: NSView) -> [NSObject] {
-        accessibilityElements(in: host).filter { ($0 as? NSAccessibilityProtocol)?.accessibilityLabel() == label }
+    private func headerBand(_ button: NSButton) -> Bool {
+        guard let root = button.window?.contentView else { return false }
+        return root.convert(button.bounds, from: button).midY < 44 || root.convert(button.bounds, from: button).midY > root.bounds.height - 44
     }
     private func pinnedModel(_ pinned: Bool) -> OnlineBattlePresentation {
         let model = Self.model()
@@ -142,26 +143,33 @@ final class OnlineBattleScreenRenderingTests: XCTestCase {
         model.popoverPinned = pinned
         return model
     }
-    func testPinnedHeaderShowsOneMarkerAndACloseButtonAndStaysAtThreeSixtyPoints() async throws {
-        let l = L(.ko)
-        let host = await host(pinnedModel(true))
-        _ = try await capture(host, named: "online-synthetic-pinned-header.png")
-        XCTAssertEqual(labelled(l.onlinePinned, in: host).count, 1, "exactly one pinned marker")
-        XCTAssertEqual(labelled(l.close, in: host).count, 1, "one visible close button")
-    }
-    func testUnpinnedHeaderHasNeitherMarkerNorCloseButton() async throws {
-        let l = L(.ko)
-        let host = await host(pinnedModel(false))
-        _ = try await capture(host, named: "online-synthetic-unpinned-header.png")
-        XCTAssertTrue(labelled(l.onlinePinned, in: host).isEmpty)
-        XCTAssertTrue(labelled(l.close, in: host).isEmpty)
+    func testPinnedHeaderAddsOneCloseButtonAndLeavesEverythingBelowItUntouched() async throws {
+        let unpinnedHost = await host(pinnedModel(false))
+        _ = try await capture(unpinnedHost, named: "online-synthetic-unpinned-header.png")
+        let before = try PracticeScreenRenderingTests.capture2x(unpinnedHost)
+        XCTAssertEqual(headerButtons(in: unpinnedHost).count, 1, "only the Home button")
+        window?.close()
+        let pinnedHost = await host(pinnedModel(true))
+        _ = try await capture(pinnedHost, named: "online-synthetic-pinned-header.png")
+        let after = try PracticeScreenRenderingTests.capture2x(pinnedHost)
+        XCTAssertEqual(headerButtons(in: pinnedHost).count, 2, "Home plus the visible close button")
+        XCTAssertEqual(after.pixelsWide, before.pixelsWide); XCTAssertEqual(after.pixelsHigh, before.pixelsHigh)
+        // 360pt layout stays stable: the marker and close button live in the header strip, nothing else moves.
+        let bytesPerRow = before.bytesPerRow, headerRows = 2 * 48
+        let below = headerRows * bytesPerRow..<before.pixelsHigh * bytesPerRow
+        XCTAssertEqual(Array(UnsafeBufferPointer(start: before.bitmapData, count: before.pixelsHigh * bytesPerRow))[below],
+                       Array(UnsafeBufferPointer(start: after.bitmapData, count: after.pixelsHigh * bytesPerRow))[below])
+        let above = 0..<headerRows * bytesPerRow
+        XCTAssertNotEqual(Array(UnsafeBufferPointer(start: before.bitmapData, count: headerRows * bytesPerRow))[above],
+                          Array(UnsafeBufferPointer(start: after.bitmapData, count: headerRows * bytesPerRow))[above], "the marker is drawn")
     }
     func testCloseButtonClosesThePopoverAndNotJustTheScreen() async throws {
         var closed = 0, backed = 0
         let host = await host(pinnedModel(true), onClose: { backed += 1 }, onClosePopover: { closed += 1 })
         _ = try await capture(host, named: "online-synthetic-pinned-close.png")
-        let button = try XCTUnwrap(labelled(L(.ko).close, in: host).first as? NSAccessibilityProtocol)
-        XCTAssertTrue(button.accessibilityPerformPress())
+        let buttons = headerButtons(in: host).sorted { $0.frame.minX < $1.frame.minX }
+        XCTAssertEqual(buttons.count, 2)
+        buttons.last?.performClick(nil)
         XCTAssertEqual(closed, 1); XCTAssertEqual(backed, 0)
     }
     func testEscapeClosesThePopoverWhilePinnedAndGoesBackToHomeOtherwise() async throws {

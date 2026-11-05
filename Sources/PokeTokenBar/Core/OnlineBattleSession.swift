@@ -628,7 +628,9 @@ final class OnlineBattleSession {
         presentation.battles = listed.values.sorted { ($0.createdAt, $0.battleId) > ($1.createdAt, $1.battleId) }
         // Only processed live views can drive the live room/result; archive summaries cannot settle it.
         let live = views.values.sorted { ($0.createdAt, $0.battleId) > ($1.createdAt, $1.battleId) }
-        let room = prefersLobby ? nil : (selectedBattleID.flatMap { views[$0] } ?? live.first(where: { $0.state.isActive }) ?? live.first)
+        // A match in play or being verified outranks a newer request, so a relaunch returns to it.
+        let inPlay = live.first(where: { $0.state == .running || $0.state == .reported })
+        let room = prefersLobby ? nil : (selectedBattleID.flatMap { views[$0] } ?? inPlay ?? live.first(where: { $0.state.isActive }) ?? live.first)
         presentation.room = room
         presentation.result = room.flatMap { resultByBattleID[$0.battleId] }
         presentation.arena = nil; presentation.request = nil; presentation.deadline = nil

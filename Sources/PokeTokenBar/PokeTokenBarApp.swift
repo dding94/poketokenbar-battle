@@ -50,11 +50,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
     }
 
     /// 팝오버를 열 때의 화면 결정 — Home 으로 reset 한 뒤 진행 중인 연습이 있으면 연습 화면, 그다음 `route`.
+    /// 진행 중인 온라인 경기(`onlineActive`)는 그 위에서 온라인 화면으로 복귀한다. 단, `route` 가 설정·도감처럼
+    /// 다른 화면을 골랐으면 그 선택을 덮지 않는다(온라인 화면이 먼저 그려져 가리기 때문).
     static func applyOpenRoute(to navigation: PopoverNavigation, practiceActive: Bool, onlineActive: Bool = false,
                                route: (PopoverNavigation) -> Void) {
         navigation.reset()
         navigation.showingPractice = practiceActive   // reset() 이 이 플래그를 지우는지에 기대지 않는다
         route(navigation)
+        let routedElsewhere = navigation.showSettings || navigation.showingRecap || navigation.tab != .home
+            || navigation.dexDetailCollectionID != nil
+        if onlineActive, !routedElsewhere { navigation.showingOnlineBattle = true }
     }
 
     /// Route for a clicked online notification: the online screen, on top of the reset to Home.
@@ -193,7 +198,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
             setStatusImage(egg, cgFrame: Self.cgFrame(from: egg))   // 초기 알도 같은 경로로(불변식)
         }
 
-        popover.behavior = .transient
+        popover.behavior = .transient   // entry/waiting/battle steps switch to .applicationDefined, see applyPinning
+        navigation.closePopover = { [weak self] in self?.popover.performClose(nil) }
         popover.delegate = self   // didShow: outside-click monitor; didClose: 호스팅 해제 + 모니터 제거
 
         observeStore()
@@ -203,6 +209,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
         observePractice()
         observeCurrentHealth()
         observeOnlineMark()
+        observeOnlinePinning()
         observeOnlineAccess()
         applyState()
         if Self.launchRequestsPractice(arguments: CommandLine.arguments) {
@@ -378,6 +385,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
             }
         }
         scheduleOnlineMarkTimer()
+    }
+
+    /// The pinned section follows the phase and whether the online screen is showing. It only ever changes how an
+    /// already open popover reacts to outside clicks; nothing here shows or closes it.
+    private func observeOnlinePinning() {
+        withObservationTracking {
+            _ = onlinePresentation.phase
+            _ = navigation.showingOnlineBattle
+        } onChange: { [weak self] in
+            Task { @MainActor in
+                guard let self else { return }
+                self.applyPinning(popoverOpen: self.popover.isShown)
+                self.observeOnlinePinning()
+            }
+        }
+    }
+
+    /// Pinned = `.applicationDefined` and no outside-click monitor; otherwise `.transient` plus the monitor.
+    /// Leaving the pinned section only relaxes the behavior; it never closes the popover.
+    private func applyPinning(popoverOpen: Bool) {
+        let pinned = popoverOpen && OnlinePopoverPinning.isPinned(phase: onlinePresentation.phase,
+                                                                   onlineScreenShowing: navigation.showingOnlineBattle)
+        if onlinePresentation.popoverPinned != pinned { onlinePresentation.popoverPinned = pinned }
+        let behavior: NSPopover.Behavior = pinned ? .applicationDefined : .transient
+        if popover.behavior != behavior { popover.behavior = behavior }
+        guard popover.isShown else { return }
+        if pinned { stopOutsideClickMonitor() } else { startOutsideClickMonitor() }
     }
 
     private func scheduleOnlineMarkTimer() {
@@ -865,7 +899,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
     private func showPopover(route: (PopoverNavigation) -> Void = { _ in }) {
         guard let button = statusItem.button, !popover.isShown else { return }
         // 닫혔다 열리면 항상 Home 으로 (설정 화면 잔류 방지) — 진행 중인 연습만 그 자리로 복귀
-        Self.applyOpenRoute(to: navigation, practiceActive: practice.isActive, route: route)
+        Self.applyOpenRoute(to: navigation, practiceActive: practice.isActive,
+                            onlineActive: OnlinePopoverPinning.routesToOnlineScreenOnOpen(phase: onlinePresentation.phase), route: route)
+        applyPinning(popoverOpen: true)   // before show, so the first frame already has the right behavior
         practice.setPaused(false, reason: .popoverClosed)
         buildPopoverContent()   // 열 때 호스팅 트리 생성(닫힐 때 해제)
         // LSUIElement 앱이 비활성이면 팝오버 내부 버튼 클릭이 무시됨 — show 전에 활성화 보장
@@ -883,13 +919,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
         Task { await online?.perform(.setPopoverVisible(true)) }
         deliverOnlineAttention()   // an open popover marks what it shows as seen, and may ask the permission once
         if let notifier = onlineNotifier { Task { await notifier.refreshPermissionHint() } }
-        startOutsideClickMonitor()
+        if !onlinePresentation.popoverPinned { startOutsideClickMonitor() }
     }
 
     /// 팝오버가 닫히면 호스팅 컨트롤러 해제(숨은 트리 재레이아웃 비용 제거) + 메뉴바 애니메이션 재개.
     func popoverDidClose(_ notification: Notification) {
         Task { await online?.perform(.setPopoverVisible(false)) }
         stopOutsideClickMonitor()
+        applyPinning(popoverOpen: false)   // back to .transient; the next open decides again
         popover.contentViewController = nil
         practice.setPaused(true, reason: .popoverClosed)
         practice.releaseIfIdle()   // 진행 중인 배틀이 없을 때만 엔진·로스터 해제

@@ -4,7 +4,7 @@ extension L {
     /// Online battle ships Korean first; other app languages use the English fallback.
     func online(_ ko: String, _ en: String) -> String { lang == .ko ? ko : en }
     var onlineTitle: String { online("온라인 배틀", "Online battle") }
-    var onlinePinned: String { "" }
+    var onlinePinned: String { online("고정됨", "Pinned") }
     var onlineSetup: String { online("동료와 정식전 시작하기", "Battle with your group") }
     var onlineServer: String { online("서버 주소", "Server address") }
     var onlineSaveServer: String { online("서버 주소 적용", "Apply server address") }
