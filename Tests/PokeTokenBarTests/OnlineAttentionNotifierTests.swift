@@ -110,7 +110,7 @@ final class OnlineAttentionNotifierTests: XCTestCase {
         let cases: [(OnlineBattleView, String)] = [
             (room("bt-a", .pending), "incomingChallenge"),
             (room("bt-b", .pending, rematchOf: "bt-old"), "rematchRequested"),
-            (room("bt-c", .accepted), "finalConfirmed"),
+            (room("bt-c", .accepted, confirmed: true), "finalConfirmed"),
             (room("bt-d", .running, confirmed: true, deadlineIn: 30), "myTurn.1"),
         ]
         for (battle, stage) in cases {

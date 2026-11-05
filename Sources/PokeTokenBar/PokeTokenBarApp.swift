@@ -1,6 +1,7 @@
 import AppKit
 import QuartzCore
 import SwiftUI
+import UserNotifications
 
 @main
 @MainActor
@@ -15,7 +16,7 @@ struct PokeTokenBarApp: App {
 }
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNotificationCenterDelegate {
     private var statusItem: NSStatusItem!
     private let popover = NSPopover()
     private var outsideClickMonitor = OutsideClickMonitor()
@@ -29,6 +30,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private var online: OnlineBattleSession?
     private var onlinePresentation = OnlineBattlePresentation()
     private var onlineAttention = OnlineAttentionSource(presentation: OnlineBattlePresentation())
+    /// Nil outside a bundled app, where UNUserNotificationCenter cannot be used.
+    private var onlineNotifier: OnlineAttentionNotifier?
     private var appliedOnlineMark: OnlineMenuMark?
     private var onlineMarkTimer: Timer?
     var onOpenPractice: (() -> Void)?
@@ -55,7 +58,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     }
 
     /// Route for a clicked online notification: the online screen, on top of the reset to Home.
-    static func openOnlineScreen(_ navigation: PopoverNavigation) {}
+    static func openOnlineScreen(_ navigation: PopoverNavigation) { navigation.showingOnlineBattle = true }
 
     /// 메뉴바 첫 줄 끝에 연습전 배지를 붙인다. 줄이 없으면 배지만 한 줄로 둔다.
     nonisolated static func menuLines(_ lines: [String], badge: String?) -> [String] {
@@ -279,10 +282,49 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             // stagingHeldBattleIDs stays at its empty default here; the staging work passes the real set at this one spot.
             onlineAttention = OnlineAttentionSource(presentation: session.presentation,
                                                     preparedBattleIDs: { [weak session] in session?.preparedBattleIDs() ?? [] })
+            prepareOnlineNotifier(presentation: session.presentation, directory: directory)
             Task { await session.bootstrap() }
         } catch {
             onlinePresentation.notice = "온라인 설정을 읽지 못했어요. 저장 폴더를 확인해 주세요."
         }
+    }
+
+    /// The notifier is the second channel behind the menu-bar mark; the delegate only exists to route clicks.
+    /// It is set up with the session so a notification that launched the app is delivered after it.
+    private func prepareOnlineNotifier(presentation: OnlineBattlePresentation, directory: URL) {
+        guard AppEnv.isBundledApp else { return }
+        UNUserNotificationCenter.current().delegate = self
+        onlineNotifier = OnlineAttentionNotifier(
+            center: SystemOnlineNotificationCenter(), store: OnlineAttentionStateFile(directory: directory),
+            l: { [companion = companion!] in companion.l },
+            setHint: { [presentation] hint in presentation.notificationHint = hint })
+    }
+
+    /// Feeds the same input the menu-bar mark reads to the notifier. Tasks run in order up to their first
+    /// suspension, and the notifier updates its record before suspending, so bursts cannot double-announce.
+    private func deliverOnlineAttention() {
+        guard let notifier = onlineNotifier else { return }
+        let input = onlineAttention.input()
+        let open = popover.isShown
+        Task { await notifier.handle(input, popoverOpen: open) }
+    }
+
+    /// A clicked notification opens the popover on that battle. A popover that is already open is left where it is
+    /// apart from switching to the online screen.
+    private func openOnlineBattle(_ battleId: String) {
+        if popover.isShown {
+            Self.openOnlineScreen(navigation)
+            NSApp.activate(ignoringOtherApps: true)
+        } else {
+            showPopover(route: Self.openOnlineScreen)
+        }
+        Task { await online?.perform(.openBattle(battleId)) }
+    }
+
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
+        guard response.actionIdentifier == UNNotificationDefaultActionIdentifier,
+              let battleId = OnlineAttentionNotifier.battleId(fromUserInfo: response.notification.request.content.userInfo) else { return }
+        await MainActor.run { openOnlineBattle(battleId) }
     }
 
     private func observeOnlineAccess() {
@@ -330,6 +372,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             Task { @MainActor in
                 guard let self else { return }
                 if self.onlineAttention.menuMark(l: self.companion.l) != self.appliedOnlineMark { self.applyState() }
+                self.deliverOnlineAttention()
                 self.scheduleOnlineMarkTimer()
                 self.observeOnlineMark()
             }
@@ -346,6 +389,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             Task { @MainActor in
                 guard let self else { return }
                 if self.onlineAttention.menuMark(l: self.companion.l) != self.appliedOnlineMark { self.applyState() }
+                self.deliverOnlineAttention()
                 self.scheduleOnlineMarkTimer()
             }
         }
@@ -837,6 +881,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     /// overwrite a live token (#168). `start` is also idempotent if `didShow` fires twice.
     func popoverDidShow(_ notification: Notification) {
         Task { await online?.perform(.setPopoverVisible(true)) }
+        deliverOnlineAttention()   // an open popover marks what it shows as seen, and may ask the permission once
+        if let notifier = onlineNotifier { Task { await notifier.refreshPermissionHint() } }
         startOutsideClickMonitor()
     }
 

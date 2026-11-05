@@ -64,7 +64,8 @@ extension L {
             return .init(title: online("대결 확정", "Battle confirmed"),
                          body: online("\(name)님과의 대결이 확정됐어요. 전투 준비를 눌러 주세요", "Your battle with \(name) is confirmed. Select Ready for battle"))
         case .rematchRequested:
-            return .init(title: "", body: "")
+            return .init(title: online("재대결 신청", "Rematch request"),
+                         body: online("\(name)님이 다시 겨루자고 해요", "\(name) wants a rematch"))
         case .myTurn:
             let seconds = onlineAttentionSeconds(attention, now: now)
             return .init(title: online("내 차례예요", "Your turn"),
@@ -72,7 +73,17 @@ extension L {
         }
     }
 
-    func onlineNotificationHint(_ hint: OnlineNotificationHint) -> String { "" }
+    /// One line each. `reason` is on screen while the system dialog is up; `denied` says where to turn notifications back on.
+    func onlineNotificationHint(_ hint: OnlineNotificationHint) -> String {
+        switch hint {
+        case .reason:
+            online("알림을 켜 두면 팝오버가 닫혀 있어도 대결 신청과 내 차례를 알려 드려요",
+                   "Turn on notifications to hear about challenges and your turn while this window is closed")
+        case .denied:
+            online("알림이 꺼져 있어요. 시스템 설정 > 알림에서 켜면 닫혀 있을 때도 알려 드려요",
+                   "Notifications are off. Turn them on in System Settings > Notifications to hear about requests while this window is closed")
+        }
+    }
 
     private func onlineAttentionSeconds(_ attention: OnlineAttention, now: Date) -> Int {
         max(1, Int((attention.deadline ?? now).timeIntervalSince(now).rounded(.up)))

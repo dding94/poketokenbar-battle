@@ -37,6 +37,12 @@ struct OnlineBattleScreen: View {
                             .font(.caption).foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
+                    if let hint = model.notificationHint {
+                        Label(l.onlineNotificationHint(hint), systemImage: "bell.slash")
+                            .font(.caption).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityIdentifier("online.notificationHint")
+                    }
                     if let notice = model.notice {
                         Text(notice).font(.caption).foregroundStyle(.orange)
                             .fixedSize(horizontal: false, vertical: true).practiceCard()

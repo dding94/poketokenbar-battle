@@ -11,7 +11,8 @@ enum OnlineAttentionKind: String, Codable, CaseIterable, Sendable {
         case .challengeAccepted: .challengeAccepted
         case .incomingChallenge: .incomingChallenge
         case .finalConfirmed: .finalConfirmed
-        case .rematchRequested, .resultReady, .matchEnded: nil
+        case .rematchRequested: .rematchRequested
+        case .resultReady, .matchEnded: nil
         }
     }
 }

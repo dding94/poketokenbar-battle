@@ -198,7 +198,8 @@ struct PopoverView: View {
                             PracticeEntryRow(session: practice, l: l) { nav.showingPractice = true }
                         }
                         if onlineBattle != nil {
-                            OnlineEntryRow(l: l, subtitle: onlineAttention?.homeSubtitle(l: l)) { nav.showingOnlineBattle = true }
+                            OnlineEntryRow(l: l, subtitle: onlineAttention?.homeSubtitle(l: l),
+                                           hint: onlineBattle?.notificationHint == .denied ? l.onlineNotificationHint(.denied) : nil) { nav.showingOnlineBattle = true }
                         }
                         Divider()
                         header
