@@ -57,6 +57,8 @@ final class OnlineBattlePresentation {
     var historyBusy = false
     var historyError: String?
     var liveLogs: [String] = []
+    var stage: OnlineBattleStaging?
+    var stageSpeed: PracticePlaybackSpeed = .normal
     var roster: [PracticeCandidate] = []
     var entryHP: [String: Int] = [:]
     var blockedEntryIDs: Set<String> = []
@@ -123,7 +125,7 @@ final class OnlineBattlePresentation {
                   battle.battleId == id, canRematch(battle) else { return }
         case .submitRematch: guard canSubmitRematch else { return }
         case .cancelRematch: guard rematchSourceID != nil else { return }
-        case .setPopoverVisible:
+        case .setPopoverVisible, .setOnlineScreenVisible, .skipStage, .setStageSpeed:
             break
         case .dismissNotice:
             // Pure presentation: closing a banner never reaches the session or the server.
@@ -205,6 +207,7 @@ enum OnlineBattleUIAction {
     case reconnect(code: String)
     case acknowledgeRecoveryCode, retryCredentialSave, refresh
     case setPopoverVisible(Bool)
+    case setOnlineScreenVisible(Bool), skipStage, setStageSpeed(PracticePlaybackSpeed)
     case selectEntry(String), selectOpponent(String), setMode(OnlineBattleMode)
     case challenge, openBattle(String), accept, confirm, prepareBattle, decline, cancel
     case showStandings, refreshStandings, prepareRematch(String), submitRematch, cancelRematch

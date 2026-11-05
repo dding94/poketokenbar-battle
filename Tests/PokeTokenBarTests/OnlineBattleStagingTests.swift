@@ -1,4 +1,5 @@
 import XCTest
+import CryptoKit
 @testable import PokeTokenBar
 
 // MARK: - BattleSeatFrame
@@ -372,4 +373,447 @@ final class OnlineBattleStagingEngineTests: XCTestCase {
         XCTAssertFalse(staging.isPlaying)
         XCTAssertEqual(staging.shown(.player)?.hp, owner.view?.p1.hp)
     }
+}
+
+// MARK: - The session keeps progress at network speed and only the display follows
+
+private final class StageClock: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: Double = 31
+    func now() -> Double { lock.withLock { value } }
+    func advance(_ seconds: Double) { lock.withLock { value += seconds } }
+}
+private actor StageCredentials: OnlineBattleCredentialStoring {
+    var key: String? = "test-key"
+    func load(scope: OnlineBattleCredentialScope) -> String? { key }
+    func save(_ accessKey: String, scope: OnlineBattleCredentialScope) { key = accessKey }
+    func remove(scope: OnlineBattleCredentialScope) { key = nil }
+}
+private actor StageHTTP: OnlineBattleHTTPTransport {
+    private var requests: [URLRequest] = []
+    private var routes: [String: OnlineBattleHTTPResponse] = [:]
+    private var queues: [String: [OnlineBattleHTTPResponse]] = [:]
+    func route(_ path: String, _ data: Data, status: Int = 200) { routes[path] = .init(status: status, body: data) }
+    func queue(_ path: String, _ values: [OnlineBattleHTTPResponse]) { queues[path] = values }
+    func bodies(_ path: String) -> [Data] { requests.filter { $0.url?.path == path }.compactMap(\.httpBody) }
+    func count(_ path: String) -> Int { requests.filter { $0.url?.path == path }.count }
+    func send(_ request: URLRequest) async throws -> OnlineBattleHTTPResponse {
+        requests.append(request)
+        let path = request.url!.path
+        if var queue = queues[path], !queue.isEmpty {
+            let value = queue.removeFirst(); queues[path] = queue; return value
+        }
+        guard let response = routes[path] else { throw OnlineBattleFailure.transport }
+        return response
+    }
+}
+private actor StageConnection: OnlineBattleConnecting {
+    private let trainer: String
+    init(trainer: String) { self.trainer = trainer }
+    func configure(origin: OnlineBattleOrigin?, accessKey: String?) {}
+    func setPopoverOpen(_ open: Bool) {}
+    func snapshot() -> OnlineBattleConnectionSnapshot { .init(state: .connected, generation: 1, connectionId: "connection", trainerId: trainer, groupId: "group") }
+    func authenticationFailed(generation: UInt64) {}
+    func stop() {}
+}
+@MainActor
+private final class StageEffects: OnlineBattleEffects {
+    var state = CompanionState()
+    var applications = 0
+    func healthShare(of instanceID: String) -> Double { state.battleHealth[instanceID] ?? 1 }
+    func setHealthShare(_ share: Double, of instanceID: String) { state.battleHealth[instanceID] = share }
+    func grantBattleXP(_ xp: Int) -> Bool { false }
+    func setInBattle(_ instanceID: String?) {}
+    func companionState() -> (state: CompanionState, activeName: String?)? { (state, nil) }
+    func isHeldForBattle(instanceID: String) -> Bool { state.onlineBattleHolds.contains { $0.instanceID == instanceID } }
+    func holdOnlineBattle(key: OnlineBattleReceiptKey, instanceID: String) throws {
+        if !state.onlineBattleHolds.contains(where: { $0.key == key }) { state.onlineBattleHolds.append(.init(key: key, instanceID: instanceID)) }
+    }
+    func releaseOnlineBattle(key: OnlineBattleReceiptKey) { state.onlineBattleHolds.removeAll { $0.key == key } }
+    func applyVerifiedOnlineBattleEffect(_ effect: VerifiedOnlineBattleEffect) throws -> OnlineBattleEffectReceipt {
+        if let old = state.onlineBattleReceipts.first(where: { $0.key == effect.key }) { return old }
+        applications += 1
+        let result = OnlineBattleLedger.commit(effect, to: state, on: Date(timeIntervalSince1970: 0))
+        state = result.state; return result.receipt
+    }
+}
+
+@MainActor
+final class OnlineBattleStagingSessionTests: XCTestCase {
+    private struct Fixture: Decodable { let battle: OnlineBattleView }
+    private struct Harness {
+        let session: OnlineBattleSession, http: StageHTTP, effects: StageEffects, clock: StageClock
+        @MainActor var model: OnlineBattlePresentation { session.presentation }
+    }
+    private var engineURL: URL {
+        URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("engine/dist/battle-engine.js")
+    }
+    private func changed(_ room: OnlineBattleView, _ updates: [String: Any]) throws -> OnlineBattleView {
+        var value = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(room)) as? [String: Any])
+        for (key, update) in updates { value[key] = update }
+        return try JSONDecoder().decode(OnlineBattleView.self, from: JSONSerialization.data(withJSONObject: value))
+    }
+    /// A golden battle in the server's id namespace, with the journal hash that id implies.
+    private func battle(_ index: Int = 0) throws -> OnlineBattleView {
+        let fixture = try JSONDecoder().decode([Fixture].self, from: Data(contentsOf: XCTUnwrap(Bundle.module.url(forResource: "golden", withExtension: "json", subdirectory: "OnlineBattle"))))[index].battle
+        let id = "bt_" + fixture.battleId.replacingOccurrences(of: "-", with: "_")
+        let bytes = try OnlineBattleResolver.journalBytes(battleID: id, readyToken: fixture.config!.readyToken, journal: fixture.journal)
+        var result = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(fixture.result)) as? [String: Any])
+        result["journalHash"] = SHA256Hex.of(bytes)
+        return try changed(fixture, ["battleId": id, "result": result])
+    }
+    private func journal(_ pairs: ArraySlice<OnlineBattlePair>) throws -> Any { try JSONSerialization.jsonObject(with: JSONEncoder().encode(Array(pairs))) }
+    private func running(_ final: OnlineBattleView, rounds: Int, _ extra: [String: Any] = [:]) throws -> OnlineBattleView {
+        var updates: [String: Any] = ["state": "RUNNING", "result": NSNull(), "roundSeq": rounds, "journal": try journal(final.journal.prefix(rounds))]
+        for (key, value) in extra { updates[key] = value }
+        return try changed(final, updates)
+    }
+    private func roster(_ battle: OnlineBattleView) -> [PracticeCandidate] {
+        [battle.p1.snapshot!, battle.p2.snapshot!].map { value in
+            .init(id: value.instanceId, name: value.publicInfo.species, snapshot: .init(schemaVersion: 1, instanceID: value.instanceId, engineHash: BattleEngineManifest.sha256, rulesVersion: BattleSnapshot.rules, policyVersion: BattleSnapshot.policy, set: value.set, publicInfo: value.publicInfo), blockedReason: nil)
+        }
+    }
+    private func setup(_ battles: [OnlineBattleView], trainer: String = "trainer-one", roomForRoster: OnlineBattleView) async throws -> Harness {
+        let http = StageHTTP(), effects = StageEffects(), clock = StageClock()
+        let group = OnlineBattleGroup(groupId: "group", name: "Test", hostTrainerId: "trainer-two")
+        let account = OnlineBattleAccount(trainer: .init(trainerId: trainer, displayEmail: "synthetic@example.invalid", role: .member, status: .active), group: group)
+        await http.route("/v1/me", try JSONEncoder().encode(account))
+        await http.route("/v1/group", try JSONEncoder().encode(OnlineBattleGroupMembers(group: group, members: [])))
+        await http.route("/v1/battles", try JSONEncoder().encode(OnlineBattlePage(battles: battles, before: nil)))
+        let candidates = roster(roomForRoster), url = engineURL
+        let session = OnlineBattleSession(settings: .init(profileID: UUID().uuidString, serverURL: "https://battle.example.invalid"), credentials: StageCredentials(), transport: http, effects: effects, engineFactory: { try BattleEngine(url: url) }, connectionFactory: { _ in StageConnection(trainer: trainer) }, rosterProvider: { candidates }, clock: .init(now: { clock.now() }), automaticTicks: false)
+        return Harness(session: session, http: http, effects: effects, clock: clock)
+    }
+    private func showScreen(_ h: Harness) async {
+        await h.session.perform(.setPopoverVisible(true))
+        await h.session.perform(.setOnlineScreenVisible(true))
+    }
+    private func list(_ h: Harness, _ rooms: [OnlineBattleView]) async throws {
+        await h.http.route("/v1/battles", try JSONEncoder().encode(OnlineBattlePage(battles: rooms, before: nil)))
+    }
+    private func drainBeats(_ h: Harness) {
+        for _ in 0..<2000 where h.model.stage?.isPlaying == true { h.clock.advance(1); h.session.tickStage() }
+    }
+
+    // MARK: Progress never waits (D6)
+
+    func testAdvanceAndMoveChoicesDoNotWaitForTheBeat() async throws {
+        let final = try battle(), first = try running(final, rounds: 1)
+        let opened = try changed(first, ["roundSeq": 2, "deadline": 61000]), submitted = try changed(opened, ["ownChoice": "move 1"])
+        let advance = "/v1/battles/\(final.battleId)/advance", choices = "/v1/battles/\(final.battleId)/choices"
+        let h = try await setup([first], roomForRoster: final)
+        await h.http.route(advance, try JSONEncoder().encode(opened))
+        await h.http.route(choices, try JSONEncoder().encode(submitted))
+        await showScreen(h)
+        await h.session.bootstrap()
+        let stage = try XCTUnwrap(h.model.stage)
+        XCTAssertTrue(stage.isPlaying, "the visible round stages")
+        let beat = stage.playback.beat?.id
+        let advances = await h.http.count(advance); XCTAssertEqual(advances, 1, "the first seat advances as soon as it has consumed the round")
+        XCTAssertEqual(h.model.deadline, Date(timeIntervalSince1970: 61), "the server clock is what the screen shows")
+        XCTAssertEqual(h.model.phase, .arena)
+        XCTAssertTrue(h.model.canChooseMove(1), "moves stay open during a beat")
+        await h.session.perform(.chooseMove(1))
+        let posted = await h.http.count(choices); XCTAssertEqual(posted, 1)
+        XCTAssertTrue(h.model.choiceSubmitted)
+        XCTAssertEqual(stage.playback.beat?.id, beat, "a response with no new round leaves the beat alone")
+    }
+
+    func testSecondSeatFallbackAdvanceRunsOnItsOwnClockDuringABeat() async throws {
+        let final = try battle(), first = try running(final, rounds: 1)
+        let advance = "/v1/battles/\(final.battleId)/advance"
+        let h = try await setup([first], trainer: "trainer-two", roomForRoster: final)
+        await h.http.route(advance, try JSONEncoder().encode(try changed(first, ["roundSeq": 2, "deadline": 63000])))
+        await showScreen(h)
+        await h.session.bootstrap()
+        let stage = try XCTUnwrap(h.model.stage)
+        XCTAssertEqual(stage.frame.local, .p2)
+        XCTAssertTrue(stage.isPlaying)
+        h.clock.advance(2); await h.session.tick()
+        let advances = await h.http.count(advance); XCTAssertEqual(advances, 1)
+        XCTAssertTrue(stage.isPlaying, "only the stage driver moves beats")
+        drainBeats(h)
+        let view = try XCTUnwrap(h.model.arena)
+        XCTAssertEqual(stage.shown(.player)?.hp, view.p2.hp, "the second seat's own card is the second seat")
+        XCTAssertEqual(stage.shown(.player)?.maxHP, view.p2.maxhp)
+        XCTAssertEqual(stage.shown(.opponent)?.hp, view.p1.hp)
+    }
+
+    func testDeadlineDecidesWhetherAManualRoundStages() async throws {
+        let final = try battle()
+        for (deadline, stages) in [(61000, true), (37000, true), (36999, false), (34000, false)] {
+            let opened = try running(final, rounds: 1, ["roundSeq": 2, "deadline": deadline])
+            let h = try await setup([opened], roomForRoster: final)
+            await showScreen(h)
+            await h.session.bootstrap()
+            XCTAssertEqual(h.model.stage?.isPlaying, stages, "deadline \(deadline)")
+        }
+    }
+
+    func testAutomaticRoundsQueueWhileProgressFinishesAtNetworkSpeed() async throws {
+        let final = try battle(1), first = try running(final, rounds: 1)
+        let steps = try (2...final.journal.count).map { count in
+            OnlineBattleHTTPResponse(status: 200, body: try JSONEncoder().encode(try running(final, rounds: count)))
+        }
+        let h = try await setup([first], roomForRoster: final)
+        await h.http.queue("/v1/battles/\(final.battleId)/advance", steps)
+        await h.http.route("/v1/battles/\(final.battleId)/report", try JSONEncoder().encode(final))
+        await showScreen(h)
+        await h.session.bootstrap()
+        XCTAssertEqual(h.effects.applications, 1, "settlement does not wait for the display")
+        let reports = await h.http.bodies("/v1/battles/\(final.battleId)/report")
+        XCTAssertEqual(reports.count, 1)
+        if let body = reports.first { XCTAssertEqual(try JSONDecoder().decode(OnlineBattleReport.self, from: body), final.result) }
+        let stage = try XCTUnwrap(h.model.stage)
+        XCTAssertTrue(stage.isPlaying)
+        XCTAssertEqual(h.model.phase, .arena)
+        XCTAssertLessThan(stage.playback.history.count, 2, "the rounds are queued, not played")
+        drainBeats(h)
+        XCTAssertEqual(h.model.phase, .result)
+        XCTAssertEqual(Set(stage.playback.history.map(\.turn)).count, final.journal.count, "every live round played in turn")
+        XCTAssertEqual(stage.playback.history.map(\.turn), stage.playback.history.map(\.turn).sorted())
+    }
+
+    func testSkipStagePlaysTheQueueAtOnceAndReleasesTheHold() async throws {
+        let final = try battle(1), first = try running(final, rounds: 1)
+        let steps = try (2...final.journal.count).map { count in
+            OnlineBattleHTTPResponse(status: 200, body: try JSONEncoder().encode(try running(final, rounds: count)))
+        }
+        let h = try await setup([first], roomForRoster: final)
+        await h.http.queue("/v1/battles/\(final.battleId)/advance", steps)
+        await h.http.route("/v1/battles/\(final.battleId)/report", try JSONEncoder().encode(final))
+        await showScreen(h)
+        await h.session.bootstrap()
+        XCTAssertEqual(h.model.phase, .arena)
+        await h.session.perform(.skipStage)
+        XCTAssertEqual(h.model.stage?.isPlaying, false)
+        XCTAssertEqual(h.model.phase, .result)
+    }
+
+    func testSpeedSettingAppliesToTheBeatAndInstantNeverStages() async throws {
+        let final = try battle(), first = try running(final, rounds: 1, ["roundSeq": 2, "deadline": 61000])
+        let h = try await setup([first], roomForRoster: final)
+        await showScreen(h)
+        await h.session.perform(.setStageSpeed(.fast))
+        XCTAssertEqual(h.model.stageSpeed, .fast)
+        await h.session.bootstrap()
+        let stage = try XCTUnwrap(h.model.stage), beat = stage.playback.beat?.id
+        XCTAssertEqual(stage.playback.timeScale, 0.5)
+        h.clock.advance(PracticePlayback.actionBeat / 2); h.session.tickStage()
+        XCTAssertNotEqual(stage.playback.beat?.id, beat, "the fast setting halves a beat")
+        await h.session.perform(.setStageSpeed(.instant))
+        XCTAssertFalse(stage.isPlaying, "instant asks for no staging, like a hidden screen")
+        await h.session.perform(.setStageSpeed(.normal))
+        XCTAssertEqual(stage.playback.timeScale, 1)
+    }
+
+    // MARK: The phase holds only the display
+
+    func testTerminalRoundKeepsTheArenaUntilItsBeatsEndThoughProgressIsDone() async throws {
+        let final = try battle(), terminal = try running(final, rounds: final.journal.count)
+        let reported = try changed(final, ["state": "REPORTED", "result": NSNull()])
+        let h = try await setup([terminal], roomForRoster: final)
+        await h.http.route("/v1/battles/\(final.battleId)/report", try JSONEncoder().encode(reported))
+        await showScreen(h)
+        await h.session.bootstrap()
+        let reports = await h.http.bodies("/v1/battles/\(final.battleId)/report")
+        XCTAssertEqual(reports.count, 1, "the report does not wait for the beats")
+        if let body = reports.first { XCTAssertEqual(try JSONDecoder().decode(OnlineBattleReport.self, from: body), final.result) }
+        let stage = try XCTUnwrap(h.model.stage)
+        XCTAssertTrue(stage.isPlaying)
+        XCTAssertEqual(h.model.room?.state, .reported)
+        XCTAssertEqual(h.model.phase, .arena, "reported holds the arena while the last round plays")
+        try await list(h, [final])
+        await h.session.refresh()
+        XCTAssertEqual(h.effects.applications, 1, "settlement does not wait for the beats")
+        XCTAssertEqual(h.model.room?.state, .completed)
+        XCTAssertTrue(stage.isPlaying)
+        XCTAssertEqual(h.model.phase, .arena, "completed holds the arena while the last round plays")
+        XCTAssertEqual(h.model.arena?.ended, true, "the closed resolver's last view still draws")
+        XCTAssertEqual(h.model.request?.kind, "none")
+        drainBeats(h)
+        XCTAssertEqual(h.model.phase, .result)
+        XCTAssertEqual(h.effects.applications, 1)
+        XCTAssertNotNil(h.model.stage, "completion keeps the stage until the result is dismissed")
+        await h.session.perform(.dismissResult)
+        XCTAssertNil(h.model.stage)
+        XCTAssertEqual(h.model.phase, .lobby)
+    }
+
+    func testReportedGoesToVerifyingOnceTheBeatsEnd() async throws {
+        let final = try battle(), terminal = try running(final, rounds: final.journal.count)
+        let h = try await setup([terminal], roomForRoster: final)
+        await h.http.route("/v1/battles/\(final.battleId)/report", try JSONEncoder().encode(try changed(final, ["state": "REPORTED", "result": NSNull()])))
+        await showScreen(h)
+        await h.session.bootstrap()
+        XCTAssertEqual(h.model.phase, .arena)
+        drainBeats(h)
+        XCTAssertEqual(h.model.phase, .verifying)
+    }
+
+    func testVoidNeverHoldsAndDropsTheStage() async throws {
+        let final = try battle(), first = try running(final, rounds: 1, ["roundSeq": 2, "deadline": 61000])
+        let h = try await setup([first], roomForRoster: final)
+        await showScreen(h)
+        await h.session.bootstrap()
+        XCTAssertEqual(h.model.stage?.isPlaying, true)
+        try await list(h, [try running(final, rounds: 1, ["roundSeq": 2, "state": "VOID"])])
+        await h.session.refresh()
+        XCTAssertEqual(h.model.phase, .result)
+        XCTAssertNil(h.model.stage)
+    }
+
+    // MARK: The gate
+
+    func testClosingThePopoverPlaysEverythingAndReleasesTheHold() async throws {
+        let final = try battle(), terminal = try running(final, rounds: final.journal.count)
+        let h = try await setup([terminal], roomForRoster: final)
+        await h.http.route("/v1/battles/\(final.battleId)/report", try JSONEncoder().encode(try changed(final, ["state": "REPORTED", "result": NSNull()])))
+        await showScreen(h)
+        await h.session.bootstrap()
+        let stage = try XCTUnwrap(h.model.stage)
+        XCTAssertTrue(stage.isPlaying)
+        await h.session.perform(.setPopoverVisible(false))
+        XCTAssertFalse(stage.isPlaying)
+        XCTAssertEqual(h.model.phase, .verifying)
+        let played = stage.playback.history.count
+        await showScreen(h)
+        XCTAssertFalse(stage.isPlaying)
+        XCTAssertNil(stage.playback.beat)
+        XCTAssertEqual(stage.playback.history.count, played, "nothing replays on reopening")
+    }
+
+    func testRoundsWhileHiddenNeverPlayOnReopening() async throws {
+        let final = try battle(), first = try running(final, rounds: 1)
+        let advance = "/v1/battles/\(final.battleId)/advance"
+        let h = try await setup([first], roomForRoster: final)
+        await h.http.route(advance, try JSONEncoder().encode(first))
+        await showScreen(h)
+        await h.session.bootstrap()
+        let stage = try XCTUnwrap(h.model.stage)
+        XCTAssertTrue(stage.isPlaying)
+        await h.session.perform(.setPopoverVisible(false))
+        XCTAssertFalse(stage.isPlaying)
+        for count in 2...6 {
+            let next = try running(final, rounds: count)
+            await h.http.route(advance, try JSONEncoder().encode(next))
+            try await list(h, [next])
+            await h.session.refresh()
+            XCTAssertFalse(stage.isPlaying, "round \(count) arrived hidden")
+        }
+        let advances = await h.http.count(advance); XCTAssertEqual(advances, 6, "hidden battles keep advancing")
+        let played = stage.playback.history.count
+        await showScreen(h)
+        h.session.tickStage()
+        XCTAssertFalse(stage.isPlaying)
+        XCTAssertNil(stage.playback.beat)
+        XCTAssertEqual(stage.playback.history.count, played)
+        let view = try XCTUnwrap(h.model.arena)
+        XCTAssertEqual(stage.playback.display[.player]?.hp, view.p1.hp)
+    }
+
+    func testLeavingTheOnlineScreenSkipsAndAReopenedPopoverWaitsForTheScreen() async throws {
+        let final = try battle(), first = try running(final, rounds: 1)
+        let advance = "/v1/battles/\(final.battleId)/advance"
+        let h = try await setup([first], roomForRoster: final)
+        await h.http.route(advance, try JSONEncoder().encode(first))
+        await showScreen(h)
+        await h.session.bootstrap()
+        let stage = try XCTUnwrap(h.model.stage)
+        XCTAssertTrue(stage.isPlaying)
+        await h.session.perform(.setOnlineScreenVisible(false))
+        XCTAssertFalse(stage.isPlaying)
+        await h.session.perform(.setOnlineScreenVisible(true))
+        // The popover's views go away without a guaranteed onDisappear, so closing counts as leaving the screen.
+        await h.session.perform(.setPopoverVisible(false))
+        await h.session.perform(.setPopoverVisible(true))
+        let next = try running(final, rounds: 2)
+        await h.http.route(advance, try JSONEncoder().encode(next))
+        try await list(h, [next])
+        await h.session.refresh()
+        XCTAssertFalse(stage.isPlaying, "the home screen is open, not the battle")
+    }
+
+    func testOverlaysAndNavigationSkipTheStage() async throws {
+        let final = try battle(), first = try running(final, rounds: 1, ["roundSeq": 2, "deadline": 61000])
+        let h = try await setup([first], roomForRoster: final)
+        await showScreen(h)
+        await h.session.bootstrap()
+        let stage = try XCTUnwrap(h.model.stage)
+        XCTAssertTrue(stage.isPlaying)
+        await h.session.perform(.showHistory)
+        h.session.tickStage()
+        XCTAssertFalse(stage.isPlaying, "an overlay hides the arena")
+        await h.session.perform(.closeReplay)
+        await h.session.perform(.backToLobby)
+        XCTAssertNil(h.model.stage, "only the shown room's stage is exposed")
+        await h.session.perform(.openBattle(final.battleId))
+        XCTAssertTrue(h.model.stage === stage, "a running battle keeps its stage across navigation")
+        XCTAssertFalse(stage.isPlaying)
+    }
+
+    func testAnotherRoomOnScreenSkipsThisOne() async throws {
+        let final = try battle(), first = try running(final, rounds: 1, ["roundSeq": 2, "deadline": 61000])
+        let h = try await setup([first], roomForRoster: final)
+        await showScreen(h)
+        await h.session.bootstrap()
+        let stage = try XCTUnwrap(h.model.stage)
+        XCTAssertTrue(stage.isPlaying)
+        let other = try changed(battle(), ["battleId": "bt_other", "state": "PENDING", "config": NSNull(), "result": NSNull(), "roundSeq": 0, "journal": [], "createdAt": 5])
+        try await list(h, [first, other])
+        await h.session.refresh()
+        await h.session.perform(.openBattle("bt_other"))
+        XCTAssertFalse(stage.isPlaying)
+        XCTAssertNil(h.model.stage)
+    }
+
+    // MARK: Reconstruction and release
+
+    func testRefetchedResolverSeedsWithoutReplayingTheBattle() async throws {
+        let final = try battle(), first = try running(final, rounds: 2, ["roundSeq": 3, "deadline": 61000])
+        let h = try await setup([first], roomForRoster: final)
+        await showScreen(h)
+        await h.session.bootstrap()
+        let stage = try XCTUnwrap(h.model.stage)
+        XCTAssertTrue(stage.isPlaying)
+        // A rewritten journal prefix poisons the resolver; the room's authoritative read rebuilds it.
+        let rewritten = final.journal.prefix(3).map { OnlineBattlePair(roundSeq: $0.roundSeq, p1: $0.p1, p2: $0.p2, releasedAt: $0.releasedAt + 1) }
+        let rejected = try changed(first, ["roundSeq": 4, "journal": try JSONSerialization.jsonObject(with: JSONEncoder().encode(rewritten))])
+        try await list(h, [rejected])
+        await h.http.route("/v1/battles/\(final.battleId)", try JSONEncoder().encode(rejected))
+        await h.session.refresh()
+        XCTAssertTrue(h.model.stage === stage, "the stage survives a new resolver")
+        XCTAssertFalse(stage.isPlaying, "the rebuilt log is not staged again")
+        XCTAssertEqual(stage.playback.history.map(\.id), Array(Set(stage.playback.history.map(\.id))).sorted())
+        let view = try XCTUnwrap(h.model.arena)
+        XCTAssertEqual(stage.playback.display[.player]?.hp, view.p1.hp)
+        XCTAssertEqual(stage.playback.display[.opponent]?.hp, view.p2.hp)
+    }
+
+    func testGenerationResetsDropTheStage() async throws {
+        let final = try battle(), first = try running(final, rounds: 1, ["roundSeq": 2, "deadline": 61000])
+        let group = OnlineBattleGroup(groupId: "group", name: "Test", hostTrainerId: "trainer-two")
+        let trainer = OnlineBattleTrainer(trainerId: "trainer-one", displayEmail: "synthetic@example.invalid", role: .member, status: .active)
+        for reset in 0..<3 {
+            let h = try await setup([first], roomForRoster: final)
+            await showScreen(h)
+            await h.session.bootstrap()
+            XCTAssertEqual(h.model.stage?.isPlaying, true)
+            switch reset {
+            case 0: await h.session.setEnabled(false)
+            case 1: await h.session.configureServer("https://new-battle.example.invalid")
+            default:
+                let grant = try JSONSerialization.data(withJSONObject: ["trainer": JSONSerialization.jsonObject(with: JSONEncoder().encode(trainer)), "group": JSONSerialization.jsonObject(with: JSONEncoder().encode(group)), "accessKey": "new-synthetic-key", "recoveryCode": "new-synthetic-code"])
+                await h.http.route("/v1/join", grant)
+                try await list(h, [])
+                await h.session.perform(.join(inviteCode: "SYNTHETIC", email: "synthetic@example.invalid"))
+            }
+            XCTAssertNil(h.model.stage, "reset \(reset)")
+        }
+    }
+}
+
+private enum SHA256Hex {
+    static func of(_ text: String) -> String { SHA256.hash(data: Data(text.utf8)).map { String(format: "%02x", $0) }.joined() }
 }

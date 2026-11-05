@@ -1011,6 +1011,7 @@ final class OnlineBattleSession {
         try await process(result, account: account, api: api, epoch: epoch)
         try rebuildRoster(); publish()
     }
+    func tickStage() {}
     func tick() async {
         guard onlineAllowed, authenticated else { return }
         let now = clock.now()
