@@ -28,6 +28,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private var onlineAccessObservation: OnlineBattleAccessObservation?
     private var online: OnlineBattleSession?
     private var onlinePresentation = OnlineBattlePresentation()
+    private var onlineAttention = OnlineAttentionSource(presentation: OnlineBattlePresentation())
+    private var appliedOnlineMark: OnlineMenuMark?
+    private var onlineMarkTimer: Timer?
     var onOpenPractice: (() -> Void)?
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
@@ -192,6 +195,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         observePowerState()
         observePractice()
         observeCurrentHealth()
+        observeOnlineMark()
         observeOnlineAccess()
         applyState()
         if Self.launchRequestsPractice(arguments: CommandLine.arguments) {
@@ -268,6 +272,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
                 accessAllowed: { !KeychainAccessGate.isDisabled },
                 localization: { [companion = companion!] in companion.l })
             online = session; onlinePresentation = session.presentation
+            // stagingHeldBattleIDs stays at its empty default here; the staging work passes the real set at this one spot.
+            onlineAttention = OnlineAttentionSource(presentation: session.presentation,
+                                                    preparedBattleIDs: { [weak session] in session?.preparedBattleIDs() ?? [] })
             Task { await session.bootstrap() }
         } catch {
             onlinePresentation.notice = "온라인 설정을 읽지 못했어요. 저장 폴더를 확인해 주세요."
@@ -310,6 +317,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         }
     }
 
+    /// Online mark: any presentation change that moves the mark redraws the menu bar, and a timer covers the two
+    /// moments the clock alone changes it (a turn reaching ten seconds, and its deadline).
+    private func observeOnlineMark() {
+        withObservationTracking {
+            _ = onlineAttention.menuMark(l: companion.l)
+        } onChange: { [weak self] in
+            Task { @MainActor in
+                guard let self else { return }
+                if self.onlineAttention.menuMark(l: self.companion.l) != self.appliedOnlineMark { self.applyState() }
+                self.scheduleOnlineMarkTimer()
+                self.observeOnlineMark()
+            }
+        }
+        scheduleOnlineMarkTimer()
+    }
+
+    private func scheduleOnlineMarkTimer() {
+        onlineMarkTimer?.invalidate()
+        onlineMarkTimer = nil
+        guard let next = onlineAttention.nextMarkChange() else { return }
+        // A hair late, so the clock is past the boundary when the mark is recomputed.
+        onlineMarkTimer = Timer.scheduledTimer(withTimeInterval: max(0.1, next.timeIntervalSinceNow + 0.05), repeats: false) { [weak self] _ in
+            Task { @MainActor in
+                guard let self else { return }
+                if self.onlineAttention.menuMark(l: self.companion.l) != self.appliedOnlineMark { self.applyState() }
+                self.scheduleOnlineMarkTimer()
+            }
+        }
+    }
+
     /// 저전력 모드 토글을 즉시 반영 — 유효 하한(`menuFrameFloor`)이 바뀌면 `menuSpriteKey` 가
     /// 달라져 `ensureMenuAnimation()` 이 재구성한다(선택이 powerSaver 면 하한 불변 → 재구성 없음,
     /// 이미 그 프레임률이라 옳다). 플로팅 펫은 자체 관측(`FloatingPetController`)으로 따로 처리.
@@ -333,10 +370,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         // 현재 포켓몬이 기절했으면(PR 03C) 회복할 때까지 첫 줄 끝 표식 + 툴팁 한 줄 + (그 포켓몬을 보여 줄 때) 흐린 스프라이트.
         let faint = currentFaintLook
         appliedFaintLook = faint
-        Self.applyMenuText(Self.menuLines(store.menuLines, badge: Self.menuBadge(practice: badge, fainted: faint.fainted)),
-                           to: button, colors: store.menuLimitColorRuns())
+        let onlineMark = onlineAttention.menuMark(l: companion.l)
+        appliedOnlineMark = onlineMark
+        Self.applyMenuText(Self.menuLines(store.menuLines, badge: Self.menuBadge(practice: badge, fainted: faint.fainted, online: onlineMark?.text)),
+                           to: button, colors: store.menuLimitColorRuns(), onlineMark: onlineMark)
         button.toolTip = Self.menuToolTip(base: store.menuToolTip, badge: badge, resultReady: !practice.resultSeen,
-                                          faintedName: faint.fainted ? companion.displayName : nil, l: companion.l)
+                                          faintedName: faint.fainted ? companion.displayName : nil,
+                                          onlineLine: onlineMark?.tooltip, l: companion.l)
         CATransaction.begin()
         CATransaction.setDisableActions(true)   // 레이어 속성 변경도 전환 애니메이션 없이(setStatusImage 와 같은 규칙)
         spriteLayer.opacity = Self.statusSpriteOpacity(fainted: faint.fainted, showsCurrent: faint.showsCurrent)
@@ -358,7 +398,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     /// 줄 수에 맞춰 폰트를 자동 축소해 N줄이 메뉴바 높이에 클리핑 없이 들어오게 한다. 한도 항목 색
     /// (`colors`) 외에는 색을 지정하지 않아 메뉴바 명암(라이트/다크)·비활성(appearsDisabled) 상태에 자동 적응한다.
     private static func applyMenuText(_ lines: [String], to button: NSStatusBarButton,
-                                      colors: [UsageStore.MenuLimitColorRun]) {
+                                      colors: [UsageStore.MenuLimitColorRun], onlineMark: OnlineMenuMark? = nil) {
         if lines.count >= 2 {
             // NSStatusBarButton 은 멀티라인 title 을 세로 중앙에 두지 않고 위로 치우쳐 그린다(측정:
             // titleRect.y 가 음수 → 상단 클리핑 + 하단 여백, 사용자 지적). 그래서 baselineOffset 을
@@ -379,6 +419,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
                     string: lines.joined(separator: "\n"),
                     attributes: [.font: font, .paragraphStyle: para, .baselineOffset: offset])
                 MenuLimitColoring.apply(colors, to: title)
+                MenuOnlineMarkColoring.apply(onlineMark, to: title)
                 return title
             }
             let bounds = button.bounds
@@ -395,11 +436,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             // 1줄로 되돌릴 때 이전 attributedTitle 이 남지 않게 먼저 비운다.
             button.attributedTitle = NSAttributedString(string: "")
             let title = lines.first ?? ""
-            if !colors.isEmpty, !title.isEmpty {
+            if (!colors.isEmpty || MenuOnlineMarkColoring.color(for: onlineMark?.tone ?? .ongoing) != nil), !title.isEmpty {
                 let colored = NSMutableAttributedString(
                     string: " " + title,
                     attributes: [.font: button.font ?? NSFont.menuBarFont(ofSize: 0)])
                 MenuLimitColoring.apply(colors, to: colored)
+                MenuOnlineMarkColoring.apply(onlineMark, to: colored)
                 button.attributedTitle = colored
             } else {
                 button.title = title.isEmpty ? "" : " " + title
@@ -726,7 +768,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         popover.contentViewController = NSHostingController(
             rootView: PopoverView()
                 .environment(store).environment(companion).environment(updater).environment(navigation)
-                .environment(practice).environment(onlinePresentation))
+                .environment(practice).environment(onlinePresentation).environment(onlineAttention))
     }
 
     @objc private func statusItemClicked() {

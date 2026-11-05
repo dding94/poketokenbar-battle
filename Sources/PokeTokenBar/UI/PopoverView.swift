@@ -99,6 +99,7 @@ struct PopoverView: View {
     /// (tests, previews) keep the tabs and hide the practice entry points.
     @Environment(PracticeSession.self) private var practice: PracticeSession?
     @Environment(OnlineBattlePresentation.self) private var onlineBattle: OnlineBattlePresentation?
+    @Environment(OnlineAttentionSource.self) private var onlineAttention: OnlineAttentionSource?
 
     private var l: L { companion.l }
     @State private var showingClaudeKeychainHelp = false
@@ -197,13 +198,7 @@ struct PopoverView: View {
                             PracticeEntryRow(session: practice, l: l) { nav.showingPractice = true }
                         }
                         if onlineBattle != nil {
-                            Button { nav.showingOnlineBattle = true } label: {
-                                HStack {
-                                    Label(l.onlineTitle, systemImage: "network")
-                                    Spacer()
-                                    Image(systemName: "chevron.right").font(.caption)
-                                }.frame(maxWidth: .infinity).contentShape(Rectangle())
-                            }.buttonStyle(.plain).practiceCard()
+                            OnlineEntryRow(l: l, subtitle: onlineAttention?.homeSubtitle(l: l)) { nav.showingOnlineBattle = true }
                         }
                         Divider()
                         header

@@ -17,7 +17,19 @@ enum MenuLimitColoring {
 
 /// Colors the online mark at the end of the menu bar's first line. An ongoing room keeps the system text color.
 enum MenuOnlineMarkColoring {
-    static func color(for tone: OnlineMenuMark.Tone) -> NSColor? { nil }
+    static func color(for tone: OnlineMenuMark.Tone) -> NSColor? {
+        switch tone {
+        case .attention: .systemBlue
+        case .urgent: .systemRed
+        case .ongoing: nil
+        }
+    }
 
-    static func apply(_ mark: OnlineMenuMark?, to string: NSMutableAttributedString) {}
+    /// The mark sits at the end of the first line, so the last match in the text is the mark itself.
+    static func apply(_ mark: OnlineMenuMark?, to string: NSMutableAttributedString) {
+        guard let mark, let color = color(for: mark.tone) else { return }
+        let range = (string.string as NSString).range(of: mark.text, options: .backwards)
+        guard range.location != NSNotFound else { return }
+        string.addAttribute(.foregroundColor, value: color, range: range)
+    }
 }
