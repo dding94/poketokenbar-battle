@@ -213,11 +213,15 @@ struct OnlineBattleArena: View {
         .frame(maxWidth: .infinity, minHeight: Self.footerHeight, maxHeight: Self.footerHeight, alignment: .top)
     }
 
+    /// Only the battle's own rules lock a move card. A beat playing does not (D6): the server's clock keeps
+    /// running and the choice may be made while the last turn is still on screen.
+    func movesLocked(_ slot: Int) -> Bool { !model.canChooseMove(slot) }
+
     private func moveGrid(_ moves: [BattleMove]) -> some View {
         LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], spacing: 6) {
             ForEach(moves) { move in
                 PracticeMoveCard(move: namedMove(move), key: move.slot, snapshot: ownSnapshot, l: l, artwork: artwork,
-                                 locked: !model.canChooseMove(move.slot)) {
+                                 locked: movesLocked(move.slot)) {
                     model.send(.chooseMove(move.slot))
                 }
                 .accessibilityIdentifier("online.move.\(move.slot)")

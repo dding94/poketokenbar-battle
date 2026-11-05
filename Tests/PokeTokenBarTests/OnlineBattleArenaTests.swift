@@ -37,6 +37,23 @@ final class OnlineBattleArenaTests: XCTestCase {
         XCTAssertFalse(OnlineBattleArena.showsSkipToResult(mode: .manual, playing: true))
     }
 
+    /// D6: a choice is never held back by the beats. It reaches the session while a beat is on screen.
+    func testThePickerStaysOpenAndSendsAChoiceWhileTheBeatsPlay() throws {
+        let fixture = try OnlineBattleArenaFixture.arena(seat: .p1); defer { fixture.close() }
+        try fixture.play(rounds: 1)
+        XCTAssertTrue(fixture.staging.isPlaying)
+        var slots: [Int] = []
+        fixture.model.onAction = { if case .chooseMove(let slot) = $0 { slots.append(slot) } }
+        let arena = arenaView(fixture.model)
+        XCTAssertEqual(fixture.model.request?.kind, "move")
+        for move in fixture.model.request?.moves ?? [] { XCTAssertFalse(arena.movesLocked(move.slot), "slot \(move.slot)") }
+        fixture.model.send(.chooseMove(2))
+        XCTAssertEqual(slots, [2])
+        XCTAssertTrue(fixture.model.choiceSubmitted)
+        XCTAssertTrue(arena.movesLocked(1), "after the choice the picker locks until the next turn")
+        XCTAssertTrue(fixture.staging.isPlaying, "choosing leaves the beats alone")
+    }
+
     // MARK: cards follow the frame and the staging
 
     func testSecondSeatCardsShowOwnAndFoeFromTheFrame() throws {
