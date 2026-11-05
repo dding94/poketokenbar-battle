@@ -61,11 +61,14 @@ private actor SessionConnection: OnlineBattleConnecting {
     var stops = 0
     var state: OnlineBattleConnectionState = .connected
     var trainer = "trainer-one"
+    var connectionID: String? = "connection"
     func setTrainer(_ value: String) { trainer = value }
     func setState(_ value: OnlineBattleConnectionState) { state = value }
+    /// What a real reconnect does: the old id disappears with the socket, hello brings a new one.
+    func setConnection(_ value: OnlineBattleConnectionState, id: String?) { state = value; connectionID = id }
     func configure(origin: OnlineBattleOrigin?, accessKey: String?) { configurationCount += 1 }
     func setPopoverOpen(_ open: Bool) {}
-    func snapshot() -> OnlineBattleConnectionSnapshot { .init(state: state, generation: 1, connectionId: "connection", trainerId: trainer, groupId: "group") }
+    func snapshot() -> OnlineBattleConnectionSnapshot { .init(state: state, generation: 1, connectionId: connectionID, trainerId: trainer, groupId: "group") }
     func authenticationFailed(generation: UInt64) {}
     private var pauseStop = false
     private var stoppedWaiter: CheckedContinuation<Void, Never>?
@@ -1963,5 +1966,130 @@ final class OnlineBattleSessionTests: XCTestCase {
         let notice = try XCTUnwrap(session.presentation.notice)
         XCTAssertTrue(notice.contains("expired"), notice)
         XCTAssertNil(notice.range(of: "[가-힣]", options: .regularExpression), notice)
+    }
+    // MARK: Review A F1.1: the server binds ready to one connection
+    private func confirmedRoom() throws -> OnlineBattleView {
+        try changed(battle(), ["state": "ACCEPTED", "config": NSNull(), "result": NSNull(), "confirmed": true, "roundSeq": 0, "journal": []])
+    }
+    private func sentConnectionIDs(_ http: SessionHTTP, _ id: String, action: String = "ready") async throws -> [String?] {
+        try await http.bodies("/v1/battles/\(id)/\(action)").map { body in
+            let object = try JSONSerialization.jsonObject(with: body) as? [String: Any]
+            return object?["connectionId"] as? String
+        }
+    }
+    /// The socket drops and comes back with a new id, in the order the real connection reports it.
+    private func reconnect(_ connection: SessionConnection, observer: SessionObserver, id: String) async {
+        await connection.setConnection(.retryWaiting, id: nil)
+        await observer.callback?(.changed(await connection.snapshot()))
+        await connection.setConnection(.connected, id: id)
+        await observer.callback?(.changed(await connection.snapshot()))
+    }
+    func testReconnectAfterReadySendsItAgainSoTheRoomCanStillStart() async throws {
+        let final = try battle(), accepted = try confirmedRoom()
+        let ready = try changed(final, ["state": "READY", "result": NSNull(), "roundSeq": 0, "journal": []])
+        let running = try changed(final, ["state": "RUNNING", "result": NSNull(), "roundSeq": 1, "journal": []])
+        let connection = SessionConnection(), observer = SessionObserver()
+        let (session, http, _, _) = try await setup([accepted], connection: connection, observer: observer)
+        await http.route("/v1/battles/\(final.battleId)/ready", try JSONEncoder().encode(accepted))
+        await http.route("/v1/battles/\(final.battleId)/start", try JSONEncoder().encode(running))
+        await session.bootstrap(); await session.perform(.prepareBattle)
+        XCTAssertTrue(session.presentation.localReady)
+        await reconnect(connection, observer: observer, id: "connection-b")
+        XCTAssertFalse(session.presentation.localReady, "The server no longer holds a ready from the old socket")
+        // The opponent readied meanwhile, so the server stays ACCEPTED until this side answers on its new socket.
+        await http.route("/v1/battles/\(final.battleId)/ready", try JSONEncoder().encode(ready))
+        await session.refresh()
+        let readies = try await sentConnectionIDs(http, final.battleId)
+        XCTAssertEqual(readies, ["connection", "connection-b"])
+        let starts = try await sentConnectionIDs(http, final.battleId, action: "start")
+        XCTAssertEqual(starts, ["connection-b"])
+        XCTAssertEqual(session.presentation.phase, .arena)
+    }
+    func testReconnectResendLeavesThePersonReadyOnTheNewConnectionWithoutRepeating() async throws {
+        let accepted = try confirmedRoom()
+        let connection = SessionConnection(), observer = SessionObserver()
+        let (session, http, _, _) = try await setup([accepted], connection: connection, observer: observer)
+        await http.route("/v1/battles/\(accepted.battleId)/ready", try JSONEncoder().encode(accepted))
+        await session.bootstrap(); await session.perform(.prepareBattle)
+        await reconnect(connection, observer: observer, id: "connection-b")
+        await session.refresh(); await session.refresh()
+        let readies = try await sentConnectionIDs(http, accepted.battleId)
+        XCTAssertEqual(readies, ["connection", "connection-b"], "One gesture is sent once per connection")
+        XCTAssertTrue(session.presentation.localReady)
+        XCTAssertFalse(session.presentation.canPrepare)
+        XCTAssertEqual(session.preparedBattleIDs(), [accepted.battleId])
+    }
+    func testResendThatTheServerRefusesGivesTheButtonAndTheMarkBack() async throws {
+        let accepted = try confirmedRoom()
+        let connection = SessionConnection(), observer = SessionObserver()
+        let (session, http, _, _) = try await setup([accepted], connection: connection, observer: observer)
+        await http.route("/v1/battles/\(accepted.battleId)/ready", try JSONEncoder().encode(accepted))
+        await session.bootstrap(); await session.perform(.prepareBattle)
+        await reconnect(connection, observer: observer, id: "connection-b")
+        await http.route("/v1/battles/\(accepted.battleId)/ready", errorBody("not_ready"), status: 409)
+        await session.refresh()
+        XCTAssertFalse(session.presentation.localReady)
+        XCTAssertTrue(session.presentation.canPrepare, "The person has to be able to press it again")
+        XCTAssertEqual(session.preparedBattleIDs(), [], "The mark asks for the press again")
+        XCTAssertEqual(session.presentation.phase, .room)
+    }
+    func testResendSkipsWhenTheEntryChangedAndLeavesTheChoiceToThePerson() async throws {
+        let accepted = try confirmedRoom()
+        let connection = SessionConnection(), observer = SessionObserver()
+        let (session, http, _, effects) = try await setup([accepted], connection: connection, observer: observer)
+        await http.route("/v1/battles/\(accepted.battleId)/ready", try JSONEncoder().encode(accepted))
+        await session.bootstrap(); await session.perform(.prepareBattle)
+        effects.setHealthShare(0.5, of: "instance-one")
+        await reconnect(connection, observer: observer, id: "connection-b")
+        await session.refresh()
+        let readies = try await sentConnectionIDs(http, accepted.battleId)
+        XCTAssertEqual(readies, ["connection"], "A changed entry must not be readied on the person's behalf")
+        XCTAssertFalse(session.presentation.localReady)
+        XCTAssertEqual(session.preparedBattleIDs(), [])
+    }
+    func testReadyPendingOnADroppedSocketStaysQuietOnTheMarkButNotOnTheButton() async throws {
+        let accepted = try confirmedRoom()
+        let connection = SessionConnection(), observer = SessionObserver()
+        let (session, http, _, _) = try await setup([accepted], connection: connection, observer: observer)
+        await http.route("/v1/battles/\(accepted.battleId)/ready", try JSONEncoder().encode(accepted))
+        await session.bootstrap(); await session.perform(.prepareBattle)
+        await connection.setConnection(.retryWaiting, id: nil)
+        await observer.callback?(.changed(await connection.snapshot()))
+        XCTAssertEqual(session.preparedBattleIDs(), [accepted.battleId], "A socket blip is no reason to notify; the press is sent again on hello")
+        XCTAssertFalse(session.presentation.localReady)
+        XCTAssertEqual(session.presentation.prepareBlock, .connecting)
+    }
+    func testFailedReadAfterReconnectCannotPromiseTheResendAnyMore() async throws {
+        let accepted = try confirmedRoom()
+        let connection = SessionConnection(), observer = SessionObserver()
+        let (session, http, _, _) = try await setup([accepted], connection: connection, observer: observer)
+        await http.route("/v1/battles/\(accepted.battleId)/ready", try JSONEncoder().encode(accepted))
+        await session.bootstrap(); await session.perform(.prepareBattle)
+        await reconnect(connection, observer: observer, id: "connection-b")
+        await http.route("/v1/battles", Data(), status: 503)
+        await session.refresh()
+        XCTAssertEqual(session.preparedBattleIDs(), [], "Nothing will send it now, so the mark asks for the press")
+        XCTAssertTrue(session.presentation.canPrepare)
+    }
+    func testReadyRoomReconnectStartsOnTheNewConnectionAndKeepsTheFlag() async throws {
+        let final = try battle(), ready = try changed(final, ["state": "READY", "result": NSNull(), "roundSeq": 0, "journal": []])
+        let connection = SessionConnection(), observer = SessionObserver()
+        let (session, http, _, _) = try await setup([ready], connection: connection, observer: observer)
+        await http.route("/v1/battles/\(final.battleId)/start", try JSONEncoder().encode(ready))
+        await session.bootstrap(); await session.perform(.prepareBattle)
+        XCTAssertTrue(session.presentation.localReady)
+        await reconnect(connection, observer: observer, id: "connection-b")
+        await session.refresh()
+        let starts = try await sentConnectionIDs(http, final.battleId, action: "start")
+        XCTAssertEqual(starts, ["connection", "connection-b"])
+        XCTAssertTrue(session.presentation.localReady)
+    }
+    func testRefusedStartDoesNotReadAsReady() async throws {
+        let final = try battle(), ready = try changed(final, ["state": "READY", "result": NSNull(), "roundSeq": 0, "journal": []])
+        let (session, http, _, _) = try await setup([ready])
+        await http.route("/v1/battles/\(final.battleId)/start", Data(), status: 503)
+        await session.bootstrap(); await session.perform(.prepareBattle)
+        XCTAssertFalse(session.presentation.localReady, "A failed start must not read as received")
+        XCTAssertTrue(session.presentation.canPrepare, "Nothing else would retry it on this screen")
     }
 }
