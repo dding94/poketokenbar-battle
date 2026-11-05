@@ -67,6 +67,11 @@ final class OnlineBattlePresentation {
     /// Set by the session: this app's ready call for the open room was accepted by the server.
     var localReady = false
     var canRetryCredentialSave = false
+    /// A saved account exists but has not been read yet, so there is nothing to sign up for.
+    var restoringAccount = false { didSet { if !restoringAccount { showsSetupWhileRestoring = false } } }
+    /// The way out when the saved account cannot be reached: recover it, or use another server.
+    var showsSetupWhileRestoring = false
+    var showsRestoringAccount: Bool { restoringAccount && !showsSetupWhileRestoring }
     var selectedEntryID: String?
     var selectedOpponentID: String?
     var mode: OnlineBattleMode = .manual
@@ -152,6 +157,9 @@ final class OnlineBattlePresentation {
         case .cancelRematch: guard rematchSourceID != nil else { return }
         case .setPopoverVisible, .setOnlineScreenVisible, .skipStage, .setStageSpeed:
             break
+        case .showSetupWhileRestoring:
+            showsSetupWhileRestoring = true
+            return
         case .dismissNotice:
             // Pure presentation: closing a banner never reaches the session or the server.
             notice = nil; stickyNotice = nil
@@ -240,5 +248,5 @@ enum OnlineBattleUIAction {
     case accept(String), confirm(String), prepareBattle(String), decline(String), cancel(String)
     case showStandings, refreshStandings, prepareRematch(String), submitRematch, cancelRematch
     case showHistory, openReplay(String), seekReplay(Int), closeReplay
-    case chooseMove(Int), dismissResult, backToLobby, dismissNotice
+    case chooseMove(Int), dismissResult, backToLobby, dismissNotice, showSetupWhileRestoring
 }

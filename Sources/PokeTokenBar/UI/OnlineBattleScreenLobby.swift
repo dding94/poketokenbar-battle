@@ -57,7 +57,7 @@ struct OnlineBattleLobby: View {
                         HStack {
                             VStack(alignment: .leading, spacing: 3) {
                                 Text(opponentName(battle)).font(.callout).lineLimit(1).truncationMode(.middle)
-                                Text(l.onlineState(battle.state)).font(.caption2).foregroundStyle(.secondary)
+                                Text(l.onlineRoomState(battle)).font(.caption2).foregroundStyle(.secondary)
                             }
                             Spacer(minLength: 4)
                             Image(systemName: "chevron.right").font(.caption)

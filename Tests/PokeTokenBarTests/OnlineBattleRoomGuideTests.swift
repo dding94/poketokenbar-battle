@@ -5,6 +5,15 @@ import XCTest
 /// and why a button is disabled. Synthetic data only.
 @MainActor
 final class OnlineBattleRoomGuideTests: XCTestCase {
+    func testListRowFollowsTheStepTheRoomIsOn() {
+        for l in [L(.ko), L(.en)] {
+            let confirmed = OnlineBattleScreenRenderingTests.room(state: .accepted, confirmed: true)
+            let unconfirmed = OnlineBattleScreenRenderingTests.room(state: .accepted, confirmed: false)
+            XCTAssertEqual(l.onlineRoomState(confirmed), l.onlineState(.ready), "Final confirmation is already done")
+            XCTAssertEqual(l.onlineRoomState(unconfirmed), l.onlineState(.accepted))
+            XCTAssertEqual(l.onlineRoomState(OnlineBattleScreenRenderingTests.room(state: .running)), l.onlineState(.running))
+        }
+    }
     private typealias Fixture = OnlineBattleScreenRenderingTests
 
     private func challenger(_ state: OnlineBattleState, confirmed: Bool = false) -> OnlineBattlePresentation {

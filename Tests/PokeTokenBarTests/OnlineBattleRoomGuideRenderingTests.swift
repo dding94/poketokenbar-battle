@@ -64,6 +64,11 @@ final class OnlineBattleRoomGuideRenderingTests: XCTestCase {
         },
         .init(name: "challenger-2b-accepted-long-nickname") { challenger($0, state: .accepted); named($0, longNickname) },
         .init(name: "lobby-fainted-entry") { $0.phase = .lobby; $0.entryHP["synthetic-pikachu"] = 0 },
+        .init(name: "lobby-row-confirmed-and-unconfirmed") {
+            $0.phase = .lobby
+            $0.battles = [OnlineBattleScreenRenderingTests.room(state: .accepted, confirmed: true, id: "synthetic-a"),
+                          OnlineBattleScreenRenderingTests.room(state: .accepted, confirmed: false, id: "synthetic-b")]
+        },
     ]
     static let allScenarios = baseScenarios + guideScenarios
 #else

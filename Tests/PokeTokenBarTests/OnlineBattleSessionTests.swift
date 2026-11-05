@@ -16,7 +16,13 @@ private actor SessionCredentials: OnlineBattleCredentialStoring {
     var fails = false
     func setFailure(_ value: Bool) { fails = value }
     func setKey(_ value: String?) { key = value }
-    func load(scope: OnlineBattleCredentialScope) -> String? { loads += 1; return key }
+    var failsLoad = false
+    func setLoadFailure() { failsLoad = true }
+    func load(scope: OnlineBattleCredentialScope) throws -> String? {
+        loads += 1
+        if failsLoad { throw OnlineBattleFailure.credentialsUnavailable }
+        return key
+    }
     func save(_ accessKey: String, scope: OnlineBattleCredentialScope) throws {
         saves += 1
         if fails { throw OnlineBattleFailure.credentialsUnavailable }
@@ -2434,5 +2440,69 @@ final class OnlineBattleSessionTests: XCTestCase {
         try await list(http, [try changed(confirmed, ["confirmed": false, "revision": confirmed.revision + 1])])
         await session.refresh()
         XCTAssertEqual(session.presentation.room?.confirmed, false)
+    }
+    // MARK: Review A F1.6: a saved account is not a new sign-up
+    func testSavedAccountOfflineWaitsInsteadOfOfferingTheSignUpForm() async throws {
+        let (session, http, _, _) = try await setup()
+        await http.route("/v1/me", Data(), status: 503)
+        await session.bootstrap()
+        XCTAssertEqual(session.presentation.phase, .setup)
+        XCTAssertTrue(session.presentation.showsRestoringAccount, "Nothing here is for this person to fill in")
+        await http.route("/v1/me", try JSONEncoder().encode(account))
+        await session.perform(.refresh)
+        XCTAssertFalse(session.presentation.showsRestoringAccount)
+        XCTAssertEqual(session.presentation.phase, .lobby)
+    }
+    func testNoSavedAccountShowsTheSignUpForm() async throws {
+        let credentials = SessionCredentials(); await credentials.setKey(nil)
+        let (session, _, _, _) = try await setup(credential: credentials)
+        await session.bootstrap()
+        XCTAssertEqual(session.presentation.phase, .setup)
+        XCTAssertFalse(session.presentation.showsRestoringAccount)
+    }
+    func testRevokedSavedAccountReturnsToTheFormForRecovery() async throws {
+        let (session, http, _, _) = try await setup()
+        await http.route("/v1/me", Data(), status: 401)
+        await session.bootstrap()
+        XCTAssertEqual(session.presentation.phase, .setup)
+        XCTAssertFalse(session.presentation.showsRestoringAccount)
+    }
+    func testKeychainFailureShowsTheFormWithItsError() async throws {
+        let credentials = SessionCredentials(); await credentials.setLoadFailure()
+        let (session, _, _, _) = try await setup(credential: credentials)
+        await session.bootstrap()
+        XCTAssertFalse(session.presentation.showsRestoringAccount)
+        XCTAssertEqual(session.presentation.notice, copy.onlineErrorKeySaveFailed)
+    }
+    func testWayOutOfTheWaitReachesTheFormAndEndsWithTheWait() async throws {
+        let (session, http, _, _) = try await setup()
+        await http.route("/v1/me", Data(), status: 503)
+        await session.bootstrap()
+        session.presentation.onAction = { _ in XCTFail("Opening the form is not a server action") }
+        session.presentation.send(.showSetupWhileRestoring)
+        XCTAssertFalse(session.presentation.showsRestoringAccount)
+        session.presentation.setupInput.nickname = "초안"
+        session.presentation.restoringAccount = false
+        session.presentation.restoringAccount = true
+        XCTAssertTrue(session.presentation.showsRestoringAccount, "The next wait starts from the wait, not the form")
+    }
+    func testAccountAndServerBoundariesEndTheWait() async throws {
+        for boundary in 0..<3 {
+            let (session, http, _, _) = try await setup()
+            await http.route("/v1/me", Data(), status: 503)
+            await session.bootstrap()
+            XCTAssertTrue(session.presentation.restoringAccount)
+            switch boundary {
+            case 0: await session.setEnabled(false)
+            case 1:
+                let grant = try JSONSerialization.data(withJSONObject: ["trainer": JSONSerialization.jsonObject(with: JSONEncoder().encode(account.trainer)), "group": JSONSerialization.jsonObject(with: JSONEncoder().encode(account.group)), "accessKey": "new-synthetic-key", "recoveryCode": "new-synthetic-code"])
+                await http.route("/v1/join", grant)
+                await session.perform(.join(inviteCode: "SYNTHETIC", email: "synthetic@example.invalid"))
+            default:
+                await http.route("/v1/me", try JSONEncoder().encode(account))
+                await session.configureServer("https://new-battle.example.invalid")
+            }
+            XCTAssertFalse(session.presentation.restoringAccount, "boundary \(boundary)")
+        }
     }
 }

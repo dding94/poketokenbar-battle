@@ -135,6 +135,10 @@ extension L {
     func onlineTurn(_ turn: Int, seconds: Int) -> String { online("\(turn)턴 · \(seconds)초", "Turn \(turn) · \(seconds)s") }
     func onlineXP(_ value: Int64) -> String { online("경험치 +\(value.formatted())", "XP +\(value.formatted())") }
     func onlineHP(_ value: Int) -> String { "HP \(value)%" }
+    /// One room in a list. ACCEPTED covers two steps, so the row follows the same step the room's guide shows.
+    func onlineRoomState(_ battle: OnlineBattleView) -> String {
+        onlineState(battle.state)
+    }
     func onlineState(_ state: OnlineBattleState) -> String {
         switch state {
         case .pending: online("수락 대기", "Awaiting acceptance")
@@ -151,6 +155,9 @@ extension L {
     }
 
     // MARK: Error notices
+    var onlineRestoringTitle: String { online("저장된 계정으로 연결하고 있어요", "Connecting with your saved account") }
+    var onlineRestoringHint: String { online("연결되면 그룹 화면으로 바로 이어져요. 따로 입력할 것은 없어요.", "You will go straight to your group once connected. There is nothing to enter.") }
+    var onlineRestoringOther: String { online("다른 계정이나 서버로 연결", "Use another account or server") }
     var onlineErrorGeneric: String { online("온라인 정보를 확인하지 못했어요. 연결을 확인하고 다시 시도해 주세요.", "Could not read online information. Check your connection and try again.") }
     var onlineErrorKeySaveFailed: String { online("접속키를 안전하게 저장하지 못했어요. 저장을 다시 시도해 주세요.", "Could not save your access key safely. Try saving again.") }
     var onlineErrorKeySaveDisabled: String { online("접속키 저장이 꺼져 있어요. 설정을 확인해 주세요.", "Access key storage is turned off. Check your settings.") }
