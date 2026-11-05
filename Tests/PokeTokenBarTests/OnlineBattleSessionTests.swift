@@ -790,6 +790,7 @@ final class OnlineBattleSessionTests: XCTestCase {
         let credentials = SessionCredentials(); await credentials.setKey(nil)
         let (session, http, _, _) = try await setup(credential: credentials, embeddedServer: "https://embedded.example.invalid")
         await http.route("/v1/join", try grantBody())
+        await session.bootstrap() // A started session is exactly where an unguarded inner join would reach the network.
         await session.perform(.applyingServer("https://other.example.invalid", .join(inviteCode: "invite", email: "synthetic@example.invalid")))
         XCTAssertEqual(session.presentation.serverAddress, "https://embedded.example.invalid")
         XCTAssertNil(session.presentation.account)
