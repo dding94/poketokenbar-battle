@@ -76,6 +76,20 @@ class CommittedAddressScanTests(unittest.TestCase):
             path.write_text('https://w.' + ACCOUNT + SUFFIX + '\n')
         self.assertEqual(self.scan().returncode, 0)
 
+    def test_release_source_check_runs_the_scan(self):
+        core = self.repo / 'Sources/PokeTokenBar/Core'
+        core.mkdir(parents=True)
+        for name in ('AppIdentity.swift', 'UpdateChecker.swift'):
+            shutil.copy(ROOT / 'Sources/PokeTokenBar/Core' / name, core / name)
+        for name in ('build-app.sh', 'battle.entitlements'):
+            shutil.copy(ROOT / 'scripts' / name, self.repo / 'scripts' / name)
+        baseline = validate('source', str(self.repo))
+        self.assertEqual(baseline.returncode, 0, baseline.stderr)
+        (self.repo / 'leak.md').write_text('https://w.' + ACCOUNT + SUFFIX + '\n')
+        leaked = validate('source', str(self.repo))
+        self.assertNotEqual(leaked.returncode, 0)
+        self.assertIn('leak.md', leaked.stderr)
+
     def test_the_real_repository_is_clean(self):
         result = validate('addresses', str(ROOT))
         self.assertEqual(result.returncode, 0, result.stderr)
