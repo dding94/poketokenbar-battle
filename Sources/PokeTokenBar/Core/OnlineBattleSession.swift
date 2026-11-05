@@ -97,6 +97,8 @@ final class OnlineBattleSession {
     private var prefersLobby = false
     private var navigationRevision: UInt64 = 0
     private var selectedBattleID: String?
+    /// The room on screen when nobody chose one, so a newer request cannot slide under its buttons.
+    private var pinnedBattleID: String?
     private var checkedDeadlines: [String: Double] = [:]
     private struct ChallengeIntent {
         let sourceID: String?
@@ -137,7 +139,7 @@ final class OnlineBattleSession {
         authenticated = false; reconciled = false; bootstrapped = false; actionInFlight = false
         pendingGrant = nil; challengeIntent = nil; prepared = [:]; liveConnectionID = nil; acknowledgedStarts = []; submittedReports = []
         for resolver in resolvers.values { resolver.close() }; resolvers = [:]; views = [:]; historyViews = [:]; dropStagings()
-        selectedBattleID = nil; resultByBattleID = [:]; prefersLobby = false; checkedDeadlines = [:]; nextRecoveryRead = nil
+        selectedBattleID = nil; pinnedBattleID = nil; resultByBattleID = [:]; prefersLobby = false; checkedDeadlines = [:]; nextRecoveryRead = nil
         presentation.account = nil; presentation.members = []; presentation.battles = []
         resetBattleRuntime(); resetExtras(); clearHistory(); presentation.liveLogs = []
         presentation.room = nil; presentation.arena = nil; presentation.request = nil
@@ -178,7 +180,7 @@ final class OnlineBattleSession {
             let old = connection; connection = nil
             for resolver in resolvers.values { resolver.close() }
             dropStagings()
-            resolvers = [:]; views = [:]; historyViews = [:]; selectedBattleID = nil; resultByBattleID = [:]; prefersLobby = false; checkedDeadlines = [:]
+            resolvers = [:]; views = [:]; historyViews = [:]; selectedBattleID = nil; pinnedBattleID = nil; resultByBattleID = [:]; prefersLobby = false; checkedDeadlines = [:]
             api = nil; origin = nil; pendingGrant = nil; challengeIntent = nil
             authenticated = false; reconciled = false; actionInFlight = false
             refreshAgain = false; prepared = [:]; liveConnectionID = nil; acknowledgedStarts = []; submittedReports = []; nextRecoveryRead = nil
@@ -413,7 +415,7 @@ final class OnlineBattleSession {
             for resolver in resolvers.values { resolver.close() }
             dropStagings()
             resolvers = [:]; views = [:]; historyViews = [:]; resultByBattleID = [:]
-            selectedBattleID = nil; prefersLobby = false; checkedDeadlines = [:]; nextRecoveryRead = nil
+            selectedBattleID = nil; pinnedBattleID = nil; prefersLobby = false; checkedDeadlines = [:]; nextRecoveryRead = nil
             prepared = [:]; liveConnectionID = nil; acknowledgedStarts = []; submittedReports = []; challengeIntent = nil
             presentation.account = nil; presentation.members = []; presentation.battles = []
             resetBattleRuntime(); resetExtras(); clearHistory(); presentation.liveLogs = []
@@ -709,11 +711,15 @@ final class OnlineBattleSession {
     /// The live room on screen. Only processed live views can drive the live room/result; archive summaries cannot settle it.
     private func displayedRoom() -> OnlineBattleView? {
         guard !prefersLobby else { return nil }
+        if let selected = selectedBattleID.flatMap({ views[$0] }) { return selected }
         // Only processed live views can drive the live room/result; archive summaries cannot settle it.
         let live = views.values.sorted { ($0.createdAt, $0.battleId) > ($1.createdAt, $1.battleId) }
         // A match in play or being verified outranks a newer request, so a relaunch returns to it.
         let inPlay = live.first(where: { $0.state == .running || $0.state == .reported })
-        return selectedBattleID.flatMap { views[$0] } ?? inPlay ?? live.first(where: { $0.state.isActive }) ?? live.first
+        // It also outranks a waiting room, but never takes the screen from another match or its result.
+        if let pinned = pinnedBattleID.flatMap({ views[$0] }),
+           inPlay == nil || ![.pending, .accepted, .ready, .declined, .cancelled, .expired].contains(pinned.state) { return pinned }
+        return inPlay ?? live.first(where: { $0.state.isActive }) ?? live.first
     }
     private func publish() {
         syncStages()
@@ -721,6 +727,8 @@ final class OnlineBattleSession {
         for (id, room) in historyViews { listed[id] = room }
         presentation.battles = listed.values.sorted { ($0.createdAt, $0.battleId) > ($1.createdAt, $1.battleId) }
         let room = displayedRoom()
+        // A first read publishes room by room; until it ends, an older request is not yet the one to keep.
+        if let room, reconciled || room.state == .running || room.state == .reported { pinnedBattleID = room.battleId }
         let staging = room.flatMap { stagings[$0.battleId] }
         // Progress is already done when this holds; it only keeps the arena up until the last beat ends.
         let holdsArena = staging?.isPlaying == true
@@ -862,7 +870,7 @@ final class OnlineBattleSession {
             if presentation.mode != mode { challengeIntent = nil }
             presentation.mode = mode; return
         case .acknowledgeRecoveryCode: presentation.recoveryCode = nil; return
-        case .dismissResult, .backToLobby: resetExtras(); clearHistory(); prefersLobby = true; navigationRevision &+= 1; selectedBattleID = nil; publish(); return
+        case .dismissResult, .backToLobby: resetExtras(); clearHistory(); prefersLobby = true; navigationRevision &+= 1; selectedBattleID = nil; pinnedBattleID = nil; publish(); return
         case .openBattle(let id): prefersLobby = false; navigationRevision &+= 1; selectedBattleID = id; publish(); return
         case .configureServer(let value): await configureServer(value); return
         case .applyingServer(let address, let inner):
@@ -1054,6 +1062,12 @@ final class OnlineBattleSession {
         }
     }
 
+    private func roomActionTarget(_ action: OnlineBattleUIAction) -> String? {
+        switch action {
+        case .accept(let id), .confirm(let id), .prepareBattle(let id), .decline(let id), .cancel(let id): id
+        default: nil
+        }
+    }
     private func battleAction(_ action: OnlineBattleUIAction, epoch: UInt64) async throws {
         let navigation = navigationRevision
         let isRematch: Bool
@@ -1103,7 +1117,10 @@ final class OnlineBattleSession {
                 presentation.rematchSourceID = nil; rematchFromHistory = false; clearHistory()
             }
         } else {
-            guard let room = presentation.room else { throw OnlineBattleFailure.invalidRequest }
+            // Addressed by the battle the press was made on. Whatever is on screen now must still be it.
+            guard let room = presentation.room, roomActionTarget(action).map({ $0 == room.battleId }) ?? true else {
+                throw OnlineBattleFailure.invalidRequest
+            }
             switch action {
             case .accept:
                 if room.side(for: account.trainer.trainerId) == .p2 {
