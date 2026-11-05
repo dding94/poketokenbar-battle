@@ -62,6 +62,8 @@ private actor SessionHTTP: OnlineBattleHTTPTransport {
         return response
     }
     func count(_ path: String) -> Int { requests.filter { $0.url?.path == path }.count }
+    /// The opening of a match reads the standings once in the background, so it can land between two looks at the count.
+    var countExceptStandings: Int { requests.filter { $0.url?.path != "/v1/standings" }.count }
 }
 private actor SessionConnection: OnlineBattleConnecting {
     var configurationCount = 0
@@ -796,7 +798,7 @@ final class OnlineBattleSessionTests: XCTestCase {
         let room = try battle()
         let (session, http, _, effects) = try await setup([room])
         await session.bootstrap()
-        let requests = await http.requests.count, calls = effects.effectCalls
+        let requests = await http.countExceptStandings, calls = effects.effectCalls
         let state = try JSONEncoder().encode(effects.state)
         await session.perform(.showHistory)
         XCTAssertTrue(session.presentation.showsHistory)
@@ -811,7 +813,7 @@ final class OnlineBattleSessionTests: XCTestCase {
         await session.perform(.closeReplay)
         XCTAssertNil(session.presentation.replay)
         XCTAssertTrue(session.presentation.showsHistory)
-        let after = await http.requests.count
+        let after = await http.countExceptStandings
         XCTAssertEqual(after, requests)
         XCTAssertEqual(effects.effectCalls, calls)
         // Encode sorted JSON to compare unchanged semantic state, irrespective of dictionary order.
@@ -872,7 +874,7 @@ final class OnlineBattleSessionTests: XCTestCase {
         let room = try changed(battle(), ["state": "VOID", "result": NSNull()])
         let (session, http, _, effects) = try await setup([room])
         await session.bootstrap()
-        let requests = await http.requests.count
+        let requests = await http.countExceptStandings
         await session.perform(.showHistory)
         await session.perform(.openReplay(room.battleId))
         XCTAssertEqual(session.presentation.selectedHistoryBattle?.state, .void)
@@ -881,7 +883,7 @@ final class OnlineBattleSessionTests: XCTestCase {
         await session.perform(.closeReplay)
         await session.perform(.openReplay("bt_unknown"))
         XCTAssertNil(session.presentation.selectedHistoryBattle)
-        let after = await http.requests.count
+        let after = await http.countExceptStandings
         XCTAssertEqual(after, requests)
         XCTAssertEqual(effects.effectCalls, 0)
     }
@@ -920,9 +922,9 @@ final class OnlineBattleSessionTests: XCTestCase {
         XCTAssertEqual(session.presentation.phase, .arena)
         XCTAssertEqual(session.presentation.request?.kind, "move")
         await session.perform(.showHistory)
-        let requests = await http.requests.count
+        let requests = await http.countExceptStandings
         await session.perform(.chooseMove(1))
-        let after = await http.requests.count
+        let after = await http.countExceptStandings
         XCTAssertEqual(after, requests)
     }
 
@@ -1699,7 +1701,7 @@ final class OnlineBattleSessionTests: XCTestCase {
     func testDisabledStartupDoesNotReadCredentialsOrUseNetworkAndEnableResumes() async throws {
         let (session, http, credentials, _) = try await setup(enabled: false)
         await session.bootstrap()
-        let loads = await credentials.loads, requests = await http.requests.count
+        let loads = await credentials.loads, requests = await http.countExceptStandings
         XCTAssertEqual(loads, 0); XCTAssertEqual(requests, 0)
         await session.setEnabled(true)
         XCTAssertEqual(session.presentation.account, account)
@@ -1719,8 +1721,8 @@ final class OnlineBattleSessionTests: XCTestCase {
         XCTAssertNil(session.presentation.account)
         let stops = await connection.stops; XCTAssertEqual(stops, 1)
         let key = await credentials.key; XCTAssertEqual(key, "test-key", "disabling never deletes saved access keys")
-        let count = await http.requests.count; await session.refresh(); await session.perform(.join(inviteCode: "x", email: "x@example.invalid"))
-        let after = await http.requests.count; XCTAssertEqual(after, count)
+        let count = await http.countExceptStandings; await session.refresh(); await session.perform(.join(inviteCode: "x", email: "x@example.invalid"))
+        let after = await http.countExceptStandings; XCTAssertEqual(after, count)
     }
     func testDisableWhileJoinResponseIsInFlightNeverSavesOrDisplaysGrant() async throws {
         let access = SessionAccess(), credentials = SessionCredentials(); await credentials.setKey(nil)
@@ -2964,7 +2966,7 @@ extension OnlineBattleSessionTests {
         await session.bootstrap()
         XCTAssertEqual(effects.state.onlineBattleHolds, [], "no build of this app can reach that server again")
         XCTAssertEqual(session.presentation.blockedEntryIDs, [])
-        let requests = await http.requests.count; XCTAssertEqual(requests, 0)
+        let requests = await http.countExceptStandings; XCTAssertEqual(requests, 0)
     }
     func testPracticeOpensAfterAnEmbeddedBuildLetsGoOfAnOldServerHold() async throws {
         let effects = SessionEffects()
@@ -3421,7 +3423,7 @@ extension OnlineBattleSessionTests {
     private func failFullReads(_ http: SessionHTTP) async {
         await http.route("/v1/battles", errorBody("internal"), status: 500)
     }
-    private func requestCount(_ http: SessionHTTP) async -> Int { await http.requests.count }
+    private func requestCount(_ http: SessionHTTP) async -> Int { await http.countExceptStandings }
     private func run(_ session: OnlineBattleSession, _ clock: SessionClock, seconds: Int, step: Double = 1) async {
         for _ in 0..<Int(Double(seconds) / step) { clock.advance(step); await session.tick() }
     }
