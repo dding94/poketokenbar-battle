@@ -437,7 +437,8 @@ struct PracticeMoveCard: View {
     private var multiplier: Double? { hint?.multiplier.flatMap { $0 == 1 ? nil : $0 } }
 
     var body: some View {
-        Button(action: action) {
+        // The marked card is not disabled (a disabled button greys its content): its choice is already in, so it does nothing.
+        Button(action: chosen ? {} : action) {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 4) {
                     name.font(.callout.weight(.semibold)).lineLimit(1).minimumScaleFactor(0.8).layoutPriority(1)
@@ -477,7 +478,7 @@ struct PracticeMoveCard: View {
             .contentShape(RoundedRectangle(cornerRadius: 10))
         }
         .buttonStyle(.plain)
-        .disabled(disabled)
+        .disabled(disabled && !chosen)
         .opacity(disabled && !chosen ? 0.45 : 1)
         .accessibilityAddTraits(chosen ? .isSelected : [])
         .keyboardShortcut(KeyEquivalent(Character(String(key))), modifiers: [])
