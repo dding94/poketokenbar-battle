@@ -30,10 +30,6 @@ PokeTokenBar turns the AI coding tokens you're already burning — Claude Code, 
 - See today's token spend & cost at a glance — no dashboard, no browser tab.
 - Track official **5-hour / weekly** limits with reset countdowns and a burn-rate forecast for when you'll hit them.
 
-<div align="center">
-<img src="assets/screenshot-home.png" width="420" alt="Popover home — companion, today's tokens, daily chart">
-</div>
-
 ## How it works
 
 1. 🥚 **Code as usual.** The tokens you burn in Claude Code, Codex, Gemini CLI, Antigravity, OpenCode, Hermes Agent, Cursor, Grok CLI, Copilot CLI, Kiro CLI, Pi Agent, omp, Aside, or Kimi Code incubate an egg — nothing extra to run.
@@ -47,36 +43,31 @@ PokeTokenBar turns the AI coding tokens you're already burning — Claude Code, 
 
 <table>
 <tr>
-<td width="45%" align="center"><img src="assets/floating-pet.gif" width="340" alt="Floating desktop pet with a hover callout and right-click menu"></td>
-<td width="55%" valign="middle">
+<td valign="middle">
 <h3>🐾 Let it live on your desktop</h3>
 Move your companion out of the menu bar and onto the desktop, at any size from 48 to 384px. Hover it for today's usage, click to open the popover, right-click for a menu, drag it wherever you like — and limit alerts can appear as a speech bubble above it.
 </td>
 </tr>
 <tr>
-<td width="55%" valign="middle">
+<td valign="middle">
 <h3>In your menu bar</h3>
 An animated Gen-V sprite lives next to today's total tokens (compact, e.g. <code>200.7M</code>). Add today's cost (<code>$</code>) or official limit <code>%</code> — or turn everything off for a character-only bar.
 </td>
-<td width="45%" align="center"><img src="assets/menubar.gif" width="240" alt="Menu bar"></td>
 </tr>
 <tr>
-<td width="45%" align="center"><img src="assets/shiny-banner.gif" width="340" alt="Normal vs shiny"></td>
-<td width="55%" valign="middle">
+<td valign="middle">
 <h3>✨ Once in a rare while — Shiny</h3>
 Shiny hatches keep their distinct colors through every evolution — menu bar, home card, evolution line. In the Pokédex, species you own shiny show their shiny colors and a ✨ marker; the detail page lets you switch between owned normal and shiny appearances. Unown keeps its A icon in the grid, with letter and color choices in its details. A dedicated notification makes sure you don't miss the moment.
 </td>
 </tr>
 <tr>
-<td width="55%" valign="middle">
+<td valign="middle">
 <h3>A Pokédex worth filling</h3>
 The <b>Pokédex</b> folds every species you've owned into one cell — 16 per page in a 4×4 grid. Search by name or number, filter by rarity or shiny appearance, and change the sort order. Turn pages with the scroll wheel or trackpad, or use the larger arrow hit areas. Click a collected Pokémon on Home, its evolution line, or the <b>Catch log</b> to open its details; Back returns to its Pokédex page or the log row you opened. The log keeps each individual's full evolution line, rarity, nature, and capture date.
 </td>
-<td width="45%" align="center"><img src="assets/screenshot-collection-pokedex.png" width="300" alt="Pokédex — one cell per species"><br><br><img src="assets/screenshot-collection-catchlog.png" width="300" alt="Catch log — one row per Pokémon raised"></td>
 </tr>
 <tr>
-<td width="45%" align="center"><img src="assets/screenshot-pokemon-forms.png" width="300" alt="Rotom form picker and form-specific individuals"><br><small>Production UI rendered locally with sample Pokémon.</small></td>
-<td width="55%" valign="middle">
+<td valign="middle">
 <h3>Collect more than one look</h3>
 Collect Rotom appliances, Shaymin's Land and Sky Formes, Deerling seasons, Unown letters, and other supported Gen 1–5 forms. The Pokédex shows your form count and the individuals in each form. Choose an owned form as your menu-bar and floating-pet representative. An East Sea Shellos keeps its appearance when it becomes Gastrodon, and forms stay in saves and exports. Types, stats, abilities, and moves use the default form’s data.
 </td>
@@ -89,15 +80,13 @@ Menu-bar items, refresh interval (1–15 min or manual), launch at login, a Keyc
 </td>
 </tr>
 <tr>
-<td width="55%" valign="middle">
+<td valign="middle">
 <h3>🍬 Fill a limit, earn a Rare Candy</h3>
 Max out a 5-hour or weekly usage limit and you're handed a <b>Rare Candy</b> — one per 5-hour cap, five per weekly. Spend it from the new <b>Bag</b> tab to grow your current Pokémon: the moment you're rate-limited becomes the moment you level up.
 </td>
-<td width="45%" align="center"><img src="assets/screenshot-bag.png" width="300" alt="Rare Candy and Mint in the Bag"></td>
 </tr>
 <tr>
-<td width="45%" align="center"><img src="assets/screenshot-shop.png" width="300" alt="Token Shop — Mint, Rare Candy, Pokémon Egg, Uncommon Egg, Shiny Charm, Rare Egg"></td>
-<td width="55%" valign="middle">
+<td valign="middle">
 <h3>🛒 A shop that runs on your usage</h3>
 The tokens you've already used are your currency. Buy several consumables at once with a quantity selector and total-price preview: <b>Rare Candy</b> grows your Pokémon, and a <b>Mint</b> re-rolls its nature. A <b>Shiny Charm</b> permanently raises your shiny hatch odds. Eggs send off your companion and start over: a plain <b>Pokémon Egg</b>, an <b>Uncommon Egg</b> guaranteed to hatch Uncommon or better, or a <b>Rare Egg</b> guaranteed to hatch Rare or better. Legendaries stay in both graded pools. An empty Bag links straight to the Shop.
 </td>
@@ -181,9 +170,7 @@ Reset countdowns include the clock time, and the colored percentage stays aligne
 - **Bulk Rare Candy** — use several candies at once and preview the growth before spending.
 - **Quota pace** — gauge markers show the elapsed share of a limit window; six color tiers indicate usage pace, and menu-bar limit percentages use the same colors.
 
-<img src="assets/screenshot-usage-recap.png" width="360" alt="Usage recap for a selected period">
-
-<small>The Home, Settings, form, Shop, Bag, difficulty, daily-chart, and recap images above are local renders of the production UI with sample data.</small>
+<small>Screenshots showing game sprites were removed from this fork. Sprites are fetched at runtime from [PokéAPI](https://pokeapi.co/) and are not bundled in the app. The remaining images are local renders of the production UI with sample data.</small>
 
 ## Works with
 

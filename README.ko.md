@@ -34,10 +34,6 @@ PokeTokenBar는 당신이 이미 태우고 있는 AI 코딩 토큰(Claude Code �
 - 오늘의 토큰 사용량과 비용을 한눈에 — 대시보드도, 브라우저 탭도 필요 없이.
 - 공식 **5시간 / 주간** 한도를 리셋 카운트다운과 함께 추적하고, 현재 burn rate로 언제 도달할지 예측합니다.
 
-<div align="center">
-<img src="assets/screenshot-home.png" width="420" alt="팝오버 홈 — 포켓몬, 오늘 토큰, 일별 차트">
-</div>
-
 ## 어떻게 자라나요
 
 1. 🥚 **평소처럼 코딩하세요.** Claude Code·Codex·Gemini CLI·Antigravity·OpenCode·Hermes Agent·Cursor·Grok CLI·Copilot CLI·Kiro CLI·Pi Agent·omp·Aside·Kimi Code에서 태우는 토큰이 알을 품습니다 — 따로 돌릴 건 없어요.
@@ -51,36 +47,31 @@ PokeTokenBar는 당신이 이미 태우고 있는 AI 코딩 토큰(Claude Code �
 
 <table>
 <tr>
-<td width="45%" align="center"><img src="assets/floating-pet.gif" width="340" alt="바탕화면 플로팅 펫 — 호버 콜아웃과 우클릭 메뉴"></td>
-<td width="55%" valign="middle">
+<td valign="middle">
 <h3>🐾 바탕화면에 두기</h3>
 파트너를 메뉴바 밖 바탕화면으로 꺼내 48~384px 원하는 크기로 둘 수 있어요. 호버하면 오늘 사용량, 클릭하면 팝오버, 우클릭하면 메뉴, 드래그로 위치 이동 — 한도 알림은 펫 위 말풍선으로도 떠요.
 </td>
 </tr>
 <tr>
-<td width="55%" valign="middle">
+<td valign="middle">
 <h3>메뉴바 속 파트너</h3>
 움직이는 Gen-V 스프라이트가 오늘 토큰 합계(compact, 예: <code>200.7M</code>) 옆에 삽니다. 오늘 비용(<code>$</code>)이나 공식 한도 <code>%</code> 를 더하거나 — 전부 꺼서 캐릭터만 남길 수도 있어요.
 </td>
-<td width="45%" align="center"><img src="assets/menubar.gif" width="240" alt="메뉴바"></td>
 </tr>
 <tr>
-<td width="45%" align="center"><img src="assets/shiny-banner.gif" width="340" alt="일반 vs 이로치"></td>
-<td width="55%" valign="middle">
+<td valign="middle">
 <h3>✨ 아주 드문 우연, 이로치</h3>
 이로치는 메뉴바·홈 카드·진화 라인에서 전용 색으로 표시되고 진화를 거쳐도 유지됩니다. 도감 격자에서도 이로치로 보유한 종을 이로치 색과 ✨로 표시하며, 상세에서 보유한 일반·이로치 모습을 전환합니다. 안농의 격자 아이콘은 A를 유지하고 상세에서 문자와 색을 고릅니다. 전용 알림으로 부화 순간을 알려 줍니다.
 </td>
 </tr>
 <tr>
-<td width="55%" valign="middle">
+<td valign="middle">
 <h3>채우고 싶어지는 도감</h3>
 <b>도감</b>은 보유한 종을 한 칸으로 접어 4×4 배치로 한 페이지 16칸씩 보여 줍니다. 이름·번호 검색, 희귀도·이로치 필터와 정렬을 지원합니다. 마우스 휠·트랙패드 또는 클릭 영역을 넓힌 화살표로 페이지를 넘기세요. 홈·진화 라인·<b>포획 로그</b>의 수집한 포켓몬을 누르면 상세로 이동하고, 뒤로가기는 보던 도감 페이지나 열었던 로그 행으로 돌아옵니다. 로그에는 개체별 전체 진화 라인·희귀도·성격·획득일이 남습니다.
 </td>
-<td width="45%" align="center"><img src="assets/screenshot-collection-pokedex-ko.png" width="300" alt="도감 — 종 하나가 한 칸"><br><br><img src="assets/screenshot-collection-catchlog-ko.png" width="300" alt="포획 로그 — 키운 개체 하나가 한 행"></td>
 </tr>
 <tr>
-<td width="45%" align="center"><img src="assets/screenshot-pokemon-forms-ko.png" width="300" alt="로토무 폼 선택기와 폼별 개체"><br><small>샘플 포켓몬으로 실제 UI를 로컬 렌더링한 이미지입니다.</small></td>
-<td width="55%" valign="middle">
+<td valign="middle">
 <h3>같은 종의 다른 모습까지 수집</h3>
 로토무 가전, 쉐이미 랜드·스카이폼, 사철록 계절 모습, 안농 문자 등 지원하는 1~5세대 폼을 수집합니다. 도감에서 수집한 폼 수와 폼별 개체를 보고, 보유한 폼을 메뉴바·플로팅 펫의 대표로 고르세요. 동쪽 깝질무는 동쪽 트리토돈으로 진화하며, 모습은 저장·내보내기에도 유지됩니다. 타입·능력치·특성·기술은 기본형 데이터를 표시합니다.
 </td>
@@ -93,15 +84,13 @@ PokeTokenBar는 당신이 이미 태우고 있는 AI 코딩 토큰(Claude Code �
 </td>
 </tr>
 <tr>
-<td width="55%" valign="middle">
+<td valign="middle">
 <h3>🍬 한도를 채우면 이상한 사탕</h3>
 5시간 또는 주간 사용량 한도를 다 채우면 <b>이상한 사탕</b>을 받습니다 — 5시간 한도당 1개, 주간 한도당 5개. 새 <b>가방</b> 탭에서 현재 포켓몬에게 써서 키우세요: 막히는 순간이 곧 성장하는 순간이 됩니다.
 </td>
-<td width="45%" align="center"><img src="assets/screenshot-bag-ko.png" width="300" alt="가방 속 이상한 사탕과 민트"></td>
 </tr>
 <tr>
-<td width="45%" align="center"><img src="assets/screenshot-shop-ko.png" width="300" alt="토큰 상점 — 민트·이상한 사탕·포켓몬 알·고급 알·이로치 부적·희귀 알"></td>
-<td width="55%" valign="middle">
+<td valign="middle">
 <h3>🛒 사용량으로 돌아가는 상점</h3>
 그동안 쓴 토큰이 곧 재화입니다. 수량과 총가격을 보고 소모품 여러 개를 한 번에 구매하세요. <b>이상한 사탕</b>은 현재 포켓몬을 키우고, <b>민트</b>는 성격을 다시 굴립니다. <b>이로치 부적</b>은 이로치 확률을 영구히 올립니다. 알을 사면 현재 포켓몬을 놓아주고 다시 시작합니다 — 일반 <b>포켓몬 알</b>, 고급 이상 확정 <b>고급 알</b>, 희귀 이상 확정 <b>희귀 알</b>을 고를 수 있고 등급 알에도 전설은 섞여 있습니다. 빈 가방에서는 버튼으로 바로 상점에 갈 수 있습니다.
 </td>
@@ -185,9 +174,7 @@ Pi는 모델 여러 개를 세션 로그 하나로 흘려보낼 수 있습니다
 - **이상한 사탕 일괄 사용** — 여러 사탕을 한 번에 사용하고, 사용 전 성장 결과를 미리 볼 수 있습니다.
 - **한도 사용 페이스** — 게이지의 경과 시간 표식과 6단계 색상으로 사용 속도를 확인합니다. 메뉴바 한도 비율도 같은 색상을 사용합니다.
 
-<img src="assets/screenshot-usage-recap-ko.png" width="360" alt="선택한 기간의 사용량 돌아보기">
-
-<small>위 홈·설정·폼·상점·가방·난이도·일별 차트·회고 이미지는 샘플 데이터로 실제 UI를 로컬 렌더링한 이미지입니다.</small>
+<small>게임 스프라이트가 보이는 스크린샷은 이 문서에서 뺐습니다. 스프라이트는 실행 중 [PokéAPI](https://pokeapi.co/)에서 내려받으며 앱 번들에 들어 있지 않습니다. 남은 이미지는 샘플 데이터로 실제 UI를 로컬 렌더링한 것입니다.</small>
 
 ## 지원 도구
 

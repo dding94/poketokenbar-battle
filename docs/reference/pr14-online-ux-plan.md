@@ -715,6 +715,27 @@ T02는 푸시 이벤트가 아니라 views 상태 비교로 정의한다. 재실
 
 먼저 쓸 테스트: 수동 확인: README에 임베드된 모든 이미지를 열어 실제 포켓몬 스프라이트가 없음을 확인하는 체크 표를 작성한다. 자동화하려면 assets 목록과 README 임베드 목록이 일치하는지 검사하는 스크립트를 먼저 둔다.
 
+T23 결과 (축소판 contact sheet로 72개 png/gif를 모두 확인, 의심되는 곳만 확대):
+
+- 아이콘: 번개 모양이 가운데를 가르는 파랑·주황 두 토큰. `assets/icon.svg`가 원본이고 `scripts/generate-icon.swift`가 같은 도형을 크기별로 직접 그려 `generate-icns.sh`가 `AppIcon.icns`, `icon_1024.png`를 만든다. `icon.png`(512)는 1024에서 줄인 것이다. 기존 아이콘은 사실 몬스터볼이었다.
+- 스프라이트 판정(게임 스프라이트나 게임 아이템 아이콘이 보이면 있음):
+
+| 이미지 | 스프라이트 | 처리 |
+|---|---|---|
+| floating-pet.gif, menubar.gif, shiny-banner.gif | 있음 | README 제거, 파일 삭제 |
+| screenshot-home.png/.gif | 있음 | 삭제 |
+| screenshot-bag, shop(-ko,-ja 포함) | 있음(사탕·민트·알 아이콘) | 삭제 |
+| screenshot-usage-recap, pokemon-forms, collection-pokedex, collection-catchlog(-ko,-ja 포함) | 있음 | 삭제 |
+| assets/pr-377/*, docs/pr/pokedex-back/* (6장) | 있음 | 참조가 없어 삭제 |
+| animation-quality, antigravity-limits, daily-trend, difficulty, model-breakdown, pace-marker, pokemon-profile, quota-alignment, scan-folders, session-key, settings (각 -ko,-ja 포함) | 없음 | 유지 |
+| screenshot-online-standings/rematch | 없음(합성, 회색 대체 아이콘) | 유지 |
+| assets/pr-snapshot-history/* (3장), docs/pr/individual-picker/* (3장) | 없음 | 유지 |
+| assets/icon.png, icon_1024.png | 새 아이콘 | 유지 |
+
+- README.ko.md, README.ja.md의 해당 임베드와 홈 대표 이미지·회고 이미지를 제거하고 안내문을 고쳤다. README.md는 원래 스프라이트 임베드가 없었고 PokéAPI 런타임 로딩 문장만 보강했다. README.upstream.md도 같은 임베드를 뺐다.
+- 자동 검사: `scripts/tests/test_readme_images.py`가 네 README의 로컬 이미지 임베드가 실제 파일을 가리키는지 확인한다. 깨진 링크를 일부러 넣어 실패하는 것을 확인했다.
+- 미확인: git 이력에는 삭제한 이미지가 남아 있다(이력은 다시 쓰지 않는다). pr-snapshot-history·settings 같은 세로로 긴 이미지는 일부 구간만 확대해 봤다.
+
 ### T24 — 두 맥 수동 시험표와 받는 맥 설치 안내(Gatekeeper) 문서화
 
 - 우선순위 P1 · 크기 S · 모델 sonnet medium

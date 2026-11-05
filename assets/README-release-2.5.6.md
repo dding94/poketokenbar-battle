@@ -1,5 +1,7 @@
 # 2.5.6 UI image provenance
 
+> **Note (PR 14):** the renders that show real game sprites or item icons (home, forms, shop, bag, usage recap, Pokédex, catch log, floating pet, menu bar, shiny banner) were removed from this repository. Their rows below describe how they were made and no longer point to files.
+
 These PNGs are local native renders of the production SwiftUI/AppKit views with sample Pokémon, items and usage. They are not captures of a real user's usage. English uses the unsuffixed filename; Korean and Japanese use `-ko` and `-ja`. The common Home image is English in all three READMEs.
 
 The renderer used source commit `9ae91bd5a8060d3b5c5dd17ad00237b699323648`. Its Git tree, `b8385908ebe56e85cce9728e2c821b69ed4ae7b0`, exactly matches the final integrated source commit `2c0212b573db5c0ff1dc8479bc4eb61c4670def1` before these image/document updates.
