@@ -21,18 +21,22 @@ describe("lockstep relay", () => {
     expect(retry.body.journal).toHaveLength(mode === "manual" ? 1 : 2);
     const duplicate = await publish(); expect(duplicate.status).toBe(200); expect(duplicate.body).toEqual(retry.body);
   });
-  it("opens round1 and never exposes the first choice or submission signal to its opponent", async () => {
+  it("opens round1 and shows its opponent only that a first choice is in, never which one", async () => {
     const f = await running(); const id = f.view.battleId;
     expect(f.view.roundSeq).toBe(1); expect(f.view.deadline).toBe(f.view.startedAt + 30000);
-    const before = (await getBattle(f.p2, id)).body;
+    const before = (await getBattle(f.p2, id)).body; expect(before.opponentSubmitted).toBe(false);
     const one = await action(f.p1, id, "choices", { roundSeq: 1, choice: "move 3" }); expect(one.status).toBe(200); expect(one.body.ownChoice).toBe("move 3");
-    expect((await getBattle(f.p2, id)).body).toEqual(before); await f.a.socket.sync(); await f.b.socket.sync();
+    expect(one.body.opponentSubmitted).toBe(false);
+    const seen = (await getBattle(f.p2, id)).body;
+    expect(seen).toEqual({ ...before, opponentSubmitted: true }); expect(JSON.stringify(seen)).not.toContain("move 3");
+    await f.a.socket.sync(); await f.b.socket.sync();
     const retry = await action(f.p1, id, "choices", { roundSeq: 1, choice: "move 3" }); expect(retry.body).toEqual(one.body);
     expectError(await action(f.p1, id, "choices", { roundSeq: 1, choice: "move 2" }), 409, "choice_conflict");
     const two = await action(f.p2, id, "choices", { roundSeq: 1, choice: "move 2" }); expect(two.status).toBe(200);
     expect(two.body.journal).toEqual([{ roundSeq: 1, p1: { kind: "move", slot: 3 }, p2: { kind: "move", slot: 2 }, releasedAt: expect.any(Number) }]);
     for (const socket of [f.a.socket, f.b.socket]) expect((await socket.until(m => m.type === "battle_round")).pair).toEqual(two.body.journal[0]);
-    const view = (await getBattle(f.p1, id)).body; expect(view.ownChoice).toBeNull();
+    const view = (await getBattle(f.p1, id)).body; expect(view.ownChoice).toBeNull(); expect(view.opponentSubmitted).toBe(false);
+    expect((await getBattle(f.p2, id)).body.opponentSubmitted).toBe(false);
     expect((await action(f.p1, id, "choices", { roundSeq: 1, choice: "move 3" })).body.journal).toHaveLength(1);
   });
   it("restores private own choice, config and journal after hibernation and reconnect", async () => {

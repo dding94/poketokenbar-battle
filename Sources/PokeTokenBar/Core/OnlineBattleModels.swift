@@ -167,6 +167,7 @@ struct OnlineBattleView: Codable, Equatable, Sendable {
     let rematchOf: String?
     func side(for trainerId: String) -> OnlineBattleSide? { p1.trainerId == trainerId ? .p1 : p2.trainerId == trainerId ? .p2 : nil }
 }
+extension OnlineBattleView { var opponentSubmitted: Bool? { nil } }
 struct OnlineBattlePage: Codable, Sendable { let battles: [OnlineBattleView]; let before: String? }
 struct OnlineBattleTrainer: Codable, Equatable, Sendable {
     enum Role: String, Codable, Sendable { case host, member }

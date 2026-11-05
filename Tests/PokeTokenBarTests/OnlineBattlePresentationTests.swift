@@ -302,6 +302,46 @@ extension OnlineBattlePresentationTests {
         XCTAssertNil(model.chosenSlot)
     }
 
+    // MARK: T16 the opponent has chosen
+
+    /// The fixture room as the server's view would carry the flag.
+    private static func room(opponentSubmitted: Bool?, mode: OnlineBattleMode = .manual, state: OnlineBattleState = .running) throws -> OnlineBattleView {
+        let base = OnlineBattleScreenRenderingTests.room(state: state, mode: mode)
+        var json = try XCTUnwrap(JSONSerialization.jsonObject(with: BattleJSON.encoder().encode(base)) as? [String: Any])
+        json["opponentSubmitted"] = opponentSubmitted.map { $0 as Any }
+        return try JSONDecoder().decode(OnlineBattleView.self, from: JSONSerialization.data(withJSONObject: json))
+    }
+
+    /// The flag alone is enough: it also shows while I have not chosen yet, which is what makes the other side's
+    /// choice felt. It wins over an offline presence, since a choice that is in is in.
+    func testTheOpponentHavingChosenShowsWhetherOrNotMyChoiceIsIn() throws {
+        for mine in [false, true] {
+            let model = waiting(online: true, submitted: mine)
+            model.room = try Self.room(opponentSubmitted: true)
+            XCTAssertEqual(model.opponentWait, .submitted, "my choice in: \(mine)")
+        }
+        let offline = waiting(online: false); offline.room = try Self.room(opponentSubmitted: true)
+        XCTAssertEqual(offline.opponentWait, .submitted)
+    }
+
+    func testWithoutTheFlagTheWaitStaysChoosingAsBefore() throws {
+        for flag in [nil, false] as [Bool?] {
+            let model = waiting(online: true); model.room = try Self.room(opponentSubmitted: flag)
+            XCTAssertEqual(model.opponentWait, .choosing, "flag \(String(describing: flag))")
+            let idle = waiting(submitted: false); idle.room = try Self.room(opponentSubmitted: flag)
+            XCTAssertNil(idle.opponentWait, "flag \(String(describing: flag)), nothing sent")
+        }
+    }
+
+    func testTheFlagIsIgnoredOutsideALiveManualRound() throws {
+        let auto = waiting(); auto.room = try Self.room(opponentSubmitted: true, mode: .auto)
+        XCTAssertNil(auto.opponentWait)
+        let pending = waiting(); pending.room = try Self.room(opponentSubmitted: true, state: .pending)
+        XCTAssertNil(pending.opponentWait)
+        let lobby = waiting(); lobby.room = try Self.room(opponentSubmitted: true); lobby.phase = .lobby
+        XCTAssertNil(lobby.opponentWait)
+    }
+
     private static func room(roundSeq: Int, ownChoice: String?) -> OnlineBattleView {
         let base = OnlineBattleScreenRenderingTests.room()
         return .init(battleId: base.battleId, state: .running, revision: 1, mode: .manual, p1: base.p1, p2: base.p2,

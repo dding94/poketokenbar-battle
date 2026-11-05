@@ -7,6 +7,7 @@ extension L {
     var onlineYourPick: String { online("내가 고른 기술", "Your pick") }
     func onlineOpponentWait(_ wait: OnlineBattlePresentation.OpponentWait) -> String {
         switch wait {
+        case .submitted: ""
         case .choosing: online("상대가 고르는 중…", "Opponent is choosing…")
         case .offline: online("상대 연결 끊김, 시간 초과 시 자동 선택", "Opponent disconnected, auto-pick if time runs out")
         // The presence behind this one may be old (the socket is down), so it only says "may".

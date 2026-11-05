@@ -111,7 +111,7 @@ final class OnlineBattlePresentation {
     var canPrepare: Bool { !showsHistory && !showsStandings && rematchSourceID == nil && !isBusy && canStart && !localReady && room?.confirmed == true && [.accepted, .ready].contains(room?.state) }
     /// What the other seat is doing while this app waits for it in a manual round.
     /// `offlineMaybe` is the same news from a presence the app cannot vouch for (see `opponentWait`).
-    enum OpponentWait: Equatable { case choosing, offline, offlineMaybe }
+    enum OpponentWait: Equatable { case choosing, offline, offlineMaybe, submitted }
     /// The click that sent a choice, kept with its round so a later round never inherits the mark.
     private struct LocalChoice { let battleID: String; let roundSeq: Int; let slot: Int }
     private var localChoice: LocalChoice?

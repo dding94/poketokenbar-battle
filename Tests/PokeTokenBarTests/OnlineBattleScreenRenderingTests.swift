@@ -539,6 +539,35 @@ final class OnlineBattleScreenRenderingTests: XCTestCase {
         try assertNothingBelowTheBoard(host, "sent while the beats play")
     }
 
+    /// T16: the flag shows while I am still choosing (the pressure) and after I have chosen, in the same board.
+    func testArenaSaysTheOpponentHasChosenBeforeAndAfterMyChoiceWithoutChangingHeight() async throws {
+        let fixture = try OnlineBattleArenaFixture.arena(seat: .p1)
+        defer { fixture.close() }
+        let model = fixture.model
+        func settleHost(_ host: NSView) async throws { try await Task.sleep(for: .milliseconds(150)); host.layoutSubtreeIfNeeded() }
+        let host = await arenaHost(model)
+        let restingHeight = host.fittingSize.height
+        XCTAssertFalse(try recognized(host).contains("has chosen"), "nothing is said before the flag")
+        var json = try XCTUnwrap(JSONSerialization.jsonObject(with: BattleJSON.encoder().encode(XCTUnwrap(model.room))) as? [String: Any])
+        json["opponentSubmitted"] = true
+        model.room = try JSONDecoder().decode(OnlineBattleView.self, from: JSONSerialization.data(withJSONObject: json))
+        try await settleHost(host)
+        let before = try recognized(host)
+        XCTAssertTrue(before.contains("has chosen"), "while I still choose: \(before)")
+        XCTAssertTrue(before.contains("Thunderbolt"), "the picker is untouched: \(before)")
+        XCTAssertEqual(host.fittingSize.height, restingHeight, accuracy: 0.5)
+        try assertNothingBelowTheBoard(host, "opponent has chosen")
+        model.send(.chooseMove(1)); try await settleHost(host)
+        let after = try recognized(host)
+        XCTAssertTrue(after.contains("has chosen"), "after my choice: \(after)")
+        XCTAssertFalse(after.contains("choosing"), after)
+        XCTAssertEqual(host.fittingSize.height, restingHeight, accuracy: 0.5)
+        try assertNothingBelowTheBoard(host, "both chosen")
+        try fixture.play(rounds: 1); try await settleHost(host)
+        XCTAssertEqual(host.fittingSize.height, restingHeight, accuracy: 0.5, "while the beats play")
+        try assertNothingBelowTheBoard(host, "opponent has chosen while the beats play")
+    }
+
     private func host2(_ model: OnlineBattlePresentation) async -> NSView {
         window?.close()
         return await arenaHost(model)

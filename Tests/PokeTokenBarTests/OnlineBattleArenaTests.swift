@@ -71,11 +71,12 @@ final class OnlineBattleArenaTests: XCTestCase {
     func testWaitLineSaysChoosingOfflineOrMaybeOfflineInBothLanguages() {
         for lang in [AppLanguage.ko, .en] {
             let l = L(lang)
-            let lines = [OnlineBattlePresentation.OpponentWait.choosing, .offline, .offlineMaybe].map { l.onlineOpponentWait($0) }
-            XCTAssertEqual(Set(lines).count, 3, "\(lang): three different lines")
+            let lines = [OnlineBattlePresentation.OpponentWait.choosing, .offline, .offlineMaybe, .submitted].map { l.onlineOpponentWait($0) }
+            XCTAssertEqual(Set(lines).count, 4, "\(lang): four different lines")
             XCTAssertTrue(lines.allSatisfy { !$0.isEmpty })
         }
         XCTAssertEqual(L(.ko).onlineOpponentWait(.choosing), "상대가 고르는 중…")
+        XCTAssertEqual(L(.ko).onlineOpponentWait(.submitted), "상대 선택 완료")
         XCTAssertTrue(L(.ko).onlineOpponentWait(.offline).contains("시간 초과 시 자동 선택"))
         XCTAssertTrue(L(.ko).onlineOpponentWait(.offlineMaybe).contains("끊겼을 수"), "a stale flag is hedged")
         XCTAssertFalse(L(.en).onlineOpponentWait(.offlineMaybe).lowercased().contains("disconnected"), "a stale flag is hedged")
