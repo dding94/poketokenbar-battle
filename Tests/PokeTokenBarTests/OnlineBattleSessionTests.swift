@@ -1198,6 +1198,23 @@ final class OnlineBattleSessionTests: XCTestCase {
         let starts = await http.count("/v1/battles/\(final.battleId)/start"); XCTAssertEqual(starts, 0)
         XCTAssertFalse(session.presentation.canStart)
     }
+    func testLocalReadyIsExposedOnlyAfterTheServerAcceptedMyReadyCall() async throws {
+        let final = try battle()
+        let accepted = try changed(final, ["state": "ACCEPTED", "config": NSNull(), "result": NSNull(), "confirmed": true, "roundSeq": 0, "journal": []])
+        let (session, http, _, _) = try await setup([accepted])
+        let path = "/v1/battles/\(final.battleId)/ready"
+        await http.route(path, Data(), status: 500)
+        await session.bootstrap()
+        XCTAssertFalse(session.presentation.localReady)
+        await session.perform(.prepareBattle)
+        XCTAssertFalse(session.presentation.localReady, "A failed ready call must not read as received")
+        XCTAssertTrue(session.presentation.canPrepare, "The button must stay usable so the person can retry")
+        await http.route(path, try JSONEncoder().encode(accepted))
+        await session.perform(.prepareBattle)
+        XCTAssertTrue(session.presentation.localReady)
+        XCTAssertFalse(session.presentation.canPrepare)
+        XCTAssertEqual(session.presentation.roomProgress?.turn, .theirs)
+    }
     func testPersistedHoldMissingFromListIsFetchedAndReleasedOnlyWithEvidence() async throws {
         let room = try changed(battle(), ["state": "EXPIRED", "result": NSNull()]), effects = SessionEffects()
         let key = OnlineBattleReceiptKey(scope: .init(originHash: try OnlineBattleOrigin("https://battle.example.invalid").hash, groupID: "group", trainerID: "trainer-one"), battleID: room.battleId)

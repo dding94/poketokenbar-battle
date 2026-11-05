@@ -52,6 +52,8 @@ final class OnlineBattlePresentation {
     var blockedEntryIDs: Set<String> = []
     /// Only ready/start needs the current WebSocket hello; HTTP consent remains available when polling.
     var canStart = false
+    /// Set by the session: this app's ready call for the open room was accepted by the server.
+    var localReady = false
     var canRetryCredentialSave = false
     var selectedEntryID: String?
     var selectedOpponentID: String?
