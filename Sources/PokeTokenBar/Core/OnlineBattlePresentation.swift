@@ -15,8 +15,15 @@ final class OnlineBattlePresentation {
     var notificationHint: OnlineNotificationHint?
     /// Set with an ended-challenge notice so a background refresh does not wipe it before it is read.
     var stickyNotice: String?
+    var stickyNoticeBattleID: String?
     /// Battles whose ending was already announced (or was caused by this app's own cancel/decline).
     var endedNoticeIDs: Set<String> = []
+    /// Rooms this app ended itself; their ending is never announced back. Separate from `endedNoticeIDs`, which also holds announced ones.
+    var ownEndedBattleIDs: Set<String> = []
+    /// Endings the person has not read yet. The notifier owns the persisted list and writes it through `syncEnded`.
+    var unreadEndedBattleIDs: Set<String> = []
+    /// Endings already read. Only grows, so an older input can never bring one back.
+    var acknowledgedEndedBattleIDs: Set<String> = []
     var noticeSurvivesRefresh: Bool { stickyNotice != nil && notice == stickyNotice }
     var isBusy = false
     var serverAddress = ""
@@ -155,10 +162,14 @@ final class OnlineBattlePresentation {
                   battle.battleId == id, canRematch(battle) else { return }
         case .submitRematch: guard canSubmitRematch else { return }
         case .cancelRematch: guard rematchSourceID != nil else { return }
-        case .setPopoverVisible, .setOnlineScreenVisible, .skipStage, .setStageSpeed:
+        case .setPopoverVisible, .setOnlineScreenVisible, .skipStage, .setStageSpeed, .followAttention:
             break
         case .showSetupWhileRestoring:
             showsSetupWhileRestoring = true
+            return
+        case .dismissEnded(let id):
+            // Pure presentation, like dismissNotice.
+            dismissEnded(id)
             return
         case .dismissNotice:
             // Pure presentation: closing a banner never reaches the session or the server.
@@ -249,4 +260,8 @@ enum OnlineBattleUIAction {
     case showStandings, refreshStandings, prepareRematch(String), submitRematch, cancelRematch
     case showHistory, openReplay(String), seekReplay(Int), closeReplay
     case chooseMove(Int), dismissResult, backToLobby, dismissNotice, showSetupWhileRestoring
+    /// The way to a room from an event (notification, banner, reopening, home row). Not a lobby row: overlays may be up.
+    case followAttention(String)
+    /// Closes an ended-request banner without opening anything. Pure presentation.
+    case dismissEnded(String)
 }

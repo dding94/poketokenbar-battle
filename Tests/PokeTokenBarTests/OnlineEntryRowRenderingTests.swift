@@ -38,6 +38,7 @@ final class OnlineEntryRowRenderingTests: XCTestCase {
             ("online-idle", l.onlineHomeSubtitle(Self.input(joined: true), connectionStatus: "접속 중")),
             ("request-received", l.onlineHomeSubtitle(Self.input(joined: true, incoming: 1), connectionStatus: "접속 중")),
             ("requests-received-2", l.onlineHomeSubtitle(Self.input(joined: true, incoming: 2), connectionStatus: "접속 중")),
+            ("waiting", l.onlineHomeSubtitle(Self.input(joined: true, outgoing: 1), connectionStatus: "접속 중")),
             ("reconnecting", l.onlineHomeSubtitle(Self.input(joined: true), connectionStatus: "연결 중")),
         ]
         for (name, subtitle) in states {
@@ -51,7 +52,7 @@ final class OnlineEntryRowRenderingTests: XCTestCase {
         XCTAssertEqual(long, one, accuracy: 0.5, "A long subtitle stays on one line")
     }
 
-    private static func input(joined: Bool, incoming: Int = 0) -> OnlineAttentionInput {
+    private static func input(joined: Bool, incoming: Int = 0, outgoing: Int = 0) -> OnlineAttentionInput {
         let model = OnlineBattlePresentation()
         if joined {
             model.account = .init(trainer: .init(trainerId: "synthetic-me", displayEmail: "나래", role: .member, status: .active),
@@ -61,6 +62,11 @@ final class OnlineEntryRowRenderingTests: XCTestCase {
         let remote = OnlineBattlePlayer(trainerId: "synthetic-foe", snapshot: nil, publicInfo: nil, hpPercent: nil)
         model.battles = (0..<incoming).map { index in
             .init(battleId: "bt-\(index)", state: .pending, revision: 1, mode: .manual, p1: remote, p2: local, createdAt: Double(index),
+                  expiresAt: Date().timeIntervalSince1970 * 1000 + 3_600_000, startedAt: nil, reportedAt: nil, confirmed: false,
+                  config: nil, roundSeq: 0, deadline: nil, ownChoice: nil, journal: [], result: nil, reason: nil, rematchOf: nil)
+        }
+        model.battles += (0..<outgoing).map { index in
+            .init(battleId: "bt-out-\(index)", state: .pending, revision: 1, mode: .manual, p1: local, p2: remote, createdAt: Double(index),
                   expiresAt: Date().timeIntervalSince1970 * 1000 + 3_600_000, startedAt: nil, reportedAt: nil, confirmed: false,
                   config: nil, roundSeq: 0, deadline: nil, ownChoice: nil, journal: [], result: nil, reason: nil, rematchOf: nil)
         }

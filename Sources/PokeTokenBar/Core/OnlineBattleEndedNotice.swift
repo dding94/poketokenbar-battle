@@ -31,17 +31,53 @@ extension OnlineBattlePresentation {
     /// live is announced, so loading old history never raises a notice, and each battle only once.
     func announceEnded(_ room: OnlineBattleView, previous: OnlineBattleState?, l: L) {
         guard let previous, Self.beforeMatch.contains(previous), Self.endedBeforeMatch.contains(room.state),
-              let me = account?.trainer.trainerId, let side = room.side(for: me),
+              let me = account?.trainer.trainerId, room.side(for: me) != nil,
               endedNoticeIDs.insert(room.battleId).inserted else { return }
-        let otherID = side == .p1 ? room.p2.trainerId : room.p1.trainerId
+        showEndedNotice(room, me: me, l: l)
+    }
+
+    private func showEndedNotice(_ room: OnlineBattleView, me: String, l: L) {
+        let otherID = room.side(for: me) == .p1 ? room.p2.trainerId : room.p1.trainerId
         let name = members.first { $0.trainerId == otherID }?.displayEmail
         guard let text = l.onlineEndedNotice(room.state, opponent: name, reason: room.reason) else { return }
         notice = text
         stickyNotice = text
+        stickyNoticeBattleID = room.battleId
     }
 
     /// This app ended the room itself (cancel or decline): it must not be announced back to the person who pressed it.
-    func suppressEndedNotice(for battleID: String) { endedNoticeIDs.insert(battleID) }
+    func suppressEndedNotice(for battleID: String) {
+        endedNoticeIDs.insert(battleID)
+        ownEndedBattleIDs.insert(battleID)
+    }
     /// The server refused that cancel or decline, so the room did not end by this app's hand.
-    func allowEndedNotice(for battleID: String) { endedNoticeIDs.remove(battleID) }
+    func allowEndedNotice(for battleID: String) {
+        endedNoticeIDs.remove(battleID)
+        ownEndedBattleIDs.remove(battleID)
+    }
+
+    /// The notifier's list of unread endings, minus whatever the view took in the meantime. `read` were on the open lobby.
+    func syncEnded(unread: Set<String>, read: [String], l: L) {
+        for id in read { acknowledgeEnded(id, l: l) }
+        let next = unread.subtracting(acknowledgedEndedBattleIDs)
+        if next != unreadEndedBattleIDs { unreadEndedBattleIDs = next }
+    }
+
+    /// The person reached the ending. After a relaunch the session never saw the room change, so the lobby's notice
+    /// is raised here; one already told in this run is not repeated.
+    func acknowledgeEnded(_ battleID: String, l: L) {
+        acknowledgedEndedBattleIDs.insert(battleID)
+        unreadEndedBattleIDs.remove(battleID)
+        guard let me = account?.trainer.trainerId, let room = battles.first(where: { $0.battleId == battleID }),
+              endedNoticeIDs.insert(battleID).inserted else { return }
+        showEndedNotice(room, me: me, l: l)
+    }
+
+    /// Closing the banner reads the ending, so the same words do not wait on the lobby. No words are needed here.
+    func dismissEnded(_ battleID: String) {
+        acknowledgedEndedBattleIDs.insert(battleID)
+        unreadEndedBattleIDs.remove(battleID)
+        endedNoticeIDs.insert(battleID)
+        if stickyNoticeBattleID == battleID, noticeSurvivesRefresh { notice = nil; stickyNotice = nil }
+    }
 }

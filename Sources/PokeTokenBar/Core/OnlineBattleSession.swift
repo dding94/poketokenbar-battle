@@ -37,6 +37,10 @@ final class OnlineBattleSession {
     func stagingHeldBattleIDs() -> Set<String> {
         Set(stagings.filter { $0.value.isPlaying }.keys)
     }
+    /// Battles whose open round has nothing to pick (a recharge, Struggle): the round closes at its deadline without the person.
+    func noChoiceBattleIDs() -> Set<String> {
+        Set(resolvers.filter { $0.value.request.kind != "move" }.keys)
+    }
     /// Battles with nothing left for the person to press at their current revision. The server view does not expose it.
     /// A press on an older socket counts while its resend is still owed, so a socket blip raises no notification.
     func preparedBattleIDs() -> Set<String> {
@@ -879,7 +883,9 @@ final class OnlineBattleSession {
             presentation.mode = mode; return
         case .acknowledgeRecoveryCode: presentation.recoveryCode = nil; return
         case .dismissResult, .backToLobby: resetExtras(); clearHistory(); prefersLobby = true; navigationRevision &+= 1; selectedBattleID = nil; pinnedBattleID = nil; publish(); return
-        case .openBattle(let id): prefersLobby = false; navigationRevision &+= 1; selectedBattleID = id; publish(); return
+        case .openBattle(let id): selectBattle(id); return
+        // A lobby row cannot be pressed behind an overlay; an event can. The rematch draft's picks live outside its page.
+        case .followAttention(let id): resetExtras(); clearHistory(); selectBattle(id); return
         case .configureServer(let value): await configureServer(value); return
         case .applyingServer(let address, let inner):
             // Save the typed address first, then run the setup request against it. If it cannot be saved
@@ -929,6 +935,9 @@ final class OnlineBattleSession {
                 publish(); await handle(error, epoch: epoch)
             }
         }
+    }
+    private func selectBattle(_ id: String) {
+        prefersLobby = false; navigationRevision &+= 1; selectedBattleID = id; publish()
     }
     private var standingsVisible: Bool {
         onlineAllowed && authenticated && popoverOpen && presentation.showsStandings && presentation.account != nil

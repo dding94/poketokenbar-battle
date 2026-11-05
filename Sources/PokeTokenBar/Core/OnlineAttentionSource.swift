@@ -9,19 +9,28 @@ final class OnlineAttentionSource {
     let presentation: OnlineBattlePresentation
     @ObservationIgnored private let preparedBattleIDs: () -> Set<String>
     @ObservationIgnored private let stagingHeldBattleIDs: () -> Set<String>
+    @ObservationIgnored private let noChoiceBattleIDs: () -> Set<String>
 
     /// `stagingHeldBattleIDs` names the battles whose staged display still holds back their outcome.
     init(presentation: OnlineBattlePresentation,
          preparedBattleIDs: @escaping () -> Set<String> = { [] },
-         stagingHeldBattleIDs: @escaping () -> Set<String> = { [] }) {
+         stagingHeldBattleIDs: @escaping () -> Set<String> = { [] },
+         noChoiceBattleIDs: @escaping () -> Set<String> = { [] }) {
         self.presentation = presentation
         self.preparedBattleIDs = preparedBattleIDs
         self.stagingHeldBattleIDs = stagingHeldBattleIDs
+        self.noChoiceBattleIDs = noChoiceBattleIDs
     }
 
-    func input(now: Date = Date()) -> OnlineAttentionInput {
-        .init(presentation: presentation, preparedBattleIDs: preparedBattleIDs(), stagingHeldBattleIDs: stagingHeldBattleIDs(), now: now)
+    func input(now: Date = Date(), onlineScreenShowing: Bool = false) -> OnlineAttentionInput {
+        .init(presentation: presentation, preparedBattleIDs: preparedBattleIDs(), stagingHeldBattleIDs: stagingHeldBattleIDs(),
+              noChoiceBattleIDs: noChoiceBattleIDs(), onlineScreenShowing: onlineScreenShowing, now: now)
     }
+
+    func banner(onlineScreenShowing: Bool, now: Date = Date()) -> OnlineAttention? {
+        OnlineAttentionCalculator.banner(input(now: now, onlineScreenShowing: onlineScreenShowing))
+    }
+    func openRoute(now: Date = Date()) -> OnlineOpenRoute? { OnlinePopoverPinning.openRoute(input(now: now)) }
 
     func menuMark(l: L, now: Date = Date()) -> OnlineMenuMark? { l.onlineMenuMark(input(now: now)) }
     func homeSubtitle(l: L, now: Date = Date()) -> String { l.onlineHomeSubtitle(input(now: now), connectionStatus: presentation.connectionStatus) }

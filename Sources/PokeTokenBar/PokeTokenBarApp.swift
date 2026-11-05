@@ -50,7 +50,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
     }
 
     /// 팝오버를 열 때의 화면 결정 — Home 으로 reset 한 뒤 진행 중인 연습이 있으면 연습 화면, 그다음 `route`.
-    /// 진행 중인 온라인 경기(`onlineActive`)는 그 위에서 온라인 화면으로 복귀한다. 단, `route` 가 설정·도감처럼
+    /// 처리할 온라인 사건이나 진행 중인 경기(`onlineActive`)는 그 위에서 온라인 화면으로 복귀한다. 단, `route` 가 설정·도감처럼
     /// 다른 화면을 골랐으면 그 선택을 덮지 않는다(온라인 화면이 먼저 그려져 가리기 때문).
     static func applyOpenRoute(to navigation: PopoverNavigation, practiceActive: Bool, onlineActive: Bool = false,
                                route: (PopoverNavigation) -> Void) {
@@ -60,6 +60,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
         let routedElsewhere = navigation.showSettings || navigation.showingRecap || navigation.tab != .home
             || navigation.dexDetailCollectionID != nil
         if onlineActive, !routedElsewhere { navigation.showingOnlineBattle = true }
+    }
+
+    /// After `applyOpenRoute`: moves to the event only if the online screen won, so a menu destination moves nothing.
+    static func followOpenRoute(_ battleId: String?, navigation: PopoverNavigation, model: OnlineBattlePresentation, l: L) {
+        guard navigation.showingOnlineBattle, let battleId else { return }
+        navigation.openOnlineEvent(battleId, model: model, l: l)
     }
 
     /// Route for a clicked online notification: the online screen, on top of the reset to Home.
@@ -288,7 +294,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
             online = session; onlinePresentation = session.presentation
             onlineAttention = OnlineAttentionSource(presentation: session.presentation,
                                                     preparedBattleIDs: { [weak session] in session?.preparedBattleIDs() ?? [] },
-                                                    stagingHeldBattleIDs: { [weak session] in session?.stagingHeldBattleIDs() ?? [] })
+                                                    stagingHeldBattleIDs: { [weak session] in session?.stagingHeldBattleIDs() ?? [] },
+                                                    noChoiceBattleIDs: { [weak session] in session?.noChoiceBattleIDs() ?? [] })
             prepareOnlineNotifier(presentation: session.presentation, directory: directory)
             Task { await session.bootstrap() }
         } catch {
@@ -296,7 +303,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
         }
     }
 
-    /// The notifier is the second channel behind the menu-bar mark; the delegate only exists to route clicks.
+    /// The notifier is the second channel behind the menu-bar mark; the delegate routes clicks and says what an active app shows.
     /// It is set up with the session so a notification that launched the app is delivered after it.
     private func prepareOnlineNotifier(presentation: OnlineBattlePresentation, directory: URL) {
         guard AppEnv.isBundledApp else { return }
@@ -304,7 +311,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
         onlineNotifier = OnlineAttentionNotifier(
             center: SystemOnlineNotificationCenter(), store: OnlineAttentionStateFile(directory: directory),
             l: { [companion = companion!] in companion.l },
-            setHint: { [presentation] hint in presentation.notificationHint = hint })
+            setHint: { [presentation] hint in presentation.notificationHint = hint },
+            syncEnded: { [presentation, companion = companion!] unread, read in presentation.syncEnded(unread: unread, read: read, l: companion.l) })
     }
 
     /// Feeds the same input the menu-bar mark reads to the notifier. Tasks run in order up to their first
@@ -312,27 +320,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
     /// `popoverJustShown` covers the open itself, where the activation requested just before `show` may not have landed yet.
     private func deliverOnlineAttention(popoverJustShown: Bool = false) {
         guard let notifier = onlineNotifier else { return }
-        let input = onlineAttention.input()
+        let input = onlineAttention.input(onlineScreenShowing: popover.isShown && navigation.showingOnlineBattle)
         let open = popoverJustShown || OnlinePopoverPinning.showsAttentionInstead(popoverShown: popover.isShown, appActive: NSApp.isActive)
         Task { await notifier.handle(input, popoverOpen: open) }
     }
 
-    /// A clicked notification opens the popover on that battle. A popover that is already open is left where it is
-    /// apart from switching to the online screen.
+    /// A clicked notification opens the popover on that battle, whichever screen it was on.
     private func openOnlineBattle(_ battleId: String) {
         if popover.isShown {
-            Self.openOnlineScreen(navigation)
+            navigation.openOnlineEvent(battleId, model: onlinePresentation, l: companion.l)
             NSApp.activate(ignoringOtherApps: true)
         } else {
-            showPopover(route: Self.openOnlineScreen)
+            showPopover(following: battleId, route: Self.openOnlineScreen)
         }
-        Task { await online?.perform(.openBattle(battleId)) }
     }
 
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
         guard response.actionIdentifier == UNNotificationDefaultActionIdentifier,
               let battleId = OnlineAttentionNotifier.battleId(fromUserInfo: response.notification.request.content.userInfo) else { return }
         await MainActor.run { openOnlineBattle(battleId) }
+    }
+
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
+        let battleId = OnlineAttentionNotifier.battleId(fromUserInfo: notification.request.content.userInfo)
+        let inFront = await MainActor.run { OnlinePopoverPinning.showsAttentionInstead(popoverShown: popover.isShown, appActive: NSApp.isActive) }
+        return OnlineNotificationForeground.options(battleId: battleId, attentionInFront: inFront)
     }
 
     private func observeOnlineAccess() {
@@ -392,12 +404,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
     /// already open popover reacts to outside clicks; nothing here shows or closes it.
     private func observeOnlinePinning() {
         withObservationTracking {
-            _ = onlinePresentation.phase
-            _ = navigation.showingOnlineBattle
+            _ = OnlinePopoverPinning.isPinned(onlinePresentation, onlineScreenShowing: navigation.showingOnlineBattle)
         } onChange: { [weak self] in
             Task { @MainActor in
                 guard let self else { return }
                 self.applyPinning(popoverOpen: self.popover.isShown)
+                self.deliverOnlineAttention()   // reaching the lobby reads an ended request
                 self.observeOnlinePinning()
             }
         }
@@ -406,8 +418,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
     /// Pinned = `.applicationDefined` and no outside-click monitor; otherwise `.transient` plus the monitor.
     /// Leaving the pinned section only relaxes the behavior; it never closes the popover.
     private func applyPinning(popoverOpen: Bool) {
-        let pinned = popoverOpen && OnlinePopoverPinning.isPinned(phase: onlinePresentation.phase,
-                                                                   onlineScreenShowing: navigation.showingOnlineBattle)
+        let pinned = popoverOpen && OnlinePopoverPinning.isPinned(onlinePresentation, onlineScreenShowing: navigation.showingOnlineBattle)
         if onlinePresentation.popoverPinned != pinned { onlinePresentation.popoverPinned = pinned }
         let behavior: NSPopover.Behavior = pinned ? .applicationDefined : .transient
         if popover.behavior != behavior { popover.behavior = behavior }
@@ -897,11 +908,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
     }
 
     /// `route` runs after the reset to Home, so a menu item can land on a specific screen.
-    private func showPopover(route: (PopoverNavigation) -> Void = { _ in }) {
+    /// `following` is a clicked notification's battle; otherwise an opening goes where `openRoute` says.
+    private func showPopover(following battleId: String? = nil, route: (PopoverNavigation) -> Void = { _ in }) {
         guard let button = statusItem.button, !popover.isShown else { return }
-        // 닫혔다 열리면 항상 Home 으로 (설정 화면 잔류 방지) — 진행 중인 연습만 그 자리로 복귀
-        Self.applyOpenRoute(to: navigation, practiceActive: practice.isActive,
-                            onlineActive: OnlinePopoverPinning.routesToOnlineScreenOnOpen(phase: onlinePresentation.phase), route: route)
+        // 닫혔다 열리면 항상 Home 으로 (설정 화면 잔류 방지) — 진행 중인 연습과 처리할 온라인 사건만 그 자리로 복귀
+        let target = onlineAttention.openRoute()
+        Self.applyOpenRoute(to: navigation, practiceActive: practice.isActive, onlineActive: target != nil, route: route)
+        Self.followOpenRoute(battleId ?? target?.battleId, navigation: navigation, model: onlinePresentation, l: companion.l)
         applyPinning(popoverOpen: true)   // before show, so the first frame already has the right behavior
         practice.setPaused(false, reason: .popoverClosed)
         buildPopoverContent()   // 열 때 호스팅 트리 생성(닫힐 때 해제)

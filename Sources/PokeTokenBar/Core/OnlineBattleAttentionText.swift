@@ -38,6 +38,10 @@ extension L {
             return .init(tooltip: online("\(name)님이 다시 겨루자고 해요", "\(name) wants a rematch"),
                          subtitle: online("\(name)님의 재대결 신청", "Rematch request from \(name)"),
                          banner: online("\(name)님이 다시 겨루자고 해요. 수락하거나 거절해 주세요.", "\(name) wants a rematch. Accept or decline."))
+        case .requestEnded:
+            let summary = onlineEndedSummary(attention.ending, name: name)
+            return .init(tooltip: summary, subtitle: summary,
+                         banner: attention.ending.flatMap { onlineEndedNotice($0.state, opponent: name, reason: $0.reason) } ?? summary)
         case .matchEnded:
             return .init(tooltip: online("\(name)님과의 대전이 끝났어요", "Your battle with \(name) has ended"),
                          subtitle: online("\(name)님과 대전 종료 · 결과 확인 중", "Battle with \(name) ended · Checking result"),
@@ -66,6 +70,8 @@ extension L {
         case .rematchRequested:
             return .init(title: online("재대결 신청", "Rematch request"),
                          body: online("\(name)님이 다시 겨루자고 해요", "\(name) wants a rematch"))
+        case .requestEnded:
+            return .init(title: online("신청 종료", "Challenge ended"), body: onlineEndedSummary(attention.ending, name: name))
         case .myTurn:
             let seconds = onlineAttentionSeconds(attention, now: now)
             return .init(title: online("내 차례예요", "Your turn"),
@@ -79,9 +85,23 @@ extension L {
         case .reason:
             online("알림을 켜 두면 팝오버가 닫혀 있어도 대결 신청과 내 차례를 알려 드려요",
                    "Turn on notifications to hear about challenges and your turn while this window is closed")
+        case .undecided:
+            online("알림 권한을 아직 고르지 않았어요. 허용하면 닫혀 있을 때도 알려 드려요",
+                   "You haven't chosen whether to allow notifications yet. Allow them to hear about requests while this window is closed")
         case .denied:
             online("알림이 꺼져 있어요. 시스템 설정 > 알림에서 켜면 닫혀 있을 때도 알려 드려요",
                    "Notifications are off. Turn them on in System Settings > Notifications to hear about requests while this window is closed")
+        }
+    }
+
+    /// One line about a room that ended while this person was waiting on it. No advice: the banner adds that.
+    private func onlineEndedSummary(_ ending: OnlineAttentionEnding?, name: String) -> String {
+        switch ending?.state {
+        case .declined: return online("\(name)님이 신청을 거절했어요", "\(name) declined your challenge")
+        case .expired: return online("\(name)님과의 신청 시간이 지났어요", "Your challenge with \(name) timed out")
+        case .cancelled where ending?.reason == "participant_left":
+            return online("\(name)님이 그룹을 떠나 신청이 취소됐어요", "\(name) left the group, so the challenge was cancelled")
+        default: return online("\(name)님이 신청을 취소했어요", "\(name) cancelled the challenge")
         }
     }
 
@@ -133,9 +153,10 @@ extension L {
     /// One line under "Online battle" on the home screen.
     /// `connectionStatus` is the presentation's connection line; only its connected and reconnecting wording is read here.
     func onlineHomeSubtitle(_ input: OnlineAttentionInput, connectionStatus: String) -> String {
-        guard input.localTrainerID != nil else {
+        guard let me = input.localTrainerID else {
             return online("동료와 겨루기 · 아직 가입 안 함", "Battle your group · Not joined yet")
         }
+        if input.recoveryCodeShowing { return online("복구코드를 저장해 주세요", "Save your recovery code") }
         if Self.onlineReconnectingStatuses.contains(connectionStatus) { return online("다시 연결하는 중", "Reconnecting") }
         let active = OnlineAttentionCalculator.active(input)
         if let current = active.first {
@@ -146,9 +167,25 @@ extension L {
             return online("받은 신청 \(received)건", received == 1 ? "1 request received" : "\(received) requests received")
         }
         if input.hasOngoingRoom { return online("진행 중인 대전이 있어요", "A battle is in progress") }
+        if let waiting = onlineWaitingLine(input, me: me) { return waiting }
         return connectionStatus == Self.onlineConnectedStatus
             ? online("동료와 겨루기 · 접속 중", "Battle your group · Online")
             : online("동료와 겨루기", "Battle your group")
+    }
+
+    /// Only a room that is still open: past its expiry the server is about to end it, so it is not worth promising a wait.
+    /// No mark goes with this line, because nothing is asked of the person.
+    private func onlineWaitingLine(_ input: OnlineAttentionInput, me: String) -> String? {
+        let waiting = input.battles.filter {
+            OnlineAttentionCalculator.isWaiting($0, me: me) && $0.expiresAt / 1000 > input.now.timeIntervalSince1970
+        }
+        guard let room = waiting.first else { return nil }
+        guard waiting.count == 1 else { return online("신청 대기 중 \(waiting.count)건", "\(waiting.count) requests waiting") }
+        let other = room.side(for: me) == .p1 ? room.p2.trainerId : room.p1.trainerId
+        let name = input.nicknames[other] ?? onlineAnonymous
+        return room.state == .pending
+            ? online("\(name)님에게 신청 · 응답 대기 중", "Challenged \(name) · Waiting")
+            : online("\(name)님의 응답 대기 중", "Waiting for \(name)")
     }
 
     /// The wording OnlineBattleSession puts on `connectionStatus` for the connected and the not-yet-connected states.

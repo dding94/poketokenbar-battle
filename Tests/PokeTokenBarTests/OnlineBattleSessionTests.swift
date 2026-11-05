@@ -1884,6 +1884,137 @@ final class OnlineBattleSessionTests: XCTestCase {
         let member = OnlineBattleMember(trainerId: other, displayEmail: "하늘", role: .member, status: .active, joinedAt: 0, online: true)
         await http.route("/v1/group", try JSONEncoder().encode(OnlineBattleGroupMembers(group: account.group, members: [member])))
     }
+    // MARK: the way to an event
+
+    /// History, then the popover is closed with the flag still up. The old path selected the room behind it.
+    func testFollowingAnEventLeavesHistoryAndTheRoomCanBeAnswered() async throws {
+        let finished = try battle()
+        let incoming = try changed(pendingRoom(), ["battleId": "bt_incoming", "createdAt": finished.createdAt + 1])
+        let (session, http, _, _) = try await setup([finished], trainer: "trainer-two")
+        await session.bootstrap()
+        await session.perform(.dismissResult)
+        await session.perform(.showHistory)
+        await session.perform(.openReplay(finished.battleId))
+        XCTAssertTrue(session.presentation.showsHistory)
+        await http.route("/v1/battles", try JSONEncoder().encode(OnlineBattlePage(battles: [incoming, finished], before: nil)))
+        await session.refresh()
+        await session.perform(.followAttention("bt_incoming"))
+        let model = session.presentation
+        XCTAssertFalse(model.showsHistory)
+        XCTAssertNil(model.selectedHistoryBattle)
+        XCTAssertNil(model.replay)
+        XCTAssertEqual(model.room?.battleId, "bt_incoming")
+        XCTAssertEqual(model.phase, .room)
+        XCTAssertTrue(model.canAccept, "A selected room behind an overlay has every button disabled")
+    }
+
+    func testFollowingAnEventLeavesTheStandings() async throws {
+        let finished = try battle()
+        let incoming = try changed(pendingRoom(), ["battleId": "bt_incoming", "createdAt": finished.createdAt + 1])
+        let (session, http, _, _) = try await setup([finished], trainer: "trainer-two")
+        await http.route("/v1/standings", Data(#"{"groupId":"group","championTrainerId":null,"rows":[]}"#.utf8))
+        await session.bootstrap()
+        await session.perform(.dismissResult)
+        await session.perform(.showStandings)
+        XCTAssertTrue(session.presentation.showsStandings)
+        await http.route("/v1/battles", try JSONEncoder().encode(OnlineBattlePage(battles: [incoming, finished], before: nil)))
+        await session.refresh()
+        await session.perform(.followAttention("bt_incoming"))
+        XCTAssertFalse(session.presentation.showsStandings)
+        XCTAssertNil(session.presentation.standings)
+        XCTAssertEqual(session.presentation.phase, .room)
+    }
+
+    /// The draft is only a picker over a fixed opponent and mode, and the picks live outside the page. Leaving must
+    /// keep them: the same entry and the same intent are what makes a repeated submit land on the same room.
+    func testFollowingAnEventClosesARematchDraftWithoutLosingThePick() async throws {
+        let finished = try battle()
+        let incoming = try changed(pendingRoom(), ["battleId": "bt_incoming", "createdAt": finished.createdAt + 1])
+        let (session, http, _, _) = try await setup([finished], trainer: "trainer-two")
+        try await namedOpponent(http, trainer: "trainer-two")
+        await session.bootstrap()
+        await session.perform(.openBattle(finished.battleId))   // A result from an earlier run shows only when opened.
+        await session.perform(.prepareRematch(finished.battleId))
+        let model = session.presentation
+        XCTAssertEqual(model.rematchSourceID, finished.battleId)
+        let picked = try XCTUnwrap(model.selectedEntryID)
+        await http.route("/v1/battles", try JSONEncoder().encode(OnlineBattlePage(battles: [incoming, finished], before: nil)))
+        await session.refresh()
+        await session.perform(.followAttention("bt_incoming"))
+        XCTAssertNil(model.rematchSourceID)
+        XCTAssertEqual(model.room?.battleId, "bt_incoming")
+        XCTAssertEqual(model.selectedEntryID, picked)
+        await session.perform(.followAttention(finished.battleId))
+        await session.perform(.prepareRematch(finished.battleId))
+        XCTAssertEqual(model.rematchSourceID, finished.battleId, "The draft can be reopened")
+        XCTAssertEqual(model.selectedEntryID, picked)
+    }
+
+    func testFollowingAnEventComesBackFromTheGroupList() async throws {
+        let final = try battle()
+        let running = try changed(final, ["state": "RUNNING", "result": NSNull(), "roundSeq": 1, "deadline": 60000, "journal": []])
+        let (session, _, _, _) = try await setup([running])
+        await session.bootstrap()
+        await session.perform(.backToLobby)
+        XCTAssertEqual(session.presentation.phase, .lobby)
+        await session.perform(.followAttention(running.battleId))
+        XCTAssertEqual(session.presentation.phase, .arena)
+        XCTAssertEqual(session.presentation.room?.battleId, running.battleId)
+    }
+
+    /// The server's list carries finished rooms, so the wait comparison sees the ending in `battles` on a refresh.
+    func testADeclinedRoomStaysInTheListTheAttentionReads() async throws {
+        let pending = try pendingRoom()
+        let (session, http, _, _) = try await setup([pending])
+        try await namedOpponent(http, trainer: "trainer-one")
+        await session.bootstrap()
+        await http.route("/v1/battles", try JSONEncoder().encode(OnlineBattlePage(battles: [try changed(pending, ["state": "DECLINED", "revision": pending.revision + 1])], before: nil)))
+        await session.refresh()
+        XCTAssertEqual(session.presentation.battles.first { $0.battleId == pending.battleId }?.state, .declined)
+    }
+
+    func testPressingCancelMarksTheRoomAsMineBeforeTheServerAnswers() async throws {
+        let pending = try pendingRoom()
+        let (session, http, _, _) = try await setup([pending])
+        await session.bootstrap()
+        await http.suspendNext("/v1/battles/\(pending.battleId)/cancel")
+        let cancelling = Task { await session.perform(.cancel(pending.battleId)) }
+        await http.waitUntilBlocked()
+        XCTAssertTrue(session.presentation.ownEndedBattleIDs.contains(pending.battleId))
+        await http.resume(try response(changed(pending, ["state": "CANCELLED", "revision": pending.revision + 1])))
+        await cancelling.value
+    }
+
+    func testAFreshAccountShowsItsRecoveryCodeOnAPinnedLobby() async throws {
+        let credentials = SessionCredentials(); await credentials.setKey(nil)
+        let (session, http, _, _) = try await setup(credential: credentials)
+        await http.route("/v1/join", try grantBody())
+        await session.bootstrap()
+        await session.join(inviteCode: "invite", email: "synthetic@example.invalid")
+        XCTAssertEqual(session.presentation.phase, .lobby, "This is the phase that used to drop the pin")
+        XCTAssertNotNil(session.presentation.recoveryCode)
+        XCTAssertTrue(OnlinePopoverPinning.isPinned(session.presentation, onlineScreenShowing: true))
+        await session.perform(.acknowledgeRecoveryCode)
+        XCTAssertFalse(OnlinePopoverPinning.isPinned(session.presentation, onlineScreenShowing: true))
+    }
+
+    /// A real engine and a real forced Struggle: the fixture's eighth round leaves trainer-two with nothing to pick.
+    func testAForcedRoundIsReportedAsNothingToChoose() async throws {
+        let final = try battle(4)
+        let forced = try changed(final, ["state": "RUNNING", "result": NSNull(), "roundSeq": 9, "deadline": 60000,
+            "journal": JSONSerialization.jsonObject(with: JSONEncoder().encode(Array(final.journal.prefix(8))))])
+        let (session, _, _, _) = try await setup([forced], trainer: "trainer-two", rosterOverride: roster(final))
+        await session.bootstrap()
+        XCTAssertEqual(session.presentation.request?.kind, "forced")
+        XCTAssertEqual(session.noChoiceBattleIDs(), [final.battleId])
+        let open = try battle(0)
+        let choosing = try changed(open, ["state": "RUNNING", "result": NSNull(), "roundSeq": 1, "deadline": 60000, "journal": []])
+        let (other, _, _, _) = try await setup([choosing])
+        await other.bootstrap()
+        XCTAssertEqual(other.presentation.request?.kind, "move")
+        XCTAssertEqual(other.noChoiceBattleIDs(), [])
+    }
+
     private func pendingRoom() throws -> OnlineBattleView {
         try changed(battle(), ["state": "PENDING", "config": NSNull(), "result": NSNull(), "confirmed": false, "roundSeq": 0, "journal": []])
     }
@@ -2362,6 +2493,7 @@ final class OnlineBattleSessionTests: XCTestCase {
         try await list(http, [accepted])
         await session.perform(.cancel(pending.battleId))
         XCTAssertEqual(session.presentation.notice, copy.onlineErrorRoomChanged, "It was not a connection problem")
+        XCTAssertFalse(session.presentation.ownEndedBattleIDs.contains(pending.battleId), "A refused cancel did not end the room, so a later ending by the opponent still announces")
         XCTAssertEqual(session.presentation.room?.state, .accepted, "The screen shows what actually happened")
         XCTAssertEqual(session.presentation.phase, .room)
         await session.refresh()

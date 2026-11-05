@@ -3,7 +3,7 @@ import Foundation
 /// The single definition of "the person must look at this". The menu-bar mark, macOS notifications,
 /// the in-app banner and the home subtitle all read these values. Nothing here stores or sends.
 enum OnlineAttentionKind: String, Codable, CaseIterable, Sendable {
-    case myTurn, challengeAccepted, incomingChallenge, finalConfirmed, rematchRequested, resultReady, matchEnded
+    case myTurn, challengeAccepted, incomingChallenge, finalConfirmed, rematchRequested, requestEnded, resultReady, matchEnded
 
     var notifiable: OnlineAttentionNotifiableKind? {
         switch self {
@@ -12,13 +12,14 @@ enum OnlineAttentionKind: String, Codable, CaseIterable, Sendable {
         case .incomingChallenge: .incomingChallenge
         case .finalConfirmed: .finalConfirmed
         case .rematchRequested: .rematchRequested
+        case .requestEnded: .requestEnded
         case .resultReady, .matchEnded: nil
         }
     }
 }
 
 /// The only kinds that may become a macOS notification. Every other kind is in-app only.
-enum OnlineAttentionNotifiableKind: String, Sendable { case myTurn, challengeAccepted, incomingChallenge, finalConfirmed, rematchRequested }
+enum OnlineAttentionNotifiableKind: String, Sendable { case myTurn, challengeAccepted, incomingChallenge, finalConfirmed, rematchRequested, requestEnded }
 
 /// Identity of one occurrence: the same battle and stage is announced once, whatever the revision.
 struct OnlineAttentionKey: Codable, Hashable, Sendable {
@@ -40,7 +41,15 @@ struct OnlineAttention: Equatable, Sendable {
     let opponentName: String?
     /// The turn deadline for myTurn, nil for every other kind.
     let deadline: Date?
+    /// How the room ended, for requestEnded only.
+    var ending: OnlineAttentionEnding? = nil
     var key: OnlineAttentionKey { .init(battleId: battleId, kind: kind, roundSeq: roundSeq) }
+}
+
+/// Why a room this person was waiting on ended before the match.
+struct OnlineAttentionEnding: Equatable, Sendable {
+    let state: OnlineBattleState
+    let reason: String?
 }
 
 /// An attention that is allowed to reach macOS notifications; in-app kinds cannot be turned into one.
@@ -66,6 +75,22 @@ struct OnlineAttentionSeenRecord: Codable, Equatable, Sendable {
     func contains(_ key: OnlineAttentionKey) -> Bool { entries.contains { $0.key == key } }
 }
 
+/// Rooms this person already took a step in, and endings of those rooms they have not read yet.
+/// Persisted with the seen record, so a relaunch can tell "ended while I was away" from old history.
+/// Battle ids and revisions only.
+struct OnlineAttentionWaitRecord: Codable, Equatable, Sendable {
+    struct Entry: Codable, Equatable, Sendable {
+        let battleId: String
+        var revision: Int
+    }
+    /// Oldest first.
+    var waiting: [Entry] = []
+    /// Oldest first.
+    var unreadEnded: [Entry] = []
+    static let capacity = 64
+    var unreadIDs: Set<String> { Set(unreadEnded.map(\.battleId)) }
+}
+
 /// One publish's view of the world, captured from the presentation.
 struct OnlineAttentionInput: Sendable {
     let localTrainerID: String?
@@ -79,10 +104,24 @@ struct OnlineAttentionInput: Sendable {
     let preparedBattleIDs: Set<String>
     /// Battles whose final staging beats have not played, so win or lose must stay hidden.
     let stagingHeldBattleIDs: Set<String>
+    /// Running battles whose open round has nothing to pick: a forced action such as a recharge.
+    let noChoiceBattleIDs: Set<String>
+    /// Rooms this app ended itself (cancel, decline, a withdrawn consent). Never announced back.
+    let ownEndedBattleIDs: Set<String>
+    /// Endings the person already read; monotonic, so a stale input can never bring one back.
+    let acknowledgedEndedBattleIDs: Set<String>
+    /// Endings still waiting to be read. The notifier owns the persisted list.
+    var unreadEndedBattleIDs: Set<String>
+    /// True only while the popover is open on the online screen.
+    let onlineScreenShowing: Bool
+    /// History, standings or a rematch draft covers the room.
+    let overlayShowing: Bool
+    let recoveryCodeShowing: Bool
     let now: Date
 
     @MainActor
-    init(presentation: OnlineBattlePresentation, preparedBattleIDs: Set<String>, stagingHeldBattleIDs: Set<String>, now: Date) {
+    init(presentation: OnlineBattlePresentation, preparedBattleIDs: Set<String>, stagingHeldBattleIDs: Set<String>,
+         noChoiceBattleIDs: Set<String> = [], onlineScreenShowing: Bool = false, now: Date) {
         localTrainerID = presentation.account?.trainer.trainerId
         battles = presentation.battles
         nicknames = presentation.members.reduce(into: [:]) { names, member in names[member.trainerId] = member.displayEmail }
@@ -92,6 +131,13 @@ struct OnlineAttentionInput: Sendable {
         choiceSubmitted = presentation.choiceSubmitted
         self.preparedBattleIDs = preparedBattleIDs
         self.stagingHeldBattleIDs = stagingHeldBattleIDs
+        self.noChoiceBattleIDs = noChoiceBattleIDs
+        ownEndedBattleIDs = presentation.ownEndedBattleIDs
+        acknowledgedEndedBattleIDs = presentation.acknowledgedEndedBattleIDs
+        unreadEndedBattleIDs = presentation.unreadEndedBattleIDs
+        self.onlineScreenShowing = onlineScreenShowing
+        overlayShowing = presentation.showsHistory || presentation.showsStandings || presentation.rematchSourceID != nil
+        recoveryCodeShowing = presentation.recoveryCode != nil
         self.now = now
     }
 }
@@ -116,13 +162,78 @@ enum OnlineAttentionCalculator {
         let live = input.battles
             .sorted { ($0.createdAt, $0.battleId) < ($1.createdAt, $1.battleId) }
             .compactMap { actionable($0, me: me, input: input) }
+        let ended = input.battles
+            .filter { input.unreadEndedBattleIDs.contains($0.battleId) }
+            .sorted { ($0.createdAt, $0.battleId) < ($1.createdAt, $1.battleId) }
+            .compactMap { endedRequest($0, me: me, input: input) }
         let outcome = displayedOutcome(input, me: me).map { [$0] } ?? []
-        return (live + outcome).enumerated()
+        return (live + ended + outcome).enumerated()
             .sorted { (priority($0.element.kind), $0.offset) < (priority($1.element.kind), $1.offset) }
             .map(\.element)
     }
 
     static func current(_ input: OnlineAttentionInput) -> OnlineAttention? { active(input).first }
+
+    /// What the in-popover banner shows: the first event that is not already on the online screen. With the popover in
+    /// front the notification is suppressed and the event marked seen, so this has to speak on every other screen.
+    static func banner(_ input: OnlineAttentionInput) -> OnlineAttention? {
+        active(input).first { !isOnScreen($0, input) }
+    }
+
+    /// History, standings, a rematch draft and the recovery code all draw over the room or the lobby.
+    private static func stageIsUncovered(_ input: OnlineAttentionInput) -> Bool {
+        input.onlineScreenShowing && !input.overlayShowing && !input.recoveryCodeShowing
+    }
+
+    /// The lobby is where an ended request is told, as its closable notice.
+    static func lobbyIsShowing(_ input: OnlineAttentionInput) -> Bool {
+        stageIsUncovered(input) && input.phase == .lobby
+    }
+
+    private static func isOnScreen(_ attention: OnlineAttention, _ input: OnlineAttentionInput) -> Bool {
+        if attention.kind == .requestEnded { return lobbyIsShowing(input) }
+        return stageIsUncovered(input) && input.displayedRoom?.battleId == attention.battleId
+    }
+
+    /// True once this person has taken a step in a room that has not started, so its ending is news to them:
+    /// the challenger from the start, the receiver after accepting. The next move may still be theirs.
+    static func isWaiting(_ room: OnlineBattleView, me: String) -> Bool {
+        guard let side = room.side(for: me), room.state == .pending || room.state == .accepted || room.state == .ready else { return false }
+        return side == .p1 || room.state != .pending
+    }
+
+    /// Moves rooms through the record: a waited room that ended becomes unread unless this app ended it.
+    /// Only an ending of a room in the record counts, so a first run over old history stays silent. A room missing
+    /// from the list proves nothing (a relaunch publishes before hello refills it), so it stays until the list says.
+    static func trackWaits(_ input: OnlineAttentionInput, record: OnlineAttentionWaitRecord) -> OnlineAttentionWaitRecord {
+        guard let me = input.localTrainerID else { return record }
+        var next = OnlineAttentionWaitRecord(unreadEnded: record.unreadEnded)
+        for entry in record.waiting {
+            guard let room = input.battles.first(where: { $0.battleId == entry.battleId }) else { next.waiting.append(entry); continue }
+            guard !input.ownEndedBattleIDs.contains(entry.battleId) else { continue }
+            if room.state == .declined || room.state == .cancelled || room.state == .expired {
+                if !next.unreadIDs.contains(entry.battleId) { next.unreadEnded.append(.init(battleId: entry.battleId, revision: room.revision)) }
+            } else if isWaiting(room, me: me) {
+                next.waiting.append(.init(battleId: entry.battleId, revision: room.revision))
+            }
+        }
+        let known = Set(next.waiting.map(\.battleId))
+        let started = input.battles
+            .filter { isWaiting($0, me: me) && !known.contains($0.battleId) && !input.ownEndedBattleIDs.contains($0.battleId) }
+            .sorted { ($0.createdAt, $0.battleId) < ($1.createdAt, $1.battleId) }
+        next.waiting += started.map { .init(battleId: $0.battleId, revision: $0.revision) }
+        next.unreadEnded.removeAll { input.acknowledgedEndedBattleIDs.contains($0.battleId) }
+        next.waiting = Array(next.waiting.suffix(OnlineAttentionWaitRecord.capacity))
+        next.unreadEnded = Array(next.unreadEnded.suffix(OnlineAttentionWaitRecord.capacity))
+        return next
+    }
+
+    private static func endedRequest(_ room: OnlineBattleView, me: String, input: OnlineAttentionInput) -> OnlineAttention? {
+        guard let side = room.side(for: me) else { return nil }
+        var ended = attention(.requestEnded, room: room, side: side, input: input, deadline: nil)
+        ended.ending = .init(state: room.state, reason: room.reason)
+        return ended
+    }
 
     static func evaluate(_ input: OnlineAttentionInput, seen: OnlineAttentionSeenRecord) -> OnlineAttentionEvaluation {
         let active = active(input)
@@ -160,7 +271,8 @@ enum OnlineAttentionCalculator {
             // Readiness is bound to a connection, so a relaunched app has to press it again.
             return unexpired && unprepared ? .finalConfirmed : nil
         case .running:
-            guard room.mode == .manual, room.ownChoice == nil, let deadline = room.deadline, date(deadline) > input.now else { return nil }
+            guard room.mode == .manual, room.ownChoice == nil, let deadline = room.deadline, date(deadline) > input.now,
+                  !input.noChoiceBattleIDs.contains(room.battleId) else { return nil }
             let optimisticallyChosen = input.choiceSubmitted && input.displayedRoom?.battleId == room.battleId
             return optimisticallyChosen ? nil : .myTurn
         case .reported, .completed, .declined, .cancelled, .expired, .void:
@@ -202,8 +314,9 @@ enum OnlineAttentionCalculator {
         case .incomingChallenge: 2
         case .finalConfirmed: 3
         case .rematchRequested: 4
-        case .resultReady: 5
-        case .matchEnded: 6
+        case .requestEnded: 5
+        case .resultReady: 6
+        case .matchEnded: 7
         }
     }
 }
@@ -236,9 +349,12 @@ private extension OnlineAttentionSeenRecord {
 /// Pure: the app delegate reads it to choose `NSPopover.behavior`; nothing here opens or closes anything.
 enum OnlinePopoverPinning {
     /// Entry, waiting and battle steps pin. The lobby list, a result and the home screen stay transient.
-    static func isPinned(phase: OnlineBattlePresentation.Phase, onlineScreenShowing: Bool) -> Bool {
+    /// A recovery code pins on any phase: it is shown once, and copying it means clicking another app.
+    @MainActor
+    static func isPinned(_ model: OnlineBattlePresentation, onlineScreenShowing: Bool) -> Bool {
         guard onlineScreenShowing else { return false }
-        switch phase {
+        if model.recoveryCode != nil { return true }
+        switch model.phase {
         case .setup, .room, .arena, .verifying: return true
         case .lobby, .result: return false
         }
@@ -249,11 +365,24 @@ enum OnlinePopoverPinning {
         popoverShown && appActive
     }
 
-    /// A relaunched or reopened popover returns to a match that is still being played or verified.
-    static func routesToOnlineScreenOnOpen(phase: OnlineBattlePresentation.Phase) -> Bool {
-        switch phase {
-        case .arena, .verifying: return true
-        case .setup, .lobby, .room, .result: return false
+    /// Where an opening lands: the menu bar, Finder's reopen, a relaunch and the home row all ask this.
+    /// nil means nothing is waiting, so the popover stays on Home.
+    /// A turn elsewhere cannot wait; otherwise a match in play or being verified keeps the screen and the banner
+    /// carries the lesser event. Going back to the group list is a way out of a long verification, so only an event
+    /// brings the person back from there.
+    static func openRoute(_ input: OnlineAttentionInput) -> OnlineOpenRoute? {
+        // The code is on no other screen and is gone for good once the app quits. It keeps whichever room is selected.
+        if input.recoveryCodeShowing { return .init(battleId: nil) }
+        let current = OnlineAttentionCalculator.current(input)
+        if current?.kind == .myTurn { return current.map { .init(battleId: $0.battleId) } }
+        switch input.phase {
+        case .arena, .verifying: return .init(battleId: input.displayedRoom?.battleId)
+        case .setup, .lobby, .room, .result: return current.map { .init(battleId: $0.battleId) }
         }
     }
+}
+
+/// Where a popover goes when it opens. `battleId` nil keeps whichever room is already selected.
+struct OnlineOpenRoute: Equatable, Sendable {
+    let battleId: String?
 }

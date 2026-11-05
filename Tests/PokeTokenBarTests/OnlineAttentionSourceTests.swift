@@ -28,7 +28,8 @@ final class OnlineAttentionSourceTests: XCTestCase {
         XCTAssertEqual(source([confirmed]).homeSubtitle(l: l, now: Self.now), "\(l.onlineAnonymous)님과 대결 확정 · 전투 준비 필요")
         let readied = source([confirmed], prepared: ["bt-conf"])
         XCTAssertNil(readied.menuMark(l: l, now: Self.now), "Readied, nothing is asked of me")
-        XCTAssertEqual(readied.homeSubtitle(l: l, now: Self.now), "동료와 겨루기 · 접속 중")
+        // Readied and waiting on the other side: the home row says so rather than reading as an idle group.
+        XCTAssertEqual(readied.homeSubtitle(l: l, now: Self.now), "\(l.onlineAnonymous)님의 응답 대기 중")
     }
 
     func testTheSubtitleReadsTheConnectionStatusOfThePresentation() {

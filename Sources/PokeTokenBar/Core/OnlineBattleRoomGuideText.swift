@@ -63,6 +63,7 @@ extension L {
     var onlineOwnReady: String { online("내 준비 완료 · 상대 대기 중", "You're ready · waiting for opponent") }
     func onlineOpponentOffline(_ opponent: String?) -> String {
         let name = opponent ?? onlineAnonymous
-        return online("\(name)님은 오프라인이에요. 상대가 앱을 열 때 알려져요", "\(name) is offline. They find out when they open the app")
+        return online("\(name)님은 오프라인이에요. 신청은 보낼 수 있지만 언제 확인할지는 알 수 없어요",
+                      "\(name) is offline. You can still send a challenge, but it may be a while before they respond")
     }
 }

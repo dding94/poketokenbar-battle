@@ -23,8 +23,8 @@ extension L {
     var onlineDismissNotice: String { online("닫기", "Dismiss") }
     var onlineCancelBattle: String { online("대결 취소", "Cancel battle") }
     var onlineVerifyingAuto: String {
-        online("자동으로 갱신돼요(보통 수 초). 바로 확인하고 싶을 때만 새로고침을 눌러 주세요.",
-               "This updates automatically, usually within a few seconds. Refresh only to check right now.")
+        online("자동으로 갱신돼요. 상대 앱이 꺼져 있으면 오래 걸릴 수 있어요. 바로 확인하고 싶을 때만 새로고침을 눌러 주세요.",
+               "This updates automatically. It can take a long time if your opponent's app is closed. Refresh only to check right now.")
     }
     func onlineAwaitingResponse(opponent: String?) -> String {
         let name = opponent ?? onlineAnonymous

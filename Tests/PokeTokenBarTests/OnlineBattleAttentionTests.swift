@@ -280,10 +280,10 @@ final class OnlineBattleAttentionTests: XCTestCase {
 
     // MARK: Notification eligibility
 
-    func testOnlyFiveKindsCanBecomeANotification() {
+    func testOnlySixKindsCanBecomeANotification() {
         XCTAssertEqual(Set(OnlineAttentionKind.allCases.compactMap { $0.notifiable?.rawValue }),
-                       ["incomingChallenge", "challengeAccepted", "finalConfirmed", "myTurn", "rematchRequested"])
-        XCTAssertEqual(OnlineAttentionKind.allCases.count, 7)
+                       ["incomingChallenge", "challengeAccepted", "finalConfirmed", "myTurn", "rematchRequested", "requestEnded"])
+        XCTAssertEqual(OnlineAttentionKind.allCases.count, 8)
         for kind in OnlineAttentionKind.allCases {
             let attention = OnlineAttention(kind: kind, battleId: "bt", revision: 1, roundSeq: 0, opponentName: nil, deadline: nil)
             XCTAssertEqual(OnlineAttentionNotice(attention)?.attention, kind.notifiable == nil ? nil : attention, "\(kind)")

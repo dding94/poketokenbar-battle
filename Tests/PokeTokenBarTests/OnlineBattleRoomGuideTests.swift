@@ -161,7 +161,12 @@ final class OnlineBattleRoomGuideTests: XCTestCase {
         XCTAssertTrue(l.onlineRequestSent(opponent: "연습친구").contains("연습친구"))
         XCTAssertTrue(l.onlineRequestSent(opponent: "연습친구").contains("신청을 보냈어요"))
         XCTAssertTrue(l.onlineOpponentOffline("연습친구").contains("연습친구"))
-        XCTAssertTrue(l.onlineOpponentOffline("연습친구").contains("앱을 열 때 알려져요"))
+        for lang in [L(.ko), L(.en)] {
+            let offline = lang.onlineOpponentOffline("Nara")
+            XCTAssertTrue(offline.contains("Nara"))
+            // Nothing reaches a closed app: the server only keeps the request until it is read.
+            for promise in ["알려져요", "find out", "will see", "They'll"] { XCTAssertFalse(offline.contains(promise), offline) }
+        }
     }
     func testEveryGuideLineHasBothLanguagesNamesTheOpponentAndNeverPromisesDelivery() {
         let progresses: [OnlineRoomProgress] = [

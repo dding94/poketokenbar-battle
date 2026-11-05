@@ -1642,3 +1642,14 @@ read_when:
 - **revision을 올리지 않는 쓰기는 revision으로 순서를 가릴 수 없다.** confirm은 revision이 그대로라 먼저 시작된 목록 조회가 `confirmed`를 되돌렸다. 같은 revision에서 true→false를 거부한다.
 - **"계정 없음"과 "계정을 아직 못 읽음"은 다른 상태다.** 둘 다 `.setup`이어서 오프라인 재실행에 가입 폼이 보였고 입력 중 연결되면 초안이 사라졌다. 키가 있으면 대기 화면을 보여 주되, 서버를 바꾸거나 복구할 길이 막히지 않게 폼으로 가는 버튼을 둔다.
 - **상수 connectionId 대역의 공백은 실제 Worker 인수로 메운다.** `testSessionsStillStartWhenOneSideReconnectsAfterPressingReady`가 실제 URLSession·workerd에서 소켓 교체 뒤 양쪽이 RUNNING까지 가는지 본다(`run-native-acceptance.sh` 필수 목록). 재전송을 끄면 이 테스트가 시간 초과로 실패한다. 세션 단위 결함 주입 41건은 모두 지정 테스트 실패로 잡혔다.
+
+## 온라인 알림·표식·라우팅 (2026-11-05, 리뷰 A F2)
+
+- **알림을 억제하고 seen을 소모하는 경로는 "대신 보이는 것"을 함께 검사한다.** `showsAttentionInstead`가 참이면 알림을 보내지 않고 seen을 기록하는데, 정작 사건을 말하는 화면은 그 방 하나뿐이었다. 그래서 홈·상점·결과·다른 방에서는 사건이 사라졌다. 기존 테스트 `testAnOpenPopoverGetsNoNotification...`은 "알림 0건"만 단언해 잘못된 동작을 정답으로 고정했다. 이제 같은 입력에서 `OnlineAttentionCalculator.banner`가 그 사건을 돌려주는지까지 단언하고, 배너는 `PopoverView` 최상위에 있다. 억제 조건을 넓힐 때는 그 조건에서 대체 표시가 보이는지 같이 확인한다.
+- **활성 앱은 `willPresent`가 없으면 알림을 표시하지 않는다.** `add`는 성공하고 seen도 기록되므로 호출 횟수만 세는 대역으로는 보이지 않는다. 팝오버를 X나 Esc로 닫아도 메뉴바 앱은 활성으로 남아 이 경로에 들어간다. `AppDelegate.instancesRespond(to:)`로 메서드 존재를 런타임에 단언하고, 표시 판단은 `OnlineNotificationForeground.options`로 뺐다. 같은 delegate를 쓰는 사용량·컴패니언 알림도 활성 상태에서 함께 버려지고 있었다.
+- **"어디로 가는가"를 정하는 규칙이 여러 개면 서로 어긋난다.** 메뉴바 열기는 phase, 홈 행은 플래그만, 알림 클릭은 방 선택만 썼다. 그래서 부제는 "받은 신청 1건"인데 행을 누르면 옛 결과가 나왔다. 열기·재실행·Finder 재오픈·홈 행은 `OnlinePopoverPinning.openRoute`를, 실제 이동은 `PopoverNavigation.openOnlineEvent`를 쓴다. 표식을 켜는 값과 목적지를 고르는 값이 같아야 한다.
+- **화면 플래그만 켜면 먼저 그려지는 화면에 가려진다.** `PopoverView`는 설정 → 기록 → 온라인 순으로 그리고 `OnlineBattleScreen`은 재대결 준비 → 전적판 → 지난 경기 → 방 순으로 그린다. `.openBattle`은 방만 고르므로 `canAccept`가 거짓인 방이 그 뒤에 숨었다. 사건 경로는 `.followAttention`으로 오버레이를 지운다. 재대결 초안은 고정된 상대·방식 위의 고르기뿐이고 고른 값과 `challengeIntent`는 페이지 밖에 있어 함께 지워지지 않는다.
+- **`recoveryCode`처럼 단계와 무관하게 화면을 차지하는 상태는 단계 기반 판정에서 빠지기 쉽다.** 가입 성공은 phase를 lobby로 만들어 고정을 풀었다. `isPinned`는 이제 프레젠테이션을 직접 읽고, 앱은 같은 함수를 관찰 추적에 넣어 읽은 값이 모두 추적된다.
+- **저장 형식에 필드를 더하면 합성 디코더는 옛 파일 전체를 버린다.** `var x = 기본값`이 있어도 합성 `init(from:)`은 키가 없으면 던진다. 그대로 두면 업그레이드 때 seen과 `permissionHandled`를 잃어 모든 사건이 다시 울리고 권한을 다시 묻는다. 옛 형식 JSON 원문으로 시험한다.
+- **재실행 뒤에 "새로 끝난 경기"와 "오래된 기록"을 구별하려면 끝나기 전의 사실을 저장해야 한다.** 서버 목록에는 끝난 방이 남아 있으므로(`GET /v1/battles` 최신 100건) 상태 비교는 가능하지만 내가 기다리던 방인지는 알 수 없다. `OnlineAttentionWaitRecord`에 battleId와 revision만 저장해 비교하고, 기록에 있던 방만 울린다. 목록에 없는 방은 재실행 직후일 수 있어 지우지 않는다. 내가 직접 끝낸 방은 서버 view로 구별되지 않으므로 누른 순간 기록에서 뺀다.
+- **이번 부류의 스윕 결과.** 경로 전수 grep(`showingOnlineBattle =`, `perform(.openBattle`, `routesToOnlineScreenOnOpen`)으로 남은 플래그 직접 설정은 리셋·재오픈 라우트뿐임을 확인했다. "기술을 고르세요"는 `.myTurn` 문구에서만 나오고 `.myTurn`은 계산기 한 곳에서 만든다. 약속 문구는 온라인 텍스트 파일에서 "보통", "수 초", "알려져요"를 확인해 두 곳을 고쳤다.

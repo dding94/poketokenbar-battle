@@ -122,8 +122,12 @@ final class OnlineBattleEndedNoticeTests: XCTestCase {
 
     func testVerifyingScreenSaysItUpdatesByItself() {
         XCTAssertTrue(L(.ko).onlineVerifyingAuto.contains("자동으로 갱신"))
-        XCTAssertTrue(L(.ko).onlineVerifyingAuto.contains("수 초"))
         XCTAssertTrue(L(.en).onlineVerifyingAuto.contains("automatically"))
+        // The server waits up to 72 hours for the other report, so no duration can be promised.
+        for promise in ["수 초", "보통", "usually", "seconds"] {
+            XCTAssertFalse(L(.ko).onlineVerifyingAuto.contains(promise), promise)
+            XCTAssertFalse(L(.en).onlineVerifyingAuto.contains(promise), promise)
+        }
         XCTAssertFalse(L(.ko).onlineDismissNotice.isEmpty)
     }
     func testDismissNoticeClearsItWithoutReachingTheSession() {
