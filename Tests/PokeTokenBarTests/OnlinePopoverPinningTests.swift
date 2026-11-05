@@ -77,6 +77,12 @@ final class OnlinePopoverPinningTests: XCTestCase {
 
     // MARK: copy
 
+    func testAPinnedPopoverBehindAnotherAppStillLetsNotificationsThrough() {
+        XCTAssertFalse(OnlinePopoverPinning.showsAttentionInstead(popoverShown: true, appActive: false))
+        XCTAssertTrue(OnlinePopoverPinning.showsAttentionInstead(popoverShown: true, appActive: true))
+        XCTAssertFalse(OnlinePopoverPinning.showsAttentionInstead(popoverShown: false, appActive: true))
+    }
+
     func testPinnedMarkerIsLocalized() {
         XCTAssertEqual(L(.ko).onlinePinned, "고정됨")
         XCTAssertEqual(L(.en).onlinePinned, "Pinned")

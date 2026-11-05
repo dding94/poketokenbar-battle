@@ -309,10 +309,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
 
     /// Feeds the same input the menu-bar mark reads to the notifier. Tasks run in order up to their first
     /// suspension, and the notifier updates its record before suspending, so bursts cannot double-announce.
-    private func deliverOnlineAttention() {
+    /// `popoverJustShown` covers the open itself, where the activation requested just before `show` may not have landed yet.
+    private func deliverOnlineAttention(popoverJustShown: Bool = false) {
         guard let notifier = onlineNotifier else { return }
         let input = onlineAttention.input()
-        let open = popover.isShown
+        let open = popoverJustShown || OnlinePopoverPinning.showsAttentionInstead(popoverShown: popover.isShown, appActive: NSApp.isActive)
         Task { await notifier.handle(input, popoverOpen: open) }
     }
 
@@ -917,7 +918,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
     /// overwrite a live token (#168). `start` is also idempotent if `didShow` fires twice.
     func popoverDidShow(_ notification: Notification) {
         Task { await online?.perform(.setPopoverVisible(true)) }
-        deliverOnlineAttention()   // an open popover marks what it shows as seen, and may ask the permission once
+        deliverOnlineAttention(popoverJustShown: true)   // an open popover marks what it shows as seen, and may ask the permission once
         if let notifier = onlineNotifier { Task { await notifier.refreshPermissionHint() } }
         if !onlinePresentation.popoverPinned { startOutsideClickMonitor() }
     }

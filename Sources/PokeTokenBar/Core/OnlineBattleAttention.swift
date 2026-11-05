@@ -244,6 +244,11 @@ enum OnlinePopoverPinning {
         }
     }
 
+    /// A pinned popover can stay open behind another app, where nobody sees it. Only one in front replaces a notification.
+    static func showsAttentionInstead(popoverShown: Bool, appActive: Bool) -> Bool {
+        popoverShown && appActive
+    }
+
     /// A relaunched or reopened popover returns to a match that is still being played or verified.
     static func routesToOnlineScreenOnOpen(phase: OnlineBattlePresentation.Phase) -> Bool {
         switch phase {
