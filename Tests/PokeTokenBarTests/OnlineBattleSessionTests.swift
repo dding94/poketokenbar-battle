@@ -2079,6 +2079,15 @@ final class OnlineBattleSessionTests: XCTestCase {
         XCTAssertFalse(session.presentation.localReady)
         XCTAssertEqual(session.presentation.prepareBlock, .connecting)
     }
+    func testPressedRoomOffScreenStaysOutOfTheMark() async throws {
+        let accepted = try confirmedRoom()
+        let (session, http, _, _) = try await setup([accepted])
+        await http.route("/v1/battles/\(accepted.battleId)/ready", try JSONEncoder().encode(accepted))
+        await session.bootstrap(); await session.perform(.prepareBattle(accepted.battleId))
+        await session.perform(.backToLobby)
+        XCTAssertNil(session.presentation.room)
+        XCTAssertEqual(session.preparedBattleIDs(), [accepted.battleId])
+    }
     func testFailedReadAfterReconnectCannotPromiseTheResendAnyMore() async throws {
         let accepted = try confirmedRoom()
         let connection = SessionConnection(), observer = SessionObserver()

@@ -395,6 +395,42 @@ final class OnlineBattleNativeAcceptanceTests: XCTestCase {
         XCTAssertEqual(store.state.spentTokens, 123, file: file, line: line)
         XCTAssertEqual(store.state.inventory, [ItemKind.potion.rawValue: 2], file: file, line: line)
     }
+    /// The real server binds ready to a socket: one side's reconnect used to lock both sides in ACCEPTED.
+    func testSessionsStillStartWhenOneSideReconnectsAfterPressingReady() async throws {
+        let pair = try await pair(), snapshots = try snapshots()
+        var room = try await pair.apis[0].createBattle(requestId: UUID().uuidString,
+            targetTrainerId: pair.grants[1].trainer.trainerId, mode: .manual, snapshot: snapshots[0])
+        room = try await pair.apis[1].accept(id: room.battleId, revision: room.revision, snapshot: snapshots[1])
+        room = try await pair.apis[0].confirm(id: room.battleId, revision: room.revision)
+        let stores = try (0..<2).map { try store($0, snapshot: snapshots[$0], create: true) }
+        let live = (0..<2).map { session(pair.grants[$0], snapshot: snapshots[$0], store: stores[$0], transport: NativeHTTP(endpoint)) }
+        func waitFor(_ what: String, _ condition: () -> Bool) async throws {
+            for _ in 0..<400 {
+                if condition() { return }
+                try await Task.sleep(for: .milliseconds(25))
+            }
+            XCTFail("Timed out waiting for " + what)
+            throw OnlineBattleFailure.transport
+        }
+        for session in live {
+            await session.bootstrap(); await session.perform(.setPopoverVisible(true))
+            try await waitFor("the first hello") { session.presentation.canStart }
+        }
+        await live[0].perform(.prepareBattle(room.battleId))
+        XCTAssertTrue(live[0].presentation.localReady)
+        // A second socket for the same trainer makes the server close the session's one, so its ready no longer counts.
+        _ = try await connected(pair.grants[0])
+        try await waitFor("the replaced socket") { !live[0].presentation.canStart }
+        XCTAssertFalse(live[0].presentation.localReady)
+        for connection in connections { await connection.stop() }
+        await live[1].perform(.prepareBattle(room.battleId))
+        let waiting = try await pair.apis[1].battle(id: room.battleId)
+        XCTAssertEqual(waiting.state, .accepted, "The server must not count the ready of a socket that is gone")
+        await live[0].perform(.setPopoverVisible(false)); await live[0].perform(.setPopoverVisible(true))
+        try await waitFor("both sides in the match") { live.allSatisfy { $0.presentation.room?.state == .running } }
+        XCTAssertEqual(live[0].presentation.phase, .arena)
+        XCTAssertEqual(live[1].presentation.phase, .arena)
+    }
     func testSessionsRecoverCommittedResponseLossAndApplyDurablyOnce() async throws {
         let pair = try await pair(), snapshots = try snapshots()
         let initial = try await running(pair, mode: .manual, snapshots: snapshots)
