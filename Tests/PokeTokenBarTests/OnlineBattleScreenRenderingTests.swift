@@ -568,6 +568,42 @@ final class OnlineBattleScreenRenderingTests: XCTestCase {
         try assertNothingBelowTheBoard(host, "opponent has chosen while the beats play")
     }
 
+    /// The waiting states drawn in the whole screen for review: with `PTB_SNAPSHOT_SCREENSHOT_DIR` set the PNGs are
+    /// written (720px wide); without it the states still render and must differ from each other.
+    func testWaitingStatesRenderInTheWholeScreenForReview() async throws {
+        let fixture = try OnlineBattleArenaFixture.arena(seat: .p1)
+        defer { fixture.close() }
+        let model = fixture.model
+        model.localSide = .p1
+        let foeID = try XCTUnwrap(model.room).p2.trainerId
+        func presence(_ online: Bool) {
+            model.members = [.init(trainerId: foeID, displayEmail: "연습친구", role: .member, status: .active, joinedAt: 0, online: online)]
+        }
+        func flagged(_ value: Bool) throws {
+            var json = try XCTUnwrap(JSONSerialization.jsonObject(with: BattleJSON.encoder().encode(XCTUnwrap(model.room))) as? [String: Any])
+            json["opponentSubmitted"] = value
+            model.room = try JSONDecoder().decode(OnlineBattleView.self, from: JSONSerialization.data(withJSONObject: json))
+        }
+        try fixture.play(rounds: 2); fixture.staging.skipToEnd(); fixture.publish()
+        presence(true); model.connectionStatus = L.onlineConnectedStatus
+        let host = await host(model)
+        var shots: [Data] = []
+        func shot(_ name: String) async throws { shots.append(try await capture(host, named: name)) }
+        try await shot("t15-00-my-turn.png")
+        model.send(.chooseMove(1)); try await settle(host)
+        try await shot("t15-01-opponent-choosing.png")
+        presence(false); try await settle(host)
+        try await shot("t15-02-opponent-disconnected.png")
+        model.connectionStatus = "화면을 열 때 경기 정보를 확인해요"; try await settle(host)
+        try await shot("t15-03-opponent-maybe-offline.png")
+        model.connectionStatus = L.onlineConnectedStatus; presence(true)
+        model.choiceSubmitted = false; try flagged(true); try await settle(host)
+        try await shot("t15-04-opponent-chosen-before-mine.png")
+        model.send(.chooseMove(2)); try await settle(host)
+        try await shot("t15-05-both-chosen.png")
+        XCTAssertEqual(Set(shots).count, shots.count, "every waiting state looks different from the others")
+    }
+
     private func host2(_ model: OnlineBattlePresentation) async -> NSView {
         window?.close()
         return await arenaHost(model)
