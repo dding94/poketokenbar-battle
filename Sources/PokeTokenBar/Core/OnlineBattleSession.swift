@@ -623,6 +623,7 @@ final class OnlineBattleSession {
         presentation.result = room.flatMap { resultByBattleID[$0.battleId] }
         presentation.arena = nil; presentation.request = nil; presentation.deadline = nil
         presentation.choiceSubmitted = false
+        presentation.localReady = room.map { prepared[$0.battleId] == $0.revision } ?? false
         presentation.moveSlugs = [:]; presentation.abilitySlugs = [:]
         presentation.liveLogs = []
         guard let room, let account = presentation.account else { presentation.phase = authenticated ? .lobby : .setup; return }
@@ -961,7 +962,13 @@ final class OnlineBattleSession {
                 if room.state == .accepted, room.confirmed {
                     try validateConsent(room, account: account)
                     prepared[room.battleId] = room.revision
-                    result = try await api.ready(id: room.battleId, revision: room.revision, connectionId: connectionID, engineHash: BattleEngineManifest.sha256, rulesVersion: BattleSnapshot.rules, policyVersion: BattleSnapshot.policy)
+                    do {
+                        result = try await api.ready(id: room.battleId, revision: room.revision, connectionId: connectionID, engineHash: BattleEngineManifest.sha256, rulesVersion: BattleSnapshot.rules, policyVersion: BattleSnapshot.policy)
+                    } catch {
+                        // A refused ready call must not read as "I am ready" on the room screen.
+                        if prepared[room.battleId] == room.revision { prepared[room.battleId] = nil }
+                        throw error
+                    }
                 } else if room.state == .ready {
                     // The frozen inputs stay valid through later local growth. process validates both sets.
                     prepared[room.battleId] = room.revision

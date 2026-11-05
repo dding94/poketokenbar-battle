@@ -52,6 +52,19 @@ final class OnlineBattleRoomGuideRenderingTests: XCTestCase {
         },
     ]
 
+    /// States the old screen could not express (my press received, why a button is disabled).
+    static let guideScenarios: [Scenario] = [
+        .init(name: "challenger-3b-ready-pressed") { challenger($0, state: .accepted, confirmed: true); $0.localReady = true },
+        .init(name: "challenger-4b-both-ready-pressed") { challenger($0, state: .ready, confirmed: true); $0.localReady = true },
+        .init(name: "challenger-3c-connecting") { challenger($0, state: .accepted, confirmed: true); $0.canStart = false },
+        .init(name: "receiver-1b-pending-fainted-entry") { receiver($0, state: .pending); $0.entryHP["synthetic-pikachu"] = 0 },
+        .init(name: "receiver-3b-ready-pressed-long-nickname") {
+            receiver($0, state: .accepted, confirmed: true); named($0, longNickname); $0.localReady = true
+        },
+        .init(name: "challenger-2b-accepted-long-nickname") { challenger($0, state: .accepted); named($0, longNickname) },
+        .init(name: "lobby-fainted-entry") { $0.phase = .lobby; $0.entryHP["synthetic-pikachu"] = 0 },
+    ]
+
     private func render(_ model: OnlineBattlePresentation, named name: String) async throws -> NSSize {
         let provider = OnlineBattleSyntheticNameProvider()
         let names = PokemonNameDisplayStore()
@@ -84,7 +97,7 @@ final class OnlineBattleRoomGuideRenderingTests: XCTestCase {
     }
 
     func testRoomAndLobbyScenariosRenderAtPopoverWidth() async throws {
-        for scenario in Self.baseScenarios {
+        for scenario in Self.baseScenarios + Self.guideScenarios {
             let model = OnlineBattleScreenRenderingTests.model()
             scenario.setup(model)
             _ = try await render(model, named: scenario.name)

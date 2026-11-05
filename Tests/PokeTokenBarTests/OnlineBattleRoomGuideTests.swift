@@ -183,6 +183,14 @@ final class OnlineBattleRoomGuideTests: XCTestCase {
         }
         XCTAssertEqual(Set(OnlineActionBlock.allKnown.map { L(.ko).onlineActionBlock($0) }).count, OnlineActionBlock.allKnown.count)
     }
+    func testStepStateAndVersusLineAreSpokenInBothLanguages() {
+        for l in [L(.ko), L(.en)] {
+            let states = [l.onlineStepState(done: true, current: false), l.onlineStepState(done: false, current: true),
+                          l.onlineStepState(done: false, current: false)]
+            XCTAssertEqual(Set(states).count, 3)
+            XCTAssertTrue(l.onlineRoomVersus("Nara").contains("Nara"))
+        }
+    }
     func testMissingNicknameFallsBackToTheSharedAnonymousWord() {
         let l = L(.ko)
         XCTAssertTrue(l.onlineRoomGuide(.init(step: .accept, turn: .theirs, localReady: false), opponent: nil).contains(l.onlineAnonymous))

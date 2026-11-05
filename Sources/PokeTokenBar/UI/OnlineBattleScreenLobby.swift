@@ -41,6 +41,13 @@ struct OnlineBattleLobby: View {
                 Button(l.onlineChallenge) { model.send(.challenge) }
                     .buttonStyle(.borderedProminent).disabled(!model.canChallenge)
                     .accessibilityIdentifier("online.challenge")
+                OnlineBattleBlockReason(block: model.challengeBlock, l: l, identifier: "online.challenge.reason")
+                if model.selectedOpponentOffline {
+                    Label(l.onlineOpponentOffline(model.selectedOpponent?.displayEmail), systemImage: "moon.zzz")
+                        .font(.caption2).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("online.challenge.offline")
+                }
             }
             VStack(alignment: .leading, spacing: 8) {
                 Text(l.onlineBattles).font(.subheadline.bold())
@@ -141,33 +148,50 @@ struct OnlineBattleRoom: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             if let room = model.room {
-                Text(l.onlineState(room.state)).font(.headline)
+                if let progress = model.roomProgress {
+                    OnlineBattleRoomGuide(model: model, l: l, progress: progress)
+                } else {
+                    Text(l.onlineState(room.state)).font(.headline)
+                }
                 Text(room.mode == .manual ? l.onlineManual : l.onlineAuto).font(.caption).foregroundStyle(.secondary)
-                publicEntry(room.p1, own: model.localSide == .p1)
-                publicEntry(room.p2, own: model.localSide == .p2)
+                // The step's button sits right under the guide so it is never below the scroll fold.
                 if room.state == .pending && model.localSide == .p2 {
                     OnlineBattleRoster(model: model, l: l, artwork: artwork)
                 }
+                actions(room)
+                publicEntry(room.p1, own: model.localSide == .p1)
+                publicEntry(room.p2, own: model.localSide == .p2)
                 Text(l.onlineNoLevelLimit).font(.caption).foregroundStyle(.secondary)
                 Text(l.onlineHidden).font(.caption2).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 Text(l.onlineStakesHint).font(.caption2).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-                if room.state == .pending && model.localSide == .p2 {
-                    HStack {
-                        Button(l.onlineAccept) { model.send(.accept) }.buttonStyle(.borderedProminent).disabled(!model.canAccept)
-                        Button(l.onlineDecline) { model.send(.decline) }.disabled(model.isBusy)
-                    }
-                } else if room.state == .accepted && model.localSide == .p1 && !room.confirmed {
-                    Button(l.onlineConfirm) { model.send(.confirm) }.buttonStyle(.borderedProminent).disabled(!model.canConfirm)
-                } else if room.confirmed && [.accepted, .ready].contains(room.state) {
-                    Button(l.onlinePrepare) { model.send(.prepareBattle) }.buttonStyle(.borderedProminent).disabled(!model.canPrepare)
-                } else {
-                    Text(l.onlineWaiting).font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+    @ViewBuilder private func actions(_ room: OnlineBattleView) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if room.state == .pending && model.localSide == .p2 {
+                HStack {
+                    Button(l.onlineAccept) { model.send(.accept) }.buttonStyle(.borderedProminent).disabled(!model.canAccept)
+                        .accessibilityIdentifier("online.accept")
+                    Button(l.onlineDecline) { model.send(.decline) }.disabled(model.isBusy)
                 }
-                if [.pending, .accepted, .ready].contains(room.state) {
-                    Button(l.onlineCancel) { model.send(.cancel) }.disabled(model.isBusy)
-                }
+                OnlineBattleBlockReason(block: model.acceptBlock, l: l, identifier: "online.accept.reason")
+            } else if room.state == .accepted && model.localSide == .p1 && !room.confirmed {
+                Button(l.onlineConfirm) { model.send(.confirm) }.buttonStyle(.borderedProminent).disabled(!model.canConfirm)
+                    .accessibilityIdentifier("online.confirm")
+                OnlineBattleBlockReason(block: model.isBusy ? .busy : nil, l: l, identifier: "online.confirm.reason")
+            } else if room.confirmed && [.accepted, .ready].contains(room.state) {
+                Button(model.localReady ? l.onlineOwnReady : l.onlinePrepare) { model.send(.prepareBattle) }
+                    .buttonStyle(.borderedProminent).disabled(!model.canPrepare)
+                    .accessibilityIdentifier("online.prepare")
+                OnlineBattleBlockReason(block: model.prepareBlock, l: l, identifier: "online.prepare.reason")
+            } else if model.roomProgress == nil {
+                Text(l.onlineWaiting).font(.caption).foregroundStyle(.secondary)
+            }
+            if [.pending, .accepted, .ready].contains(room.state) {
+                Button(l.onlineCancel) { model.send(.cancel) }.disabled(model.isBusy)
             }
         }
     }
