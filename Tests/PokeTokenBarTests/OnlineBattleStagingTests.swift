@@ -701,8 +701,10 @@ final class OnlineBattleStagingSessionTests: XCTestCase {
         await h.session.bootstrap()
         let stage = try XCTUnwrap(h.model.stage)
         XCTAssertTrue(stage.isPlaying)
+        XCTAssertEqual(h.session.stagingHeldBattleIDs(), [final.battleId], "the attention mark waits for the last beat")
         await h.session.perform(.setPopoverVisible(false))
         XCTAssertFalse(stage.isPlaying)
+        XCTAssertEqual(h.session.stagingHeldBattleIDs(), [], "a closed popover holds nothing back, so a notice can go out")
         XCTAssertEqual(h.model.phase, .verifying)
         let played = stage.playback.history.count
         await showScreen(h)

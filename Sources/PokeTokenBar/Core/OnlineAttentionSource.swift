@@ -10,7 +10,7 @@ final class OnlineAttentionSource {
     @ObservationIgnored private let preparedBattleIDs: () -> Set<String>
     @ObservationIgnored private let stagingHeldBattleIDs: () -> Set<String>
 
-    /// `stagingHeldBattleIDs` is empty until the staging work reports which battles still hold back their outcome.
+    /// `stagingHeldBattleIDs` names the battles whose staged display still holds back their outcome.
     init(presentation: OnlineBattlePresentation,
          preparedBattleIDs: @escaping () -> Set<String> = { [] },
          stagingHeldBattleIDs: @escaping () -> Set<String> = { [] }) {

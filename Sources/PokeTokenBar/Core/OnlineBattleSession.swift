@@ -26,6 +26,10 @@ final class OnlineBattleSession {
     private var submittedReports = Set<String>()
     private var nextRecoveryRead: TimeInterval?
     /// Battles this connection already pressed "ready" for at their current revision. The server view does not expose it.
+    /// Battles whose staged display is still playing. A hidden stage skips to its end, so only the one on screen can be here.
+    func stagingHeldBattleIDs() -> Set<String> {
+        Set(stagings.filter { $0.value.isPlaying }.keys)
+    }
     func preparedBattleIDs() -> Set<String> {
         var ids = Set(presentation.battles.filter { prepared[$0.battleId] == $0.revision }.map(\.battleId))
         if let room = presentation.room, prepared[room.battleId] == room.revision { ids.insert(room.battleId) }

@@ -286,9 +286,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
                 accessAllowed: { !KeychainAccessGate.isDisabled },
                 localization: { [companion = companion!] in companion.l })
             online = session; onlinePresentation = session.presentation
-            // stagingHeldBattleIDs stays at its empty default here; the staging work passes the real set at this one spot.
             onlineAttention = OnlineAttentionSource(presentation: session.presentation,
-                                                    preparedBattleIDs: { [weak session] in session?.preparedBattleIDs() ?? [] })
+                                                    preparedBattleIDs: { [weak session] in session?.preparedBattleIDs() ?? [] },
+                                                    stagingHeldBattleIDs: { [weak session] in session?.stagingHeldBattleIDs() ?? [] })
             prepareOnlineNotifier(presentation: session.presentation, directory: directory)
             Task { await session.bootstrap() }
         } catch {
