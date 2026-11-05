@@ -151,7 +151,7 @@ final class SystemOnlineNotificationCenter: OnlineNotificationCenter {
         let status = await withCheckedContinuation { (continuation: CheckedContinuation<UNAuthorizationStatus, Never>) in
             center.getNotificationSettings { continuation.resume(returning: $0.authorizationStatus) }
         }
-        switch status {
+        return switch status {
         case .notDetermined: .notDetermined
         case .denied: .denied
         case .authorized, .provisional, .ephemeral: .allowed
