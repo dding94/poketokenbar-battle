@@ -1622,4 +1622,60 @@ final class OnlineBattleSessionTests: XCTestCase {
         XCTAssertNil(session.presentation.result)
     }
 
+    // MARK: Server error notices (T01)
+    private func errorBody(_ code: String) -> Data { Data("{\"error\":{\"code\":\"\(code)\"}}".utf8) }
+    private func joinNotice(code: String, status: Int, retryAfter: Int? = nil) async throws -> String {
+        let credentials = SessionCredentials(); await credentials.setKey(nil)
+        let (session, http, _, _) = try await setup(credential: credentials)
+        await http.queue("/v1/join", [.init(status: status, body: errorBody(code), retryAfter: retryAfter)])
+        await session.bootstrap(); await session.perform(.join(inviteCode: "invite", email: "synthetic"))
+        return try XCTUnwrap(session.presentation.notice, code)
+    }
+    func testJoinFailuresShowDistinctCauseSpecificNotices() async throws {
+        let generic = try await joinNotice(code: "internal", status: 500)
+        var notices: [String: String] = [:]
+        for (code, status) in [("invite_revoked", 410), ("invite_expired", 410), ("invite_used_up", 410), ("display_email_taken", 409)] {
+            notices[code] = try await joinNotice(code: code, status: status)
+        }
+        notices["too_many_attempts"] = try await joinNotice(code: "too_many_attempts", status: 429, retryAfter: 30)
+        XCTAssertEqual(Set(notices.values).count, 5, "each cause needs its own sentence: \(notices)")
+        for (code, notice) in notices { XCTAssertNotEqual(notice, generic, code) }
+        XCTAssertTrue(notices["too_many_attempts"]?.contains("30") == true)
+        // version_mismatch is a confirmed server code, but the plan keeps it on the generic sentence.
+        let version = try await joinNotice(code: "version_mismatch", status: 409)
+        XCTAssertEqual(version, generic)
+    }
+    func testNextActionClearsPreviousErrorNoticeBeforeItsRequestFinishes() async throws {
+        let credentials = SessionCredentials(); await credentials.setKey(nil)
+        let (session, http, _, _) = try await setup(credential: credentials)
+        await http.queue("/v1/join", [.init(status: 410, body: errorBody("invite_expired"))])
+        await session.bootstrap(); await session.perform(.join(inviteCode: "invite", email: "synthetic"))
+        XCTAssertNotNil(session.presentation.notice)
+        await http.suspendNext("POST /v1/join")
+        let second = Task { await session.perform(.join(inviteCode: "invite", email: "synthetic")) }
+        await http.waitUntilBlocked()
+        XCTAssertNil(session.presentation.notice)
+        await http.resume(.init(status: 410, body: errorBody("invite_revoked")))
+        await second.value
+        XCTAssertNotNil(session.presentation.notice)
+    }
+    func testAcceptOnRoomThePeerAlreadyCancelledOrLetExpireExplainsWhy() async throws {
+        let pending = try changed(battle(), ["state": "PENDING", "config": NSNull(), "result": NSNull(), "roundSeq": 0, "journal": []])
+        var notices: [String: String] = [:]
+        for state in ["CANCELLED", "EXPIRED"] {
+            let (session, http, _, _) = try await setup([pending], trainer: "trainer-two")
+            await session.bootstrap()
+            XCTAssertEqual(session.presentation.room?.state, .pending)
+            let gone = try changed(pending, ["state": state])
+            await http.route("/v1/battles", try JSONEncoder().encode(OnlineBattlePage(battles: [gone], before: nil)))
+            await session.perform(.accept)
+            let accepts = await http.count("/v1/battles/\(pending.battleId)/accept")
+            XCTAssertEqual(accepts, 0, state)
+            notices[state] = session.presentation.notice ?? "<nil>"
+        }
+        XCTAssertNotEqual(notices["CANCELLED"], notices["EXPIRED"])
+        XCTAssertTrue(notices["CANCELLED"]?.contains("취소") == true, "\(notices)")
+        XCTAssertTrue(notices["EXPIRED"]?.contains("시간이 지났") == true, "\(notices)")
+        for value in notices.values { XCTAssertFalse(value.contains("출전 정보가 바뀌")) }
+    }
 }
