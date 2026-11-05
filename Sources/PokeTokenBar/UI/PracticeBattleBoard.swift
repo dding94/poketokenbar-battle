@@ -424,6 +424,9 @@ struct PracticeMoveCard: View {
     let artwork: Bool
     /// Automatic mode or a paused battle: nothing to choose.
     let locked: Bool
+    /// The online arena marks the card whose choice is already in; it stays full strength while the rest dim.
+    /// The mark takes the key badge's place, so the card never changes size.
+    var chosen = false
     let action: () -> Void
 
     private var special: Bool { move.id == "recharge" || move.id == "struggle" }
@@ -440,11 +443,16 @@ struct PracticeMoveCard: View {
                     name.font(.callout.weight(.semibold)).lineLimit(1).minimumScaleFactor(0.8).layoutPriority(1)
                     Spacer(minLength: 2)
                     if let multiplier { PracticeEffectivenessBadge(multiplier: multiplier, l: l) }
-                    Text("\(key)")
-                        .font(.system(size: 9, weight: .bold).monospacedDigit())
-                        .foregroundStyle(.secondary)
-                        .frame(width: 14, height: 14)
-                        .overlay(RoundedRectangle(cornerRadius: 3).strokeBorder(Color.secondary.opacity(0.4)))
+                    if chosen {
+                        Image(systemName: "checkmark.circle.fill").font(.system(size: 13, weight: .bold))
+                            .foregroundStyle(tint).frame(width: 14, height: 14)
+                    } else {
+                        Text("\(key)")
+                            .font(.system(size: 9, weight: .bold).monospacedDigit())
+                            .foregroundStyle(.secondary)
+                            .frame(width: 14, height: 14)
+                            .overlay(RoundedRectangle(cornerRadius: 3).strokeBorder(Color.secondary.opacity(0.4)))
+                    }
                 }
                 // A long type name with both markers runs out of room first (FIGHTING + STAB + Priority in
                 // English): the PP count drops its label, then Priority shrinks to the hare glyph the matchup's
@@ -464,16 +472,17 @@ struct PracticeMoveCard: View {
             }
             .padding(.horizontal, 7).padding(.vertical, 5)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(tint.opacity(0.14), in: RoundedRectangle(cornerRadius: 10))
-            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(tint.opacity(0.4)))
+            .background(tint.opacity(chosen ? 0.3 : 0.14), in: RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(tint.opacity(chosen ? 0.95 : 0.4), lineWidth: chosen ? 2 : 1))
             .contentShape(RoundedRectangle(cornerRadius: 10))
         }
         .buttonStyle(.plain)
         .disabled(disabled)
-        .opacity(disabled ? 0.45 : 1)
+        .opacity(disabled && !chosen ? 0.45 : 1)
+        .accessibilityAddTraits(chosen ? .isSelected : [])
         .keyboardShortcut(KeyEquivalent(Character(String(key))), modifiers: [])
         .accessibilityLabel(l.practiceMoveLabel(key, move.name))
-        .accessibilityValue(spoken)
+        .accessibilityValue(chosen ? [l.onlineYourPick, spoken].filter { !$0.isEmpty }.joined(separator: l.practiceSeparator) : spoken)
     }
 
     private enum PriorityStyle { case text, glyph, hidden }

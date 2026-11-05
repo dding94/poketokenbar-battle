@@ -180,7 +180,14 @@ struct OnlineBattleArena: View {
         HStack(alignment: .firstTextBaseline) {
             switch footer {
             case .sent:
-                Label(l.onlineChoiceSent, systemImage: "checkmark.circle").font(.callout.weight(.semibold))
+                Label(l.onlineChoiceDone, systemImage: "checkmark.circle").font(.callout.weight(.semibold)).fixedSize()
+                if let wait = model.opponentWait {
+                    // One line under the board's fixed height; the grid below keeps the picked card marked.
+                    Text(l.onlineOpponentWait(wait)).font(.caption)
+                        .foregroundStyle(wait == .choosing ? Color.secondary : Color.orange)
+                        .lineLimit(2).minimumScaleFactor(0.85)
+                        .accessibilityIdentifier("online.opponentWait")
+                }
             case .moves:
                 Text(playing ? l.practicePlayingTurn : l.practiceWhatNext)
                     .font(.callout.weight(.semibold)).foregroundStyle(playing ? Color.secondary : Color.primary)
@@ -221,13 +228,14 @@ struct OnlineBattleArena: View {
     /// running and the choice may be made while the last turn is still on screen.
     func movesLocked(_ slot: Int) -> Bool { !model.canChooseMove(slot) }
 
-    func moveChosen(_ slot: Int) -> Bool { false }
+    /// The card of the choice that is already in; nil slot means nothing is marked.
+    func moveChosen(_ slot: Int) -> Bool { model.chosenSlot == slot }
 
     private func moveGrid(_ moves: [BattleMove]) -> some View {
         LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], spacing: 6) {
             ForEach(moves) { move in
                 PracticeMoveCard(move: namedMove(move), key: move.slot, snapshot: ownSnapshot, l: l, artwork: artwork,
-                                 locked: movesLocked(move.slot)) {
+                                 locked: movesLocked(move.slot), chosen: moveChosen(move.slot)) {
                     model.send(.chooseMove(move.slot))
                 }
                 .accessibilityIdentifier("online.move.\(move.slot)")

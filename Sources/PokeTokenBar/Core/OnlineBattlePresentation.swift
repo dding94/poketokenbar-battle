@@ -110,9 +110,27 @@ final class OnlineBattlePresentation {
     var canConfirm: Bool { !showsHistory && !showsStandings && rematchSourceID == nil && !isBusy && room?.state == .accepted && localSide == .p1 && room?.confirmed == false }
     var canPrepare: Bool { !showsHistory && !showsStandings && rematchSourceID == nil && !isBusy && canStart && !localReady && room?.confirmed == true && [.accepted, .ready].contains(room?.state) }
     /// What the other seat is doing while this app waits for it in a manual round.
+    /// `offlineMaybe` is the same news from a presence the app cannot vouch for (see `opponentWait`).
     enum OpponentWait: Equatable { case choosing, offline, offlineMaybe }
-    var opponentWait: OpponentWait? { nil }
-    var chosenSlot: Int? { nil }
+    /// The click that sent a choice, kept with its round so a later round never inherits the mark.
+    private struct LocalChoice { let battleID: String; let roundSeq: Int; let slot: Int }
+    private var localChoice: LocalChoice?
+    /// Set once my own choice is in a manual round; nil before that, so the moves stay uncluttered.
+    /// A foe flagged offline is stated as fact only while the socket is up. Presence is not refreshed while
+    /// polling, so there the flag may be old and the wording is hedged. An old "online" is never taken as proof.
+    var opponentWait: OpponentWait? {
+        guard phase == .arena, let room, room.state == .running, room.mode == .manual, choiceSubmitted else { return nil }
+        let foe = localSide == .p1 ? room.p2.trainerId : room.p1.trainerId
+        guard members.first(where: { $0.trainerId == foe })?.online == false else { return .choosing }
+        return connectionStatus == L.onlineConnectedStatus ? .offline : .offlineMaybe
+    }
+    /// The slot of my choice in this round: the server's own record once it is in the room, else my click.
+    var chosenSlot: Int? {
+        guard choiceSubmitted, let room else { return nil }
+        if let own = room.ownChoice, let slot = own.split(separator: " ").last.flatMap({ Int($0) }) { return slot }
+        guard let click = localChoice, click.battleID == room.battleId, click.roundSeq == room.roundSeq else { return nil }
+        return click.slot
+    }
     func canChooseMove(_ slot: Int) -> Bool {
         !showsHistory && !showsStandings && rematchSourceID == nil && phase == .arena && room?.state == .running && room?.mode == .manual && !isBusy && !choiceSubmitted &&
         request?.kind == "move" && request?.moves.contains { $0.slot == slot && !$0.disabled && $0.pp > 0 } == true
@@ -168,6 +186,7 @@ final class OnlineBattlePresentation {
         case .prepareBattle: guard canPrepare else { return }
         case .chooseMove(let slot):
             guard canChooseMove(slot) else { return }
+            if let room { localChoice = LocalChoice(battleID: room.battleId, roundSeq: room.roundSeq, slot: slot) }
             choiceSubmitted = true
         case .decline: guard !showsHistory, !showsStandings, rematchSourceID == nil, !isBusy, localSide == .p2, room?.state == .pending else { return }
         case .cancel: guard !showsHistory, !showsStandings, rematchSourceID == nil, !isBusy, [.pending, .accepted, .ready].contains(room?.state) else { return }
