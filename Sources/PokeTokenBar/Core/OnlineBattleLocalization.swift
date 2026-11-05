@@ -135,4 +135,29 @@ extension L {
         case .void: online("경기 무효", "Void")
         }
     }
+
+    // MARK: Error notices
+    var onlineErrorGeneric: String { online("온라인 정보를 확인하지 못했어요. 연결을 확인하고 다시 시도해 주세요.", "Could not read online information. Check your connection and try again.") }
+    var onlineErrorKeySaveFailed: String { online("접속키를 안전하게 저장하지 못했어요. 저장을 다시 시도해 주세요.", "Could not save your access key safely. Try saving again.") }
+    var onlineErrorKeySaveDisabled: String { online("접속키 저장이 꺼져 있어요. 설정을 확인해 주세요.", "Access key storage is turned off. Check your settings.") }
+    var onlineErrorEntryChanged: String { online("출전 정보가 바뀌었어요. 최신 정보를 확인하고 다시 동의해 주세요.", "Your entry changed. Review the latest details and agree again.") }
+    var onlineErrorResultUnverified: String { online("전투 결과를 확인하지 못해 체력과 경험치를 반영하지 않았어요.", "The battle result could not be verified, so health and XP were not applied.") }
+    var onlineErrorPeerCancelled: String { online("상대가 신청을 취소했어요. 목록에서 다른 동료에게 다시 신청해 보세요.", "Your opponent cancelled the challenge. Pick someone from the list to challenge again.") }
+    var onlineErrorPeerExpired: String { online("신청 시간이 지났어요. 상대에게 다시 신청해 달라고 부탁해 보세요.", "The challenge timed out. Ask your opponent to send it again.") }
+    /// Maps server error codes the Worker is known to return to a cause plus a next step.
+    /// Codes without a sentence here (including `version_mismatch`) fall back to the generic text;
+    /// add one `case` once the app needs to explain it.
+    func onlineServerError(_ error: OnlineBattleServerError) -> String? {
+        switch error.code {
+        case .invalidInvite: online("초대코드를 찾을 수 없어요. 코드를 다시 확인해 주세요.", "That invite code was not found. Check the code and try again.")
+        case .inviteRevoked: online("방장이 이 초대코드를 회수했어요. 방장에게 새 초대코드를 요청해 주세요.", "The host revoked this invite code. Ask the host for a new one.")
+        case .inviteExpired: online("초대코드 유효 시간이 지났어요. 방장에게 새 초대코드를 요청해 주세요.", "This invite code has expired. Ask the host for a new one.")
+        case .inviteUsedUp: online("이 초대코드는 사용 횟수를 모두 썼어요. 방장에게 새 초대코드를 요청해 주세요.", "This invite code has no uses left. Ask the host for a new one.")
+        case .displayEmailTaken: online("같은 닉네임을 쓰는 동료가 이미 있어요. 다른 닉네임으로 다시 참여해 주세요.", "Someone in the group already uses that nickname. Join again with a different one.")
+        case .tooManyAttempts:
+            error.retryAfter.map { seconds in online("시도가 너무 많았어요. \(seconds)초 뒤에 다시 시도해 주세요.", "Too many attempts. Try again in \(seconds) seconds.") }
+                ?? online("시도가 너무 많았어요. 잠시 뒤에 다시 시도해 주세요.", "Too many attempts. Try again in a moment.")
+        default: nil
+        }
+    }
 }

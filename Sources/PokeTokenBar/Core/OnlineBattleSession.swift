@@ -18,6 +18,7 @@ final class OnlineBattleSession {
     private let automaticTicks: Bool
     private var enabled: Bool
     private let accessAllowed: () -> Bool
+    private let localization: @MainActor () -> L
     private var onlineAllowed: Bool { enabled && accessAllowed() }
     private var refreshAgain = false
     private var prepared: [String: Int] = [:]
@@ -77,12 +78,13 @@ final class OnlineBattleSession {
          connectionFactory: @escaping (@escaping OnlineBattleConnection.Observer) -> any OnlineBattleConnecting,
          saveSettings: @escaping (OnlineBattleSettings) throws -> Void = { _ in },
          rosterProvider: (() throws -> [PracticeCandidate])? = nil,
-         clock: OnlineBattleConnectionClock = .init(), automaticTicks: Bool = true, enabled: Bool = true, accessAllowed: @escaping () -> Bool = { true }) {
+         clock: OnlineBattleConnectionClock = .init(), automaticTicks: Bool = true, enabled: Bool = true, accessAllowed: @escaping () -> Bool = { true },
+         localization: @escaping @MainActor () -> L = { L(.ko) }) {
         self.settings = settings; self.credentials = credentials; self.transport = transport
         self.effects = effects; self.engineFactory = engineFactory; self.connectionFactory = connectionFactory
         self.saveSettings = saveSettings; self.rosterProvider = rosterProvider
         self.clock = clock; self.automaticTicks = automaticTicks
-        self.enabled = enabled; self.accessAllowed = accessAllowed
+        self.enabled = enabled; self.accessAllowed = accessAllowed; self.localization = localization
         presentation.serverAddress = settings.serverURL ?? ""
         presentation.setupInput.server = presentation.serverAddress
         presentation.onAction = { [weak self] action in Task { await self?.perform(action) } }
@@ -702,7 +704,7 @@ final class OnlineBattleSession {
         default: break
         }
         guard onlineAllowed, !actionInFlight else { return }
-        actionInFlight = true; presentation.isBusy = true
+        actionInFlight = true; presentation.isBusy = true; presentation.notice = nil
         let epoch = generation
         defer { if epoch == generation { actionInFlight = false; presentation.isBusy = false } }
         switch action {
@@ -918,9 +920,23 @@ final class OnlineBattleSession {
             guard let room = presentation.room else { throw OnlineBattleFailure.invalidRequest }
             switch action {
             case .accept:
+                if room.side(for: account.trainer.trainerId) == .p2 {
+                    if room.state == .cancelled { throw OnlineBattleFailure.peerCancelled }
+                    if room.state == .expired { throw OnlineBattleFailure.peerExpired }
+                }
                 guard room.state == .pending, room.side(for: account.trainer.trainerId) == .p2 else { throw OnlineBattleFailure.invalidRequest }
                 let snapshot = try selectedSnapshot(allow: receiptKey(room, account: account))
-                result = try await api.accept(id: room.battleId, revision: room.revision, snapshot: snapshot); try current(epoch)
+                do { result = try await api.accept(id: room.battleId, revision: room.revision, snapshot: snapshot) }
+                catch let rejected as OnlineBattleServerError where rejected.code == .invalidState || rejected.code == .staleRevision {
+                    // The peer may have cancelled between our read and the accept. Re-read to say so.
+                    try current(epoch); await refresh(); try current(epoch)
+                    if let latest = views[room.battleId] {
+                        if latest.state == .cancelled { throw OnlineBattleFailure.peerCancelled }
+                        if latest.state == .expired { throw OnlineBattleFailure.peerExpired }
+                    }
+                    throw rejected
+                }
+                try current(epoch)
                 guard (try? selectedSnapshot(allow: receiptKey(result, account: account), id: snapshot.instanceId)) == snapshot else {
                     let cancelled = try await api.cancel(id: result.battleId, revision: result.revision); try current(epoch)
                     try await process(cancelled, account: account, api: api, epoch: epoch)
@@ -997,16 +1013,23 @@ final class OnlineBattleSession {
             if let connection { let snapshot = await connection.snapshot(); guard epoch == generation else { return }; await connection.authenticationFailed(generation: snapshot.generation) }
             await revoke(epoch: epoch); return
         }
+        let l = localization()
         if error as? OnlineBattleFailure == .credentialsUnavailable {
-            presentation.notice = "접속키를 안전하게 저장하지 못했어요. 저장을 다시 시도해 주세요."
+            presentation.notice = l.onlineErrorKeySaveFailed
         } else if error as? OnlineBattleFailure == .credentialsDisabled {
-            presentation.notice = "접속키 저장이 꺼져 있어요. 설정을 확인해 주세요."
+            presentation.notice = l.onlineErrorKeySaveDisabled
+        } else if error as? OnlineBattleFailure == .peerCancelled {
+            presentation.notice = l.onlineErrorPeerCancelled
+        } else if error as? OnlineBattleFailure == .peerExpired {
+            presentation.notice = l.onlineErrorPeerExpired
         } else if error as? OnlineBattleFailure == .invalidRequest {
-            presentation.notice = "출전 정보가 바뀌었어요. 최신 정보를 확인하고 다시 동의해 주세요."
+            presentation.notice = l.onlineErrorEntryChanged
         } else if error is OnlineBattleResolver.Failure {
-            presentation.notice = "전투 결과를 확인하지 못해 체력과 경험치를 반영하지 않았어요."
+            presentation.notice = l.onlineErrorResultUnverified
+        } else if let server = error as? OnlineBattleServerError, let text = l.onlineServerError(server) {
+            presentation.notice = text
         } else {
-            presentation.notice = "온라인 정보를 확인하지 못했어요. 연결을 확인하고 다시 시도해 주세요."
+            presentation.notice = l.onlineErrorGeneric
         }
     }
 }

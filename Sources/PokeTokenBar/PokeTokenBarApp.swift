@@ -264,7 +264,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
                     return try BattleEngine(url: engineURL)
                 }, connectionFactory: { OnlineBattleConnection(observer: $0) },
                 saveSettings: { try $0.save(to: directory) }, enabled: !store.disableKeychainAccess,
-                accessAllowed: { !KeychainAccessGate.isDisabled })
+                accessAllowed: { !KeychainAccessGate.isDisabled },
+                localization: { [companion] in companion.l })
             online = session; onlinePresentation = session.presentation
             Task { await session.bootstrap() }
         } catch {

@@ -1678,4 +1678,29 @@ final class OnlineBattleSessionTests: XCTestCase {
         XCTAssertTrue(notices["EXPIRED"]?.contains("시간이 지났") == true, "\(notices)")
         for value in notices.values { XCTAssertFalse(value.contains("출전 정보가 바뀌")) }
     }
+    func testAcceptRejectedByServerAfterPeerCancelledRereadsAndExplains() async throws {
+        let pending = try changed(battle(), ["state": "PENDING", "config": NSNull(), "result": NSNull(), "roundSeq": 0, "journal": []])
+        let gone = try changed(pending, ["state": "CANCELLED"])
+        let (session, http, _, _) = try await setup([pending], trainer: "trainer-two")
+        await session.bootstrap()
+        let page = { (room: OnlineBattleView) throws -> OnlineBattleHTTPResponse in .init(status: 200, body: try JSONEncoder().encode(OnlineBattlePage(battles: [room], before: nil))) }
+        // perform(.accept) first refreshes (still pending), the accept POST is refused, the re-read shows cancelled.
+        await http.queue("/v1/battles", [try page(pending), try page(gone)])
+        await http.queue("POST /v1/battles/\(pending.battleId)/accept", [.init(status: 409, body: errorBody("invalid_state"))])
+        await session.perform(.accept)
+        let accepts = await http.count("/v1/battles/\(pending.battleId)/accept")
+        XCTAssertEqual(accepts, 1)
+        XCTAssertTrue(session.presentation.notice?.contains("취소") == true, session.presentation.notice ?? "<nil>")
+    }
+    func testErrorNoticesFollowTheAppLanguage() async throws {
+        let credentials = SessionCredentials(); await credentials.setKey(nil)
+        let http = SessionHTTP(), room = try battle()
+        await http.route("/v1/me", try JSONEncoder().encode(account))
+        await http.route("/v1/join", errorBody("invite_expired"), status: 410)
+        let session = OnlineBattleSession(settings: .init(profileID: UUID().uuidString, serverURL: "https://battle.example.invalid"), credentials: credentials, transport: http, effects: SessionEffects(), engineFactory: { try BattleEngine(url: self.engineURL) }, connectionFactory: { _ in SessionConnection() }, rosterProvider: { self.roster(room) }, automaticTicks: false, localization: { L(.en) })
+        await session.bootstrap(); await session.perform(.join(inviteCode: "invite", email: "synthetic"))
+        let notice = try XCTUnwrap(session.presentation.notice)
+        XCTAssertTrue(notice.contains("expired"), notice)
+        XCTAssertNil(notice.range(of: "[가-힣]", options: .regularExpression), notice)
+    }
 }
