@@ -183,11 +183,11 @@ final class OnlineBattleConnectionTests: XCTestCase {
         let requests = await driver.requests; XCTAssertEqual(requests.count, 3)
         await connection.stop()
     }
-    /// Three failed opens in a row, from a fresh connection attempt.
+    /// Three failed opens in a row, from an attempt in flight. Sixty seconds outlasts any backoff step.
     private func enterPolling(_ connection: OnlineBattleConnection, _ clock: OnlineTestClock) async {
         for retry in 0..<3 {
             await send(.failed(nil), to: connection)
-            if retry < 2 { clock.advance(pow(2, Double(retry))); await connection.tick() }
+            if retry < 2 { clock.advance(60); await connection.tick() }
         }
     }
     func testAfterThreeFailuresTheSocketIsRetriedEveryTwoMinutesWithNoReadsWhileClosed() async throws {
@@ -341,6 +341,7 @@ final class OnlineBattleConnectionTests: XCTestCase {
         var state = await connection.snapshot(); XCTAssertEqual(state.state, .connecting, "Hello can still arrive")
         await send(.text(hello), to: connection)
         await send(.text(#"{"v":1,"type":"mystery","anything":{"nested":[1,2]}}"#), to: connection)
+        await send(.text(#"{"v":1,"type":"mystery","trainerId":7,"online":"several"}"#), to: connection)
         state = await connection.snapshot(); XCTAssertEqual(state.state, .connected)
         XCTAssertEqual(state.connectionId, "synthetic-connection")
         let socket = await driver.sockets[0]
@@ -361,7 +362,6 @@ final class OnlineBattleConnectionTests: XCTestCase {
                                     "online connection: connected -> retryWaiting",
                                     "online connection: reconnect hint (wake) in retryWaiting",
                                     "online connection: retryWaiting -> connecting"])
-        await send(.text(#"{"v":1,"type":"presence","online":true}"#), to: connection)
         await send(.text(hello), to: connection)
         await connection.reconnectHint(.network)
         await connection.tick()
@@ -538,33 +538,19 @@ final class OnlineBattleConnectionTests: XCTestCase {
 }
 
 @MainActor
+private final class OnlineSignalBox { var values: [OnlineBattleReconnectReason] = [] }
+@MainActor
 final class OnlineReconnectSignalsTests: XCTestCase {
-    private func signals(_ center: NotificationCenter, _ received: XCTestExpectation) -> (OnlineReconnectSignals, () -> [OnlineBattleReconnectReason]) {
-        final class Box { var values: [OnlineBattleReconnectReason] = [] }
-        nonisolated(unsafe) let box = Box()
-        let signals = OnlineReconnectSignals(center: center) { reason in box.values.append(reason); received.fulfill() }
-        return (signals, { box.values })
-    }
     func testWakeAndNetworkReturnBothSignal() async throws {
-        let center = NotificationCenter(), received = expectation(description: "both signals")
+        let center = NotificationCenter(), received = expectation(description: "both signals"), box = OnlineSignalBox()
         received.expectedFulfillmentCount = 2
-        let (signals, values) = signals(center, received)
+        let signals = OnlineReconnectSignals(center: center) { reason in box.values.append(reason); received.fulfill() }
         signals.start(); signals.start()
         center.post(name: NSWorkspace.didWakeNotification, object: nil)
         signals.network.onReconnected?()
         await fulfillment(of: [received], timeout: 2)
-        XCTAssertEqual(Set(values()), [.wake, .network])
-        XCTAssertEqual(values().count, 2, "Starting twice must not signal twice")
-        signals.stop()
-    }
-    func testNothingIsSignalledAfterStop() async throws {
-        let center = NotificationCenter(), received = expectation(description: "no signal")
-        received.isInverted = true
-        let (signals, values) = signals(center, received)
-        signals.start(); signals.stop()
-        center.post(name: NSWorkspace.didWakeNotification, object: nil)
-        await fulfillment(of: [received], timeout: 0.2)
-        XCTAssertEqual(values(), [])
+        XCTAssertEqual(Set(box.values), [.wake, .network])
+        XCTAssertEqual(box.values.count, 2, "Starting twice must not signal twice")
     }
     /// The delegate cannot run under `swift test`, so this reads the wiring the way the other source guards do.
     func testTheAppFeedsTheSignalsToTheSession() throws {

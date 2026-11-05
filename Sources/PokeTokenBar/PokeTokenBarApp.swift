@@ -28,6 +28,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
     private var practice: PracticeSession!
     private var onlineAccessObservation: OnlineBattleAccessObservation?
     private var online: OnlineBattleSession?
+    private var onlineReconnectSignals: OnlineReconnectSignals?
     private var onlinePresentation = OnlineBattlePresentation()
     private var onlineAttention = OnlineAttentionSource(presentation: OnlineBattlePresentation())
     /// Nil outside a bundled app, where UNUserNotificationCenter cannot be used.
@@ -297,6 +298,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
                                                     stagingHeldBattleIDs: { [weak session] in session?.stagingHeldBattleIDs() ?? [] },
                                                     noChoiceBattleIDs: { [weak session] in session?.noChoiceBattleIDs() ?? [] })
             prepareOnlineNotifier(presentation: session.presentation, directory: directory)
+            let signals = OnlineReconnectSignals { [weak session] reason in await session?.reconnectHint(reason) }
+            signals.start()
+            onlineReconnectSignals = signals
             Task { await session.bootstrap() }
         } catch {
             onlinePresentation.notice = "온라인 설정을 읽지 못했어요. 저장 폴더를 확인해 주세요."

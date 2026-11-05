@@ -1653,3 +1653,11 @@ read_when:
 - **저장 형식에 필드를 더하면 합성 디코더는 옛 파일 전체를 버린다.** `var x = 기본값`이 있어도 합성 `init(from:)`은 키가 없으면 던진다. 그대로 두면 업그레이드 때 seen과 `permissionHandled`를 잃어 모든 사건이 다시 울리고 권한을 다시 묻는다. 옛 형식 JSON 원문으로 시험한다.
 - **재실행 뒤에 "새로 끝난 경기"와 "오래된 기록"을 구별하려면 끝나기 전의 사실을 저장해야 한다.** 서버 목록에는 끝난 방이 남아 있으므로(`GET /v1/battles` 최신 100건) 상태 비교는 가능하지만 내가 기다리던 방인지는 알 수 없다. `OnlineAttentionWaitRecord`에 battleId와 revision만 저장해 비교하고, 기록에 있던 방만 울린다. 목록에 없는 방은 재실행 직후일 수 있어 지우지 않는다. 내가 직접 끝낸 방은 서버 view로 구별되지 않으므로 누른 순간 기록에서 뺀다.
 - **이번 부류의 스윕 결과.** 경로 전수 grep(`showingOnlineBattle =`, `perform(.openBattle`, `routesToOnlineScreenOnOpen`)으로 남은 플래그 직접 설정은 리셋·재오픈 라우트뿐임을 확인했다. "기술을 고르세요"는 `.myTurn` 문구에서만 나오고 `.myTurn`은 계산기 한 곳에서 만든다. 약속 문구는 온라인 텍스트 파일에서 "보통", "수 초", "알려져요"를 확인해 두 곳을 고쳤다.
+
+## 온라인 연결 상태 (PR 14 T12)
+
+- **화면 문구를 상태로 읽으면 문구를 바꾸는 순간 판단이 바뀐다.** 부제와 표식, 상대 대기(T15)는 `connectionStatus`를 `"접속 중"`, `"연결 중"` 같은 한국어 문자열과 비교했다. T12가 polling 문구를 "다시 연결하는 중"으로 바꾸면 비교 쪽 집합과 어긋나고, 줄을 영어로 옮기면 모든 판단이 깨지며, 테스트도 같은 문자열을 상수로 넣어 통과했다. 지금은 `OnlineConnectionStatus`가 타입이고 `L.onlineConnectionLine`만 문구를 안다. 문자열을 넣는 테스트는 컴파일되지 않는다.
+- **이유가 다른 차단을 한 문구로 합치면 문구가 거짓말을 한다(부류 재발).** `canStart`가 거짓이면 전부 "서버에 연결하는 중…"이어서, 다시 열어야 풀리는 `replaced`와 재시도가 없는 `protocolError`에서도 기다리라고 말했다. `canStart`만 고정한 테스트로는 보이지 않았다. `prepareBlock`을 상태별 표로 고정했다.
+- **신호가 도착한 순간의 상태만 보면 진행 중인 시도가 신호를 삼킨다.** 복귀 힌트를 polling과 retryWaiting에서만 처리하면, 네트워크가 돌아온 순간 마지막 시도가 진행 중일 때 그 실패가 세 번째로 세어져 120초를 쉰다. connecting에서는 새로 연결하지 않고 실패 횟수만 지운다.
+- **닫힌 상태에서 미룬 읽기는 다른 읽기가 대신한 것도 알아야 한다.** presence 표시를 열 때 갱신하는 조건으로만 쓰면 hello나 group_changed가 이미 읽은 뒤에도 한 번 더 읽는다. 모든 읽기 요청을 `requestRefresh` 하나로 지나게 해 표시를 함께 지운다.
+- **스윕 결과.** `grep -rnE 'connectionStatus|onlineConnectedStatus|onlineReconnectingStatuses|"접속 중"|"연결 중"' Sources`에서 `connectionStatus`의 읽기는 화면 줄(`L` 경유), `connectionState`, `connectionBlock`뿐이고 문자열 비교는 없다.

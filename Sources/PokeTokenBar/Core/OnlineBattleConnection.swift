@@ -71,6 +71,13 @@ actor OnlineBattleConnection: OnlineBattleConnecting {
     private var nextAction: TimeInterval?
     private var nextPing: TimeInterval?
     private var nextPoll: TimeInterval?
+    /// A colleague came or went while nobody could see it. The next read covers it, whatever asks for that read.
+    private var presenceMissed = false
+    private var loggedState: OnlineBattleConnectionState = .unconfigured
+    /// How long the socket rests after three failed opens. The wake and network hints cut it short.
+    private static let pollingRetryInterval: TimeInterval = 120
+    /// Anything else is from a newer server: ignored, so an older app keeps its connection.
+    private static let knownMessageTypes: Set<String> = ["hello", "standings_changed", "battle_changed", "battle_round", "battle_void", "presence", "group_changed"]
     init(driver: any OnlineBattleSocketDriver = OnlineBattleURLSessionSocketDriver(),
          clock: OnlineBattleConnectionClock = .init(),
          jitter: @escaping @Sendable (TimeInterval) -> TimeInterval = { Double.random(in: 0...$0) },
@@ -94,11 +101,33 @@ actor OnlineBattleConnection: OnlineBattleConnecting {
         let wasOpen = popoverOpen; popoverOpen = open
         if open && !wasOpen {
             if state == .replaced { attempts = 0; openFailures = 0; await connect() }
-            else if state == .polling { nextPoll = clock.now() + 30; await observer(.refreshRequested) }
+            else if state == .polling {
+                attempts = 0; openFailures = 0; nextPoll = clock.now() + 30
+                await requestRefresh()
+                // The read suspended, so a wake or network hint may already have reconnected.
+                if state == .polling { await connect() }
+            } else if state == .connected, presenceMissed { await requestRefresh() }
         }
         if !open { nextPoll = nil }
     }
-    func reconnectHint(_ reason: OnlineBattleReconnectReason) async {}
+    /// The Mac woke or got its network back: stop waiting out a backoff that was measured against a dead network.
+    /// A replaced socket stays down so two Macs do not fight over one account, and the other stopped states have nothing to retry.
+    func reconnectHint(_ reason: OnlineBattleReconnectReason) async {
+        log("online connection: reconnect hint (\(reason.rawValue)) in \(state)")
+        switch state {
+        case .polling, .retryWaiting:
+            attempts = 0; openFailures = 0
+            await connect()
+        case .connecting:
+            // This attempt may have started before the network returned. Its failure must not cost the two-minute rest.
+            attempts = 0; openFailures = 0
+        case .connected:
+            // A socket that slept may be dead without having said so.
+            nextPing = clock.now()
+        case .unconfigured, .credentialsRequired, .replaced, .revoked, .protocolError:
+            break
+        }
+    }
     func authenticationFailed(generation epoch: UInt64) async {
         guard epoch == generation else { return }
         await terminate(.revoked)
@@ -123,7 +152,17 @@ actor OnlineBattleConnection: OnlineBattleConnecting {
             }
         }
     }
-    private func publish() async { await observer(.changed(snapshot())) }
+    private func publish() async {
+        if state != loggedState {
+            log("online connection: \(loggedState) -> \(state)")
+            loggedState = state
+        }
+        await observer(.changed(snapshot()))
+    }
+    private func requestRefresh() async {
+        presenceMissed = false
+        await observer(.refreshRequested)
+    }
     private func connect() async {
         guard let origin, let accessKey else { return }
         generation &+= 1; let epoch = generation
@@ -168,6 +207,11 @@ actor OnlineBattleConnection: OnlineBattleConnecting {
         init(from decoder: Decoder) throws {
             let box = try decoder.container(keyedBy: CodingKeys.self)
             v = try box.decode(Int.self, forKey: .v); type = try box.decode(String.self, forKey: .type)
+            // A newer message may use these names for something else; that must not fail the decode.
+            guard OnlineBattleConnection.knownMessageTypes.contains(type) else {
+                connectionId = nil; trainerId = nil; groupId = nil; battleId = nil; online = nil
+                return
+            }
             connectionId = try box.decodeIfPresent(String.self, forKey: .connectionId)
             trainerId = try box.decodeIfPresent(String.self, forKey: .trainerId)
             groupId = try box.decodeIfPresent(String.self, forKey: .groupId)
@@ -194,15 +238,18 @@ actor OnlineBattleConnection: OnlineBattleConnecting {
                 openFailures = 0
                 await publish()
                 guard epoch == generation else { return }
-                await observer(.refreshRequested)
+                await requestRefresh()
             } else if message.type == "standings_changed", state == .connected {
                 await observer(.standingsRefreshRequested)
             } else if ["battle_changed", "battle_round", "battle_void"].contains(message.type), state == .connected,
                       let id = message.battleId, id.hasPrefix("bt_"), id.count <= 128 {
                 await observer(.battleNotification(snapshot(), battleID: id, payload: Data(text.utf8)))
-            } else if ["presence", "group_changed"].contains(message.type), state == .connected {
-                await observer(.refreshRequested)
-            } else { await terminate(.protocolError) }
+            } else if message.type == "presence", state == .connected {
+                // One colleague's sign-in costs every other member a full read, so it waits until someone can see it.
+                if popoverOpen { await requestRefresh() } else { presenceMissed = true }
+            } else if message.type == "group_changed", state == .connected {
+                await requestRefresh()
+            } else if Self.knownMessageTypes.contains(message.type) { await terminate(.protocolError) }
         case .closed(4001): await terminate(.replaced)
         case .closed(4003), .failed(401): await terminate(.revoked)
         case .closed(4400): await terminate(.protocolError)
@@ -221,7 +268,7 @@ actor OnlineBattleConnection: OnlineBattleConnecting {
         let old = socket; socket = nil
         connectionId = nil; trainerId = nil; groupId = nil; nextPing = nil; openedAt = nil
         if openFailures >= 3 {
-            state = .polling; nextAction = now + 600; nextPoll = popoverOpen ? now + 30 : nil
+            state = .polling; nextAction = now + Self.pollingRetryInterval; nextPoll = popoverOpen ? now + 30 : nil
         } else {
             let maximum = min(60, pow(2, Double(min(attempts, 6))))
             state = .retryWaiting; nextAction = now + min(max(0, jitter(maximum)), maximum); attempts += 1
@@ -230,7 +277,7 @@ actor OnlineBattleConnection: OnlineBattleConnecting {
         await old?.close()
         guard epoch == generation else { return }
         await publish()
-        if state == .polling, popoverOpen { await observer(.refreshRequested) }
+        if state == .polling, popoverOpen { await requestRefresh() }
     }
     func tick() async {
         let now = clock.now(), epoch = generation
@@ -246,7 +293,7 @@ actor OnlineBattleConnection: OnlineBattleConnecting {
             if state == .polling { openFailures = 0 }
             await connect()
         } else if state == .polling, popoverOpen, let nextPoll, now >= nextPoll {
-            self.nextPoll = now + 30; await observer(.refreshRequested)
+            self.nextPoll = now + 30; await requestRefresh()
         }
     }
 }

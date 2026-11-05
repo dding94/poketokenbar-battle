@@ -193,17 +193,17 @@ extension L {
     func onlineConnectionLine(_ status: OnlineConnectionStatus) -> String? {
         switch status {
         case .unknown: nil
-        case .accessOff: "키체인 접근이 꺼져 있어요"
-        case .accessStopped: "키체인 접근이 꺼져 있어 온라인 배틀을 중단했어요"
-        case .connection(.unconfigured): "서버 주소를 설정해 주세요"
-        case .connection(.credentialsRequired): "접속 정보가 필요해요"
-        case .connection(.connecting): "연결 중"
-        case .connection(.connected): "접속 중"
-        case .connection(.retryWaiting): "다시 연결할 때까지 기다리고 있어요"
-        case .connection(.polling): "화면을 열 때 경기 정보를 확인해요"
-        case .connection(.replaced): "다른 기기에서 연결했어요. 다시 열면 연결해요"
-        case .connection(.revoked): "접속키가 만료되었어요. 복구코드로 다시 연결해 주세요"
-        case .connection(.protocolError): "서버와 앱 버전을 확인해 주세요"
+        case .accessOff: online("키체인 접근이 꺼져 있어요", "Keychain access is off")
+        case .accessStopped: online("키체인 접근이 꺼져 있어 온라인 배틀을 중단했어요", "Online battles stopped because Keychain access is off")
+        case .connection(.unconfigured): online("서버 주소를 설정해 주세요", "Set the server address")
+        case .connection(.credentialsRequired): online("접속 정보가 필요해요", "Sign-in details are needed")
+        case .connection(.connecting): online("연결 중", "Connecting")
+        case .connection(.connected): online("접속 중", "Connected")
+        case .connection(.retryWaiting): online("다시 연결할 때까지 기다리고 있어요", "Waiting to reconnect")
+        case .connection(.polling): online("다시 연결하는 중", "Reconnecting")
+        case .connection(.replaced): online("다른 기기에서 연결했어요. 다시 열면 연결해요", "Connected from another device. Reopen this window to connect here")
+        case .connection(.revoked): online("접속키가 만료되었어요. 복구코드로 다시 연결해 주세요", "Your access key has expired. Reconnect with your recovery code")
+        case .connection(.protocolError): online("서버와 앱 버전을 확인해 주세요", "Check the app and server versions")
         }
     }
 }

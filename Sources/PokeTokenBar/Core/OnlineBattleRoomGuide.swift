@@ -61,7 +61,16 @@ extension OnlineBattlePresentation {
         guard !canPrepare, !localReady, room?.confirmed == true, [.accepted, .ready].contains(room?.state),
               !showsHistory, !showsStandings, rematchSourceID == nil else { return nil }
         if isBusy { return .busy }
-        return canStart ? nil : .connecting
+        return canStart ? nil : connectionBlock
+    }
+    private var connectionBlock: OnlineActionBlock {
+        switch connectionStatus {
+        case .unknown, .connection(.connecting), .connection(.connected): .connecting
+        case .connection(.retryWaiting), .connection(.polling): .reconnecting
+        case .connection(.replaced): .replaced
+        case .connection(.protocolError): .versionMismatch
+        case .accessOff, .accessStopped, .connection(.unconfigured), .connection(.credentialsRequired), .connection(.revoked): .signInNeeded
+        }
     }
     /// Nickname of the other side of the open room, if the group list has it.
     var roomOpponentName: String? {

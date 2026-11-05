@@ -160,7 +160,10 @@ final class OnlineBattleSession {
         else { Task { [weak self] in await self?.refresh() } }
     }
     /// The Mac woke or got its network back. Without an account there is no socket to bring back.
-    func reconnectHint(_ reason: OnlineBattleReconnectReason) async {}
+    func reconnectHint(_ reason: OnlineBattleReconnectReason) async {
+        guard onlineAllowed, authenticated else { return }
+        await connection?.reconnectHint(reason)
+    }
     func bootstrap() async {
         guard onlineAllowed else { presentation.connectionStatus = .accessOff; return }
         guard !bootstrapped else { return }

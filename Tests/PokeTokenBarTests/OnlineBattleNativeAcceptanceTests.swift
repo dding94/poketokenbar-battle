@@ -93,6 +93,39 @@ private struct NativeSocketDriver: OnlineBattleSocketDriver {
         let traced = NativeTracedSocket(socket); await probe.append(traced); return traced
     }
 }
+/// A real socket that can also be lost the way a sleeping Mac loses it: an abnormal close and nothing more.
+private final class NativeLosableSocket: OnlineBattleSocket, @unchecked Sendable {
+    let events: AsyncStream<OnlineBattleSocketEvent>
+    private let raw: any OnlineBattleSocket
+    private let continuation: AsyncStream<OnlineBattleSocketEvent>.Continuation
+    private var receiver: Task<Void, Never>?
+    init(_ raw: any OnlineBattleSocket) {
+        self.raw = raw
+        let stream = AsyncStream<OnlineBattleSocketEvent>.makeStream(); events = stream.stream; continuation = stream.continuation
+        receiver = Task {
+            for await event in raw.events { stream.continuation.yield(event) }
+            stream.continuation.finish()
+        }
+    }
+    func lose() { continuation.yield(.closed(1006)) }
+    func sendPing() async throws { try await raw.sendPing() }
+    func close() async { await raw.close(); receiver?.cancel() }
+}
+private actor NativeUnreliableNetwork: OnlineBattleSocketDriver {
+    private let endpoint: NativeEndpoint
+    private var down = false
+    private var current: NativeLosableSocket?
+    init(endpoint: NativeEndpoint) { self.endpoint = endpoint }
+    func connect(_ request: URLRequest) async throws -> any OnlineBattleSocket {
+        if down { throw OnlineBattleFailure.transport }
+        let raw = try await OnlineBattleURLSessionSocketDriver().connect(endpoint.rewrite(request))
+        let socket = NativeLosableSocket(raw)
+        current = socket
+        return socket
+    }
+    func goDown() { down = true; current?.lose() }
+    func comeBack() { down = false }
+}
 private actor NativeCredentials: OnlineBattleCredentialStoring {
     private var key: String?
     init(_ key: String) { self.key = key }
@@ -376,8 +409,9 @@ final class OnlineBattleNativeAcceptanceTests: XCTestCase {
         return CompanionStore(provider: NativeOfflineProvider(), fileURL: save, dittoDisguiseRollingEnabled: false, defaults: defaults)
     }
     private func session(_ grant: OnlineBattleGrant, snapshot: OnlineBattleSnapshot, store: CompanionStore,
-                         transport: NativeHTTP) -> OnlineBattleSession {
+                         transport: NativeHTTP, driver: (any OnlineBattleSocketDriver)? = nil) -> OnlineBattleSession {
         let endpoint = endpoint!, engineURL = engineURL
+        let driver = driver ?? NativeSocketDriver(endpoint: endpoint)
         let candidate = PracticeCandidate(id: snapshot.instanceId, name: snapshot.publicInfo.species,
             snapshot: .init(schemaVersion: 1, instanceID: snapshot.instanceId, engineHash: BattleEngineManifest.sha256,
                 rulesVersion: BattleSnapshot.rules, policyVersion: BattleSnapshot.policy, set: snapshot.set,
@@ -385,7 +419,7 @@ final class OnlineBattleNativeAcceptanceTests: XCTestCase {
         let session = OnlineBattleSession(settings: .init(profileID: UUID().uuidString, serverURL: NativeEndpoint.productOrigin),
             credentials: NativeCredentials(grant.accessKey), transport: transport, effects: store,
             engineFactory: { try BattleEngine(url: engineURL) },
-            connectionFactory: { OnlineBattleConnection(driver: NativeSocketDriver(endpoint: endpoint), observer: $0) },
+            connectionFactory: { OnlineBattleConnection(driver: driver, observer: $0) },
             rosterProvider: { [candidate] }, automaticTicks: false)
         sessions.append(session)
         return session
@@ -430,6 +464,44 @@ final class OnlineBattleNativeAcceptanceTests: XCTestCase {
         try await waitFor("both sides in the match") { live.allSatisfy { $0.presentation.room?.state == .running } }
         XCTAssertEqual(live[0].presentation.phase, .arena)
         XCTAssertEqual(live[1].presentation.phase, .arena)
+    }
+    /// A Mac that sleeps past three failed opens with the popover closed: the wake hint must not leave it waiting for the two-minute retry,
+    /// and the ready it pressed before sleeping goes out again on the new socket.
+    func testAWakeHintBringsBackASessionThatGaveUpAndItsReadyStillCounts() async throws {
+        let pair = try await pair(), snapshots = try snapshots()
+        var room = try await pair.apis[0].createBattle(requestId: UUID().uuidString,
+            targetTrainerId: pair.grants[1].trainer.trainerId, mode: .manual, snapshot: snapshots[0])
+        room = try await pair.apis[1].accept(id: room.battleId, revision: room.revision, snapshot: snapshots[1])
+        room = try await pair.apis[0].confirm(id: room.battleId, revision: room.revision)
+        let stores = try (0..<2).map { try store($0, snapshot: snapshots[$0], create: true) }
+        let network = NativeUnreliableNetwork(endpoint: endpoint)
+        let live = [session(pair.grants[0], snapshot: snapshots[0], store: stores[0], transport: NativeHTTP(endpoint), driver: network),
+                    session(pair.grants[1], snapshot: snapshots[1], store: stores[1], transport: NativeHTTP(endpoint))]
+        func waitFor(_ what: String, _ condition: () -> Bool) async throws {
+            for _ in 0..<400 {
+                if condition() { return }
+                try await Task.sleep(for: .milliseconds(25))
+            }
+            XCTFail("Timed out waiting for " + what)
+            throw OnlineBattleFailure.transport
+        }
+        for session in live {
+            await session.bootstrap()
+            try await waitFor("the first hello") { session.presentation.canStart }
+        }
+        await live[0].perform(.prepareBattle(room.battleId))
+        XCTAssertTrue(live[0].presentation.localReady)
+        await network.goDown()
+        try await waitFor("giving up on the socket") { live[0].presentation.connectionState == .polling }
+        await live[1].perform(.prepareBattle(room.battleId))
+        let waiting = try await pair.apis[1].battle(id: room.battleId)
+        XCTAssertEqual(waiting.state, .accepted, "The server must not count the ready of a socket that is gone")
+        await network.comeBack()
+        await live[0].reconnectHint(.wake)
+        try await waitFor("both sides in the match, well before the two-minute retry") {
+            live.allSatisfy { $0.presentation.room?.state == .running }
+        }
+        XCTAssertEqual(live[0].presentation.connectionState, .connected)
     }
     func testSessionsRecoverCommittedResponseLossAndApplyDurablyOnce() async throws {
         let pair = try await pair(), snapshots = try snapshots()

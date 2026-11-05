@@ -157,12 +157,11 @@ final class OnlineBattleMenuMarkTests: XCTestCase {
         XCTAssertNil(ko.onlineConnectionLine(.unknown))
         XCTAssertNil(en.onlineConnectionLine(.unknown))
         let states: [OnlineBattleConnectionState] = [.unconfigured, .credentialsRequired, .connecting, .connected, .retryWaiting, .polling, .replaced, .revoked, .protocolError]
-        let hangul = /[가-힣]/
+        func hasHangul(_ text: String?) -> Bool { text?.unicodeScalars.contains { (0xAC00...0xD7A3).contains($0.value) } ?? false }
         for status in states.map(OnlineConnectionStatus.connection) + [.accessOff, .accessStopped] {
-            let korean = try? XCTUnwrap(ko.onlineConnectionLine(status)), english = try? XCTUnwrap(en.onlineConnectionLine(status))
-            XCTAssertNotNil(korean?.firstMatch(of: hangul), "\(status)")
-            XCTAssertEqual(english?.isEmpty, false, "\(status)")
-            XCTAssertNil(english?.firstMatch(of: hangul), "\(status) still reads Korean in English")
+            XCTAssertTrue(hasHangul(ko.onlineConnectionLine(status)), "\(status)")
+            XCTAssertEqual(en.onlineConnectionLine(status)?.isEmpty, false, "\(status)")
+            XCTAssertFalse(hasHangul(en.onlineConnectionLine(status)), "\(status) still reads Korean in English")
         }
         XCTAssertEqual(ko.onlineConnectionLine(.connection(.polling)), "다시 연결하는 중")
         XCTAssertEqual(en.onlineConnectionLine(.connection(.polling)), "Reconnecting")

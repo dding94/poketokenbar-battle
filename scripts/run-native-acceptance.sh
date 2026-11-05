@@ -95,6 +95,7 @@ with tempfile.TemporaryDirectory(prefix='ptb-native-acceptance-') as temporary:
             expected = ['testNativeManualAndAutomaticReportsPrivacyReplayAndRematch',
                 'testSessionsRecoverCommittedResponseLossAndApplyDurablyOnce',
                 'testSessionsStillStartWhenOneSideReconnectsAfterPressingReady',
+                'testAWakeHintBringsBackASessionThatGaveUpAndItsReadyStillCounts',
                 'testSessionsReleaseVoidWithoutHealthXPWalletOrUsageEffects']
             for name in expected:
                 if not re.search(r"Test Case '-\[PokeTokenBarTests.OnlineBattleNativeAcceptanceTests " + name + r"\]' passed", transcript):
