@@ -52,7 +52,8 @@ jobs:
     # About 1.5x the slowest shard (rest, 517 s, 2026-10-30). Runners vary up to ~1.6x on the same commit.
     # A job that runs out shows as "cancelled", like a newer run on the same ref would; recheck this
     # budget when a suite is added.
-    timeout-minutes: 13
+    # The rest shard reached 13 minutes in PR 14 (2,500+ tests under coverage, about 10.5 minutes of test time).
+    timeout-minutes: 16
     env:
       # About 210 s of the 480 s suite on 2026-10-30 (SnapshotHistory ~175 s, DexBack ~35 s). They
       # leave the coverage gate; PracticeScreenRenderingTests stays in `rest` for the practice files.
