@@ -73,19 +73,7 @@ struct PracticeBattleBoard: View {
     /// What the staged beats have shown of the opponent so far (history plus the beat on screen). The
     /// engine's view is already at the end of the step, so it would reveal a move before its beat plays.
     /// nil without a playback: the view is then the only source.
-    private var stagedReveal: PracticeReveal? {
-        guard let playback else { return nil }
-        let beats = playback.history + (playback.beat.map { [$0] } ?? [])
-        var reveal = PracticeReveal()
-        for beat in beats {
-            if beat.actor == .opponent, let moveID = beat.moveID, moveID != "struggle", moveID != "recharge",
-               !reveal.moves.contains(moveID) {
-                reveal.moves.append(moveID)
-            }
-            for case .abilityRevealed(.opponent, let abilityID) in beat.callouts { reveal.ability = abilityID }
-        }
-        return reveal
-    }
+    private var stagedReveal: PracticeReveal? { playback.map { PracticeReveal(staged: $0) } }
 
     private var versus: some View {
         Text(l.practiceVersus)
@@ -121,11 +109,8 @@ struct PracticeBattleBoard: View {
     private var stage: some View {
         VStack(alignment: .leading, spacing: 6) {
             if let playback {
-                current(playback)
-                if !playback.recent.isEmpty {
-                    Divider()
-                    recent(playback)
-                }
+                PracticeBeatLines(playback: playback, wording: wording, idle: playback.history.isEmpty
+                                  ? l.practiceBattleBegins : l.practiceTurn(battle.view?.turn ?? 1), l: l, artwork: artwork)
             } else {
                 legacyTicker
             }
@@ -133,62 +118,6 @@ struct PracticeBattleBoard: View {
         .font(.caption)
         .frame(maxWidth: .infinity, minHeight: 92, maxHeight: 92, alignment: .topLeading)
         .practiceCard(padding: 8)
-    }
-
-    private func current(_ playback: PracticePlayback) -> some View {
-        ZStack(alignment: .topLeading) {
-            if let beat = playback.beat {
-                VStack(alignment: .leading, spacing: 4) {
-                    PracticePhraseText(phrase: wording.action(beat), l: l, artwork: artwork)
-                        .font(.callout.weight(.semibold))
-                        .lineLimit(1)
-                    chips(beat)
-                }
-                .id(beat.id)
-                .transition(.asymmetric(insertion: .offset(x: -12).combined(with: .opacity), removal: .opacity))
-            } else {
-                Text(playback.history.isEmpty ? l.practiceBattleBegins : l.practiceTurn(battle.view?.turn ?? 1))
-                    .font(.callout.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-        }
-        .frame(maxWidth: .infinity, minHeight: 38, alignment: .topLeading)
-        .animation(.easeOut(duration: 0.2), value: playback.beat?.id)
-    }
-
-    /// Up to three chips; fewer when the localized words do not fit one line.
-    private func chips(_ beat: PracticeBeat) -> some View {
-        let callouts = wording.chips(beat)
-        return ViewThatFits(in: .horizontal) {
-            chipRow(callouts.prefix(3), beat)
-            chipRow(callouts.prefix(2), beat)
-            chipRow(callouts.prefix(1), beat)
-        }
-        .frame(minHeight: 18, alignment: .leading)
-    }
-
-    private func chipRow(_ callouts: ArraySlice<PracticeCallout>, _ beat: PracticeBeat) -> some View {
-        HStack(spacing: 5) {
-            ForEach(Array(callouts.enumerated()), id: \.offset) { _, callout in
-                PracticeCalloutChip(phrase: wording.callout(callout, in: beat), tone: wording.tone(callout),
-                                    l: l, artwork: artwork)
-            }
-        }
-    }
-
-    /// The three newest finished beats as sentences, newest first.
-    private func recent(_ playback: PracticePlayback) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            ForEach(Array(playback.recent.prefix(3).enumerated()), id: \.element.id) { index, beat in
-                PracticePhraseText(phrase: wording.sentence(beat), l: l, artwork: artwork)
-                    .foregroundStyle(index == 0 ? Color.primary : Color.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .transition(.opacity)
-            }
-        }
-        .animation(.easeOut(duration: 0.2), value: playback.recent.first?.id)
     }
 
     /// Without a playback: the three newest log lines, newest first. Turn separators are left out.
@@ -354,6 +283,11 @@ struct PracticeSideCard: View {
     var wild = false
     /// How the opponent picks its moves (`PracticeTemperament`); nil for my own side.
     var temperament: PracticeTemperament?
+    /// PokéAPI slugs for ids whose set is not in `snapshot` (the online opponent's disclosed moves and ability).
+    var moveSlugs: [String: String] = [:]
+    var abilitySlugs: [String: String] = [:]
+    /// Without a snapshot the sprite is the plain species artwork (the online opponent's public species).
+    var spriteSpecies: Int?
 
     private var revealedMoves: [String] { reveal?.moves ?? side.moves }
     private var revealedAbility: String? {
@@ -373,7 +307,7 @@ struct PracticeSideCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
             HStack(spacing: 10) {
-                PracticeSpriteTile(set: snapshot?.set, size: 44, artwork: artwork)
+                PracticeSpriteTile(set: snapshot?.set, speciesID: spriteSpecies, size: 44, artwork: artwork)
                     .practiceFainted(fainted)
                     .practiceHitReaction(trigger: hitTrigger)
                 VStack(alignment: .leading, spacing: 5) {
@@ -454,7 +388,7 @@ struct PracticeSideCard: View {
             Text(l.practiceMoves).font(.caption2).foregroundStyle(.secondary)
             ForEach(Array(revealedMoves.prefix(4)), id: \.self) { move in
                 PracticeChip {
-                    PracticeMetadataName(kind: .move, id: move, snapshot: snapshot, l: l, artwork: artwork)
+                    PracticeMetadataName(kind: .move, id: moveSlugs[move] ?? move, snapshot: snapshot, l: l, artwork: artwork)
                 }
             }
             ForEach(0..<max(0, 4 - revealedMoves.count), id: \.self) { _ in
@@ -468,7 +402,7 @@ struct PracticeSideCard: View {
             Text(l.practiceAbility).font(.caption2).foregroundStyle(.secondary)
             if let ability = revealedAbility {
                 PracticeChip {
-                    PracticeMetadataName(kind: .ability, id: ability, snapshot: snapshot, l: l, artwork: artwork)
+                    PracticeMetadataName(kind: .ability, id: abilitySlugs[ability] ?? ability, snapshot: snapshot, l: l, artwork: artwork)
                 }
             } else {
                 PracticeChip(dimmed: true) { Text("?") }
@@ -601,4 +535,17 @@ struct PracticeMoveCard: View {
 struct PracticeReveal: Equatable {
     var moves: [String] = []
     var ability: String?
+
+    init(moves: [String] = [], ability: String? = nil) { self.moves = moves; self.ability = ability }
+
+    /// From the finished beats plus the one on screen; a beat still queued shows nothing yet.
+    @MainActor init(staged playback: PracticePlayback) {
+        for beat in playback.history + (playback.beat.map { [$0] } ?? []) {
+            if beat.actor == .opponent, let moveID = beat.moveID, moveID != "struggle", moveID != "recharge",
+               !moves.contains(moveID) {
+                moves.append(moveID)
+            }
+            for case .abilityRevealed(.opponent, let abilityID) in beat.callouts { ability = abilityID }
+        }
+    }
 }

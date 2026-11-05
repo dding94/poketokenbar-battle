@@ -54,6 +54,14 @@ struct OnlineBattleSnapshot: Codable, Equatable, Sendable {
         self.init(instanceId: snapshot.instanceID, set: snapshot.set, publicInfo: snapshot.publicInfo, hp: hp)
     }
 }
+extension OnlineBattleSnapshot {
+    /// The shape the practice cards read (sprite shiny/form, move and ability slugs). Display only: the engine hash
+    /// is left empty because this value is never hashed, verified or sent anywhere.
+    var displaySnapshot: BattleSnapshot {
+        BattleSnapshot(schemaVersion: 1, instanceID: instanceId, engineHash: "", rulesVersion: BattleSnapshot.rules,
+                       policyVersion: BattleSnapshot.policy, set: set, publicInfo: publicInfo)
+    }
+}
 struct OnlineBattlePlayer: Codable, Equatable, Sendable {
     let trainerId: String
     let snapshot: OnlineBattleSnapshot?

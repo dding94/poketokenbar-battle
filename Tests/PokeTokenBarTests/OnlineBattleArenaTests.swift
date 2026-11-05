@@ -5,7 +5,9 @@ import XCTest
 @MainActor
 final class OnlineBattleArenaTests: XCTestCase {
     private func arenaView(_ model: OnlineBattlePresentation) -> OnlineBattleArena {
-        OnlineBattleArena(model: model, l: L(.ko), artwork: false)
+        // A store of its own: names other tests cached in the shared one must not change what a card is called.
+        OnlineBattleArena(model: model, l: L(.ko), artwork: false, speciesNameProvider: OnlineBattleSyntheticNameProvider(),
+                          speciesNameStore: PokemonNameDisplayStore())
     }
     private func foe(_ side: PracticeSide) -> PracticeSide { side == .player ? .opponent : .player }
 

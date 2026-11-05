@@ -77,6 +77,19 @@ struct PracticeWording {
     let opponentName: String
     let playerSnapshot: BattleSnapshot?
     let opponentSnapshot: BattleSnapshot?
+    /// Showdown id → PokéAPI slug for sides whose set is not known (the online opponent). Only the ids the
+    /// session has already disclosed are in them.
+    var moveSlugs: [PracticeSide: [String: String]] = [:]
+    var abilitySlugs: [PracticeSide: [String: String]] = [:]
+
+    /// An online battle: names as the arena shows them, my snapshot, and nothing of the opponent's set.
+    init(l: L, playerName: String, opponentName: String, playerSnapshot: BattleSnapshot?,
+         moveSlugs: [PracticeSide: [String: String]] = [:], abilitySlugs: [PracticeSide: [String: String]] = [:]) {
+        self.l = l
+        self.playerName = playerName; self.opponentName = opponentName
+        self.playerSnapshot = playerSnapshot; opponentSnapshot = nil
+        self.moveSlugs = moveSlugs; self.abilitySlugs = abilitySlugs
+    }
 
     /// From the pair the battle was started with: the selection may already name someone else (a wild search
     /// replacing its batch mid-battle).
@@ -98,13 +111,13 @@ struct PracticeWording {
         case "recharge": return .literal(l.practiceRecharge)
         default:
             let owner: BattleSnapshot? = side.flatMap { self.snapshot($0) }
-            let slug = PracticeMetadataName.slug(.move, moveID, in: owner)
+            let slug = side.flatMap { moveSlugs[$0]?[moveID] } ?? PracticeMetadataName.slug(.move, moveID, in: owner)
             return .resource(PokemonNameResource(kind: .move, name: slug))
         }
     }
 
     func ability(_ side: PracticeSide, _ abilityID: String) -> PracticeNameRef {
-        .resource(.init(kind: .ability, name: PracticeMetadataName.slug(.ability, abilityID, in: snapshot(side))))
+        .resource(.init(kind: .ability, name: abilitySlugs[side]?[abilityID] ?? PracticeMetadataName.slug(.ability, abilityID, in: snapshot(side))))
     }
 
     // MARK: Beat lines
@@ -292,5 +305,85 @@ extension View {
         self.grayscale(fainted ? 1 : 0)
             .opacity(fainted ? 0.4 : 1)
             .animation(.easeOut(duration: 0.4), value: fainted)
+    }
+}
+
+/// The beat on screen (action and callout chips) over the newest finished beats, as the practice board and the
+/// online arena both draw them. The caller gives the card and its frame, so the height stays its own.
+@MainActor
+struct PracticeBeatLines: View {
+    let playback: PracticePlayback
+    let wording: PracticeWording
+    /// What the line says between beats ("Turn 3", or the battle's first prompt).
+    let idle: String
+    let l: L
+    let artwork: Bool
+    /// Finished beats under the current one, newest first.
+    var recentCount = 3
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            current
+            if !playback.recent.isEmpty {
+                Divider()
+                recent
+            }
+        }
+    }
+
+    private var current: some View {
+        ZStack(alignment: .topLeading) {
+            if let beat = playback.beat {
+                VStack(alignment: .leading, spacing: 4) {
+                    PracticePhraseText(phrase: wording.action(beat), l: l, artwork: artwork)
+                        .font(.callout.weight(.semibold))
+                        .lineLimit(1)
+                    chips(beat)
+                }
+                .id(beat.id)
+                .transition(.asymmetric(insertion: .offset(x: -12).combined(with: .opacity), removal: .opacity))
+            } else {
+                Text(idle)
+                    .font(.callout.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+        }
+        .frame(maxWidth: .infinity, minHeight: 38, alignment: .topLeading)
+        .animation(.easeOut(duration: 0.2), value: playback.beat?.id)
+    }
+
+    /// Up to three chips; fewer when the localized words do not fit one line.
+    private func chips(_ beat: PracticeBeat) -> some View {
+        let callouts = wording.chips(beat)
+        return ViewThatFits(in: .horizontal) {
+            chipRow(callouts.prefix(3), beat)
+            chipRow(callouts.prefix(2), beat)
+            chipRow(callouts.prefix(1), beat)
+        }
+        .frame(minHeight: 18, alignment: .leading)
+    }
+
+    private func chipRow(_ callouts: ArraySlice<PracticeCallout>, _ beat: PracticeBeat) -> some View {
+        HStack(spacing: 5) {
+            ForEach(Array(callouts.enumerated()), id: \.offset) { _, callout in
+                PracticeCalloutChip(phrase: wording.callout(callout, in: beat), tone: wording.tone(callout),
+                                    l: l, artwork: artwork)
+            }
+        }
+    }
+
+    /// The newest finished beats as sentences, newest first.
+    private var recent: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            ForEach(Array(playback.recent.prefix(recentCount).enumerated()), id: \.element.id) { index, beat in
+                PracticePhraseText(phrase: wording.sentence(beat), l: l, artwork: artwork)
+                    .foregroundStyle(index == 0 ? Color.primary : Color.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .transition(.opacity)
+            }
+        }
+        .animation(.easeOut(duration: 0.2), value: playback.recent.first?.id)
     }
 }

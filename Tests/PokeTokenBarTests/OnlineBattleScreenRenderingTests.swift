@@ -396,14 +396,23 @@ final class OnlineBattleScreenRenderingTests: XCTestCase {
     // MARK: T14 arena board
 
     private func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap { descendants($0) } }
-    private func buttons(titled title: String, in view: NSView) -> [NSButton] {
-        descendants(view).compactMap { $0 as? NSButton }.filter { $0.title == title }
+    /// SwiftUI buttons carry no title, label or identifier on their AppKit view here, so they are told apart by
+    /// position: top to bottom.
+    private func buttons(in view: NSView) -> [NSButton] {
+        func top(_ button: NSButton) -> CGFloat {
+            let y = view.convert(button.bounds, from: button).minY
+            return view.isFlipped ? y : -y
+        }
+        return descendants(view).compactMap { $0 as? NSButton }.sorted { top($0) < top($1) }
     }
+    private static let arenaFiller: CGFloat = 200
     private func arenaHost(_ model: OnlineBattlePresentation, width: CGFloat = PopoverMetrics.scrollContentWidth) async -> NSView {
         let provider = OnlineBattleSyntheticNameProvider()
-        let host = NSHostingView(rootView: OnlineBattleArena(model: model, l: L(.en), artwork: false, speciesNameProvider: provider,
-                                                             speciesNameStore: PokemonNameDisplayStore())
-            .frame(width: width).background(Color.white).environment(\.colorScheme, .light))
+        // Blank room under the board: whatever hangs out of it shows up there.
+        let host = NSHostingView(rootView: VStack(alignment: .leading, spacing: 0) {
+            OnlineBattleArena(model: model, l: L(.en), artwork: false, speciesNameProvider: provider, speciesNameStore: PokemonNameDisplayStore())
+            Color.clear.frame(height: Self.arenaFiller)
+        }.frame(width: width).background(Color.white).environment(\.colorScheme, .light))
         host.frame = NSRect(x: 0, y: 0, width: width, height: 700)
         let window = NSWindow(contentRect: host.frame, styleMask: .borderless, backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false; window.appearance = NSAppearance(named: .aqua)
@@ -411,6 +420,20 @@ final class OnlineBattleScreenRenderingTests: XCTestCase {
         try? await Task.sleep(for: .milliseconds(150))
         host.layoutSubtreeIfNeeded()
         return host
+    }
+    /// Nothing may draw under the board's fixed height: a footer taller than its room would hang out of the scroll area.
+    private func assertNothingBelowTheBoard(_ host: NSView, _ state: String, file: StaticString = #filePath, line: UInt = #line) throws {
+        let bitmap = try PracticeScreenRenderingTests.capture2x(host)
+        let first = Int(OnlineBattleArena.boardHeight * 2) + 2
+        XCTAssertGreaterThan(bitmap.pixelsHigh, first + 20, file: file, line: line)
+        var inked = 0
+        for y in first..<bitmap.pixelsHigh {
+            for x in 0..<bitmap.pixelsWide {
+                guard let color = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB) else { continue }
+                if color.alphaComponent > 0.01, color.redComponent < 0.99 || color.greenComponent < 0.99 || color.blueComponent < 0.99 { inked += 1 }
+            }
+        }
+        XCTAssertEqual(inked, 0, "\(state) draws \(inked) pixels below the board", file: file, line: line)
     }
     private func recognized(_ host: NSView) throws -> String {
         let bitmap = try PracticeScreenRenderingTests.capture2x(host)
@@ -426,31 +449,48 @@ final class OnlineBattleScreenRenderingTests: XCTestCase {
         defer { manual.close() }
         try manual.play(rounds: 1); manual.staging.skipToEnd(); manual.publish()
         let host = await arenaHost(manual.model)
-        var heights = [("choosing", host.fittingSize.height)]
+        manual.staging.skipToEnd(); manual.publish()
+        var heights = [("choosing", (host.fittingSize.height - Self.arenaFiller))]
         try manual.play(rounds: 1)
         XCTAssertTrue(manual.staging.isPlaying)
         try await Task.sleep(for: .milliseconds(150)); host.layoutSubtreeIfNeeded()
-        heights.append(("playing", host.fittingSize.height))
+        heights.append(("playing", (host.fittingSize.height - Self.arenaFiller))); try assertNothingBelowTheBoard(host, "playing")
         manual.model.choiceSubmitted = true
         try await Task.sleep(for: .milliseconds(150)); host.layoutSubtreeIfNeeded()
-        heights.append(("sent", host.fittingSize.height))
+        heights.append(("sent", (host.fittingSize.height - Self.arenaFiller))); try assertNothingBelowTheBoard(host, "sent")
         manual.model.choiceSubmitted = false
         manual.staging.skipToEnd()
         manual.model.request = .init(kind: "none", moves: [])
         try await Task.sleep(for: .milliseconds(150)); host.layoutSubtreeIfNeeded()
-        heights.append(("forced", host.fittingSize.height))
+        heights.append(("forced", (host.fittingSize.height - Self.arenaFiller))); try assertNothingBelowTheBoard(host, "forced")
         manual.model.request = .init(kind: "move", moves: [.init(slot: 1, id: "thunderbolt", name: "Thunderbolt", type: "Electric", pp: 1, maxpp: 1, disabled: false)])
         try await Task.sleep(for: .milliseconds(150)); host.layoutSubtreeIfNeeded()
-        heights.append(("one move", host.fittingSize.height))
+        heights.append(("one move", (host.fittingSize.height - Self.arenaFiller)))
+        let four = ["Thunderbolt", "Quick Attack", "Volt Tackle", "Iron Tail"].enumerated().map { index, name in
+            BattleMove(slot: index + 1, id: OnlineBattleArenaFixture.normalized(name), name: name, type: "Electric", pp: 15, maxpp: 15, disabled: false)
+        }
+        manual.model.request = .init(kind: "move", moves: four)
+        try await Task.sleep(for: .milliseconds(150)); host.layoutSubtreeIfNeeded()
+        heights.append(("four moves", (host.fittingSize.height - Self.arenaFiller))); try assertNothingBelowTheBoard(host, "four moves")
+        // The tallest foe card: four revealed moves and an ability with long names wrap onto a second line.
+        let seen = try XCTUnwrap(manual.model.arena), foe = seen.p2
+        manual.model.arena = BattleView(turn: seen.turn, ended: false, p1: seen.p1,
+                                        p2: .init(speciesNum: foe.speciesNum, species: foe.species, level: foe.level, types: foe.types, hp: foe.hp,
+                                                  maxhp: foe.maxhp, status: "par", moves: ["hyperbeam", "earthquake", "flamethrower", "thunderwave"],
+                                                  ability: "intimidate"))
+        manual.model.moveSlugs[.p2] = ["hyperbeam": "hyper-beam", "earthquake": "earthquake", "flamethrower": "flamethrower", "thunderwave": "thunder-wave"]
+        manual.model.abilitySlugs[.p2] = ["intimidate": "intimidate"]
+        try await Task.sleep(for: .milliseconds(150)); host.layoutSubtreeIfNeeded()
+        heights.append(("wrapped foe card", (host.fittingSize.height - Self.arenaFiller))); try assertNothingBelowTheBoard(host, "wrapped foe card")
         let auto = try OnlineBattleArenaFixture.arena(seat: .p2, name: "auto")
         defer { auto.close() }
         try auto.play(rounds: 1, mode: .auto, secondsLeft: nil)
         auto.model.room = try OnlineBattleArenaFixture.liveRoom("auto", seat: .p2, deadline: nil)
         let autoHost = await self.host2(auto.model)
-        heights.append(("auto", autoHost.fittingSize.height))
+        heights.append(("auto", (autoHost.fittingSize.height - Self.arenaFiller))); try assertNothingBelowTheBoard(autoHost, "auto")
         for (name, height) in heights { XCTAssertEqual(height, heights[0].1, accuracy: 0.5, "\(name) must not change the board height") }
-        // The popover's scroll area is 520pt: the group-back row (about 16pt) and the 12pt gaps come before the board.
-        XCTAssertLessThanOrEqual(heights[0].1, 520 - 16 - 12 - 12 - 24, "the move picker must stay inside the scroll area")
+        // The popover's scroll area is 520pt and its group-back row (about 16pt) and one 12pt gap come first.
+        XCTAssertLessThanOrEqual(heights[0].1, 520 - 16 - 12, "the move picker must stay inside the scroll area")
     }
     private func host2(_ model: OnlineBattlePresentation) async -> NSView {
         window?.close()
@@ -459,9 +499,9 @@ final class OnlineBattleScreenRenderingTests: XCTestCase {
 
     /// My moves are the picker's cards only: the old card also listed them as chips, so each name showed twice.
     func testArenaShowsEachOfMyMoveNamesOnce() async throws {
+        // Before the first beat the lines hold no move name, so the picker's cards are the only place for them.
         let fixture = try OnlineBattleArenaFixture.arena(seat: .p1)
         defer { fixture.close() }
-        try fixture.play(rounds: 1); fixture.staging.skipToEnd(); fixture.publish()
         let text = try recognized(await arenaHost(fixture.model))
         func count(_ needle: String) -> Int { text.components(separatedBy: needle).count - 1 }
         XCTAssertEqual(count("Thunderbolt"), 1, text)
@@ -469,45 +509,43 @@ final class OnlineBattleScreenRenderingTests: XCTestCase {
     }
 
     func testSkipButtonsAppearOnlyWhileTheBeatsPlay() async throws {
-        let l = L(.en)
         let manual = try OnlineBattleArenaFixture.arena(seat: .p1)
         defer { manual.close() }
-        var actions: [String] = []
-        manual.model.onAction = { action in
-            switch action {
-            case .skipStage: actions.append("skip")
-            default: break
-            }
-        }
+        var skips = 0
+        manual.model.onAction = { if case .skipStage = $0 { skips += 1 } }
         try manual.play(rounds: 1); manual.staging.skipToEnd(); manual.publish()
         let host = await arenaHost(manual.model)
-        XCTAssertTrue(buttons(titled: l.practiceSkip, in: host).allSatisfy { !$0.isEnabled || $0.isHidden }, "nothing to skip at rest")
+        XCTAssertTrue(buttons(in: host).isEmpty, "nothing to skip at rest, and a manual battle has no result button")
         try manual.play(rounds: 1)
         try await Task.sleep(for: .milliseconds(150)); host.layoutSubtreeIfNeeded()
-        let skip = try XCTUnwrap(buttons(titled: l.practiceSkip, in: host).first)
+        let found = buttons(in: host)
+        XCTAssertEqual(found.count, 1)
+        let skip = try XCTUnwrap(found.first)
         XCTAssertTrue(skip.isEnabled)
         skip.performClick(nil)
-        XCTAssertEqual(actions, ["skip"])
-        XCTAssertTrue(buttons(titled: l.practiceSkipToResult, in: host).isEmpty, "the result button is for automatic battles")
+        XCTAssertEqual(skips, 1)
     }
 
     func testAutomaticBattleOffersShowResultWhilePlayingAndKeepsItsPlaceAtRest() async throws {
-        let l = L(.en)
         let auto = try OnlineBattleArenaFixture.arena(seat: .p2, name: "auto")
         defer { auto.close() }
-        var actions = 0
-        auto.model.onAction = { if case .skipStage = $0 { actions += 1 } }
+        var skips = 0
+        auto.model.onAction = { if case .skipStage = $0 { skips += 1 } }
         try auto.play(rounds: 1, mode: .auto, secondsLeft: nil)
         auto.model.room = try OnlineBattleArenaFixture.liveRoom("auto", seat: .p2, deadline: nil)
         XCTAssertTrue(auto.staging.isPlaying)
         let host = await arenaHost(auto.model)
-        let result = try XCTUnwrap(buttons(titled: l.practiceSkipToResult, in: host).first)
+        let playing = buttons(in: host)
+        XCTAssertEqual(playing.count, 2, "Skip in the prompt row and the result button in the footer")
+        let result = try XCTUnwrap(playing.last)
         XCTAssertTrue(result.isEnabled)
         result.performClick(nil)
-        XCTAssertEqual(actions, 1)
+        XCTAssertEqual(skips, 1)
         auto.staging.skipToEnd(); auto.publish()
         try await Task.sleep(for: .milliseconds(150)); host.layoutSubtreeIfNeeded()
-        XCTAssertTrue(buttons(titled: l.practiceSkipToResult, in: host).allSatisfy { !$0.isEnabled })
+        let rest = buttons(in: host)
+        XCTAssertEqual(rest.count, 1, "the result button keeps its place so the card never changes size")
+        XCTAssertFalse(try XCTUnwrap(rest.first).isEnabled)
     }
 
     // MARK: T14 arena board states (PR images)
@@ -528,6 +566,13 @@ final class OnlineBattleScreenRenderingTests: XCTestCase {
         manual.model.choiceSubmitted = true
         let sent = try await capture(host, named: "arena-3-choice-sent.png")
         XCTAssertNotEqual(choosing, playing); XCTAssertNotEqual(playing, sent)
+        // A full set of four moves is the tallest picker; it must stay inside the scroll area too.
+        manual.model.choiceSubmitted = false
+        manual.model.request = .init(kind: "move", moves: ["Thunderbolt", "Quick Attack", "Volt Tackle", "Iron Tail"].enumerated().map { index, name in
+            BattleMove(slot: index + 1, id: OnlineBattleArenaFixture.normalized(name), name: name, type: ["Electric", "Normal", "Electric", "Steel"][index],
+                       pp: 15, maxpp: 15, disabled: false)
+        })
+        _ = try await capture(host, named: "arena-5-four-moves.png")
 
         let auto = try OnlineBattleArenaFixture.arena(seat: .p2, name: "auto")
         defer { auto.close() }

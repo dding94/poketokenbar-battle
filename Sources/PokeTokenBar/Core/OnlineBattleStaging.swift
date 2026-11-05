@@ -99,8 +99,12 @@ final class OnlineBattleStaging {
     /// parsing gap can never outlive the beat that showed it. The display would not do either: passing nil
     /// to the practice card leaves `fainted` false.
     func atRest(_ side: PracticeSide) -> PracticeDisplaySide? {
-        guard let lastView else { return nil }
-        let pokemon = frame.pokemon(side, in: lastView), fainted = pokemon.hp == 0
+        lastView.map { Self.resting(frame.pokemon(side, in: $0)) }
+    }
+
+    /// A card at rest from one engine view of a Pokémon. The arena uses it when no staging exists.
+    static func resting(_ pokemon: BattleView.Pokemon) -> PracticeDisplaySide {
+        let fainted = pokemon.hp == 0
         return PracticeDisplaySide(hp: pokemon.hp, maxHP: pokemon.maxhp,
                                    status: fainted || pokemon.status.isEmpty ? nil : pokemon.status, fainted: fainted)
     }
