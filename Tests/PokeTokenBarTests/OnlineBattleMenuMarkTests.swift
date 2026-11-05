@@ -128,35 +128,56 @@ final class OnlineBattleMenuMarkTests: XCTestCase {
     // MARK: The home row subtitle
 
     func testSubtitleBeforeJoining() {
-        XCTAssertEqual(ko.onlineHomeSubtitle(input([], joined: false), connectionStatus: ""), "동료와 겨루기 · 아직 가입 안 함")
-        XCTAssertEqual(en.onlineHomeSubtitle(input([], joined: false), connectionStatus: ""), "Battle your group · Not joined yet")
+        XCTAssertEqual(ko.onlineHomeSubtitle(input([], joined: false), connection: nil), "동료와 겨루기 · 아직 가입 안 함")
+        XCTAssertEqual(en.onlineHomeSubtitle(input([], joined: false), connection: nil), "Battle your group · Not joined yet")
     }
 
     func testSubtitleCountsReceivedRequests() {
-        XCTAssertEqual(ko.onlineHomeSubtitle(input([incoming()]), connectionStatus: "접속 중"), "받은 신청 1건")
-        XCTAssertEqual(ko.onlineHomeSubtitle(input([incoming("bt-a"), incoming("bt-b", createdAt: 2, rematch: true)]), connectionStatus: "접속 중"), "받은 신청 2건")
-        XCTAssertEqual(en.onlineHomeSubtitle(input([incoming()]), connectionStatus: "접속 중"), "1 request received")
-        XCTAssertEqual(en.onlineHomeSubtitle(input([incoming("bt-a"), incoming("bt-b", createdAt: 2)]), connectionStatus: "접속 중"), "2 requests received")
+        XCTAssertEqual(ko.onlineHomeSubtitle(input([incoming()]), connection: .connected), "받은 신청 1건")
+        XCTAssertEqual(ko.onlineHomeSubtitle(input([incoming("bt-a"), incoming("bt-b", createdAt: 2, rematch: true)]), connection: .connected), "받은 신청 2건")
+        XCTAssertEqual(en.onlineHomeSubtitle(input([incoming()]), connection: .connected), "1 request received")
+        XCTAssertEqual(en.onlineHomeSubtitle(input([incoming("bt-a"), incoming("bt-b", createdAt: 2)]), connection: .connected), "2 requests received")
     }
 
     func testSubtitleWhileReconnectingWinsOverEverythingButNotJoining() {
-        for status in ["연결 중", "다시 연결할 때까지 기다리고 있어요"] {
-            XCTAssertEqual(ko.onlineHomeSubtitle(input([incoming()]), connectionStatus: status), "다시 연결하는 중", status)
-            XCTAssertEqual(en.onlineHomeSubtitle(input([]), connectionStatus: status), "Reconnecting", status)
+        for status in [OnlineBattleConnectionState.connecting, .retryWaiting] {
+            XCTAssertEqual(ko.onlineHomeSubtitle(input([incoming()]), connection: status), "다시 연결하는 중", "\(status)")
+            XCTAssertEqual(en.onlineHomeSubtitle(input([]), connection: status), "Reconnecting", "\(status)")
         }
-        XCTAssertEqual(ko.onlineHomeSubtitle(input([], joined: false), connectionStatus: "연결 중"), "동료와 겨루기 · 아직 가입 안 함")
+        XCTAssertEqual(ko.onlineHomeSubtitle(input([], joined: false), connection: .connecting), "동료와 겨루기 · 아직 가입 안 함")
+    }
+
+    /// On a network that blocks the socket polling can last, and the read it still does brings news worth showing.
+    func testPollingDoesNotHideARequestBehindReconnecting() {
+        XCTAssertEqual(ko.onlineHomeSubtitle(input([incoming()]), connection: .polling), "받은 신청 1건")
+        XCTAssertEqual(ko.onlineHomeSubtitle(input([]), connection: .polling), "동료와 겨루기")
+    }
+
+    func testEveryConnectionLineHasBothLanguages() {
+        XCTAssertNil(ko.onlineConnectionLine(.unknown))
+        XCTAssertNil(en.onlineConnectionLine(.unknown))
+        let states: [OnlineBattleConnectionState] = [.unconfigured, .credentialsRequired, .connecting, .connected, .retryWaiting, .polling, .replaced, .revoked, .protocolError]
+        let hangul = /[가-힣]/
+        for status in states.map(OnlineConnectionStatus.connection) + [.accessOff, .accessStopped] {
+            let korean = try? XCTUnwrap(ko.onlineConnectionLine(status)), english = try? XCTUnwrap(en.onlineConnectionLine(status))
+            XCTAssertNotNil(korean?.firstMatch(of: hangul), "\(status)")
+            XCTAssertEqual(english?.isEmpty, false, "\(status)")
+            XCTAssertNil(english?.firstMatch(of: hangul), "\(status) still reads Korean in English")
+        }
+        XCTAssertEqual(ko.onlineConnectionLine(.connection(.polling)), "다시 연결하는 중")
+        XCTAssertEqual(en.onlineConnectionLine(.connection(.polling)), "Reconnecting")
     }
 
     func testSubtitleForOtherEventsOngoingRoomsAndIdle() {
-        XCTAssertEqual(ko.onlineHomeSubtitle(input([turn(seconds: 20)]), connectionStatus: "접속 중"), "연습친구님과 대전 중 · 내 차례")
-        XCTAssertEqual(ko.onlineHomeSubtitle(input([battle("bt-conf", .accepted, confirmed: true)]), connectionStatus: "접속 중"),
+        XCTAssertEqual(ko.onlineHomeSubtitle(input([turn(seconds: 20)]), connection: .connected), "연습친구님과 대전 중 · 내 차례")
+        XCTAssertEqual(ko.onlineHomeSubtitle(input([battle("bt-conf", .accepted, confirmed: true)]), connection: .connected),
                        "연습친구님과 대결 확정 · 전투 준비 필요")
         let ongoing = battle("bt-run", .running, confirmed: true, deadline: Self.nowMS + 20_000, ownChoice: "move 1")
-        XCTAssertEqual(ko.onlineHomeSubtitle(input([ongoing]), connectionStatus: "접속 중"), "진행 중인 대전이 있어요")
-        XCTAssertEqual(en.onlineHomeSubtitle(input([ongoing]), connectionStatus: "접속 중"), "A battle is in progress")
-        XCTAssertEqual(ko.onlineHomeSubtitle(input([]), connectionStatus: "접속 중"), "동료와 겨루기 · 접속 중")
-        XCTAssertEqual(en.onlineHomeSubtitle(input([]), connectionStatus: "접속 중"), "Battle your group · Online")
-        XCTAssertEqual(ko.onlineHomeSubtitle(input([]), connectionStatus: ""), "동료와 겨루기", "Before the first connection report")
-        XCTAssertEqual(ko.onlineHomeSubtitle(input([]), connectionStatus: "접속 정보가 필요해요"), "동료와 겨루기")
+        XCTAssertEqual(ko.onlineHomeSubtitle(input([ongoing]), connection: .connected), "진행 중인 대전이 있어요")
+        XCTAssertEqual(en.onlineHomeSubtitle(input([ongoing]), connection: .connected), "A battle is in progress")
+        XCTAssertEqual(ko.onlineHomeSubtitle(input([]), connection: .connected), "동료와 겨루기 · 접속 중")
+        XCTAssertEqual(en.onlineHomeSubtitle(input([]), connection: .connected), "Battle your group · Online")
+        XCTAssertEqual(ko.onlineHomeSubtitle(input([]), connection: nil), "동료와 겨루기", "Before the first connection report")
+        XCTAssertEqual(ko.onlineHomeSubtitle(input([]), connection: .credentialsRequired), "동료와 겨루기")
     }
 }

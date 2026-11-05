@@ -43,8 +43,8 @@ struct OnlineBattleScreen: View {
                             .buttonStyle(.borderless).font(.caption)
                             .accessibilityIdentifier("online.backToGroup")
                     }
-                    if !model.connectionStatus.isEmpty {
-                        Label(model.connectionStatus, systemImage: "network")
+                    if let line = l.onlineConnectionLine(model.connectionStatus) {
+                        Label(line, systemImage: "network")
                             .font(.caption).foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }

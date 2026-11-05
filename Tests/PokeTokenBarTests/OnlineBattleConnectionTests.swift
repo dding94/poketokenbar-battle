@@ -1,3 +1,4 @@
+import AppKit
 import XCTest
 @testable import PokeTokenBar
 
@@ -18,6 +19,12 @@ private actor OnlineTestSocket: OnlineBattleSocket {
     func setFailPing() { failPing = true }
     func sendPing() throws { pings += 1; if failPing { throw OnlineBattleFailure.transport } }
     func close() { closes += 1; continuation.finish() }
+}
+private final class OnlineLogLines: @unchecked Sendable {
+    private let lock = NSLock()
+    private var values: [String] = []
+    func append(_ line: String) { lock.withLock { values.append(line) } }
+    var lines: [String] { lock.withLock { values } }
 }
 private actor OnlineTestSocketDriver: OnlineBattleSocketDriver {
     var requests: [URLRequest] = []
@@ -176,24 +183,193 @@ final class OnlineBattleConnectionTests: XCTestCase {
         let requests = await driver.requests; XCTAssertEqual(requests.count, 3)
         await connection.stop()
     }
-    func testPollingIsPopoverOnlyAndWebSocketRetriesAfterTenMinutes() async throws {
-        let (connection, clock, driver, events) = try await setup()
+    /// Three failed opens in a row, from a fresh connection attempt.
+    private func enterPolling(_ connection: OnlineBattleConnection, _ clock: OnlineTestClock) async {
         for retry in 0..<3 {
             await send(.failed(nil), to: connection)
             if retry < 2 { clock.advance(pow(2, Double(retry))); await connection.tick() }
         }
+    }
+    func testAfterThreeFailuresTheSocketIsRetriedEveryTwoMinutesWithNoReadsWhileClosed() async throws {
+        let (connection, clock, driver, events) = try await setup()
+        await enterPolling(connection, clock)
+        var state = await connection.snapshot(); XCTAssertEqual(state.state, .polling)
         clock.advance(30); await connection.tick()
-        var count = await events.refreshCount; XCTAssertEqual(count, 0)
+        let reads = await events.refreshCount; XCTAssertEqual(reads, 0, "Nothing is read on a timer while the popover is closed")
+        clock.advance(89); await connection.tick()
+        state = await connection.snapshot(); XCTAssertEqual(state.state, .polling, "Still 1 second short of two minutes")
+        var requests = await driver.requests; XCTAssertEqual(requests.count, 3)
+        clock.advance(1); await connection.tick()
+        state = await connection.snapshot(); XCTAssertEqual(state.state, .connecting)
+        requests = await driver.requests; XCTAssertEqual(requests.count, 4)
+        await send(.failed(nil), to: connection)
+        state = await connection.snapshot(); XCTAssertEqual(state.state, .retryWaiting, "The retry starts a new round of three")
+        await connection.stop()
+    }
+    func testOpeningThePopoverWhilePollingReadsAndReconnects() async throws {
+        let (connection, clock, driver, events) = try await setup()
+        await enterPolling(connection, clock)
         await connection.setPopoverOpen(true)
-        count = await events.refreshCount; XCTAssertEqual(count, 1)
+        var reads = await events.refreshCount; XCTAssertEqual(reads, 1)
+        var state = await connection.snapshot(); XCTAssertEqual(state.state, .connecting)
+        var requests = await driver.requests; XCTAssertEqual(requests.count, 4)
+        // The network still blocks the socket: back to polling, with reads only while the popover stays open.
+        await enterPolling(connection, clock)
+        state = await connection.snapshot(); XCTAssertEqual(state.state, .polling)
+        reads = await events.refreshCount; XCTAssertEqual(reads, 2)
         clock.advance(30); await connection.tick()
-        count = await events.refreshCount; XCTAssertEqual(count, 2)
+        reads = await events.refreshCount; XCTAssertEqual(reads, 3)
         await connection.setPopoverOpen(false)
         clock.advance(30); await connection.tick()
-        count = await events.refreshCount; XCTAssertEqual(count, 2)
-        clock.advance(510); await connection.tick()
-        let state = await connection.snapshot(); XCTAssertEqual(state.state, .connecting)
-        let requests = await driver.requests; XCTAssertEqual(requests.count, 4)
+        reads = await events.refreshCount; XCTAssertEqual(reads, 3)
+        requests = await driver.requests; XCTAssertEqual(requests.count, 6)
+        await connection.stop()
+    }
+    func testAReconnectHintLeavesPollingAtOnceWithFreshCounters() async throws {
+        let (connection, clock, driver, events) = try await setup()
+        await enterPolling(connection, clock)
+        await connection.reconnectHint(.wake)
+        var state = await connection.snapshot(); XCTAssertEqual(state.state, .connecting)
+        var requests = await driver.requests; XCTAssertEqual(requests.count, 4, "No waiting for the two-minute retry")
+        await send(.failed(nil), to: connection)
+        state = await connection.snapshot(); XCTAssertEqual(state.state, .retryWaiting, "openFailures went back to 0")
+        clock.advance(1); await connection.tick()
+        state = await connection.snapshot(); XCTAssertEqual(state.state, .connecting, "attempts went back to 0, so the first backoff step")
+        await send(.text(hello), to: connection)
+        let reads = await events.refreshCount; XCTAssertEqual(reads, 1, "Hello reconciles what the sleep missed")
+        requests = await driver.requests; XCTAssertEqual(requests.count, 5)
+        await connection.stop()
+    }
+    func testAReconnectHintCutsABackoffShort() async throws {
+        let (connection, clock, driver, _) = try await setup()
+        await send(.failed(nil), to: connection); clock.advance(1); await connection.tick()
+        await send(.failed(nil), to: connection)
+        var state = await connection.snapshot(); XCTAssertEqual(state.state, .retryWaiting)
+        await connection.reconnectHint(.network)
+        state = await connection.snapshot(); XCTAssertEqual(state.state, .connecting)
+        let requests = await driver.requests; XCTAssertEqual(requests.count, 3)
+        await send(.failed(nil), to: connection)
+        clock.advance(1); await connection.tick()
+        state = await connection.snapshot(); XCTAssertEqual(state.state, .connecting, "Backoff starts over, not from the third step")
+        await connection.stop()
+    }
+    func testAReconnectHintChecksALiveSocketOnTheNextTick() async throws {
+        let (connection, _, driver, _) = try await setup()
+        await send(.text(hello), to: connection)
+        let socket = await driver.sockets[0]
+        await connection.tick()
+        var pings = await socket.pings; XCTAssertEqual(pings, 0)
+        await connection.reconnectHint(.wake)
+        await connection.tick()
+        pings = await socket.pings; XCTAssertEqual(pings, 1, "A socket that slept may be dead: find out now")
+        await connection.tick()
+        pings = await socket.pings; XCTAssertEqual(pings, 1, "One extra ping, back to the 30-second rhythm")
+        let state = await connection.snapshot(); XCTAssertEqual(state.state, .connected)
+        let requests = await driver.requests; XCTAssertEqual(requests.count, 1, "A live socket is not replaced")
+        await connection.stop()
+    }
+    /// The network can come back while the last doomed attempt is still in flight: that failure must not cost two minutes.
+    func testAReconnectHintDuringAnAttemptForgivesEarlierFailures() async throws {
+        let (connection, clock, driver, _) = try await setup()
+        await send(.failed(nil), to: connection); clock.advance(1); await connection.tick()
+        await send(.failed(nil), to: connection); clock.advance(2); await connection.tick()
+        await connection.reconnectHint(.network)
+        let requests = await driver.requests; XCTAssertEqual(requests.count, 3, "The attempt in flight is not doubled")
+        await send(.failed(nil), to: connection)
+        let state = await connection.snapshot(); XCTAssertEqual(state.state, .retryWaiting)
+        await connection.stop()
+    }
+    func testAReconnectHintNeverBringsBackAConnectionThatMustStayDown() async throws {
+        for event in [OnlineBattleSocketEvent.closed(4001), .closed(4003), .closed(4400)] {
+            let (connection, _, driver, _) = try await setup()
+            await send(event, to: connection)
+            let before = await connection.snapshot()
+            await connection.reconnectHint(.wake)
+            let after = await connection.snapshot(); XCTAssertEqual(after, before)
+            let requests = await driver.requests; XCTAssertEqual(requests.count, 1, "\(event)")
+            await connection.stop()
+        }
+        let (stopped, _, driver, _) = try await setup()
+        await stopped.stop()
+        await stopped.reconnectHint(.network)
+        let requests = await driver.requests; XCTAssertEqual(requests.count, 1)
+    }
+    func testPresenceWhileClosedWaitsForOneRefreshOnOpen() async throws {
+        let (connection, _, _, events) = try await setup()
+        await send(.text(hello), to: connection)
+        for online in [true, false, true] {
+            await send(.text(#"{"v":1,"type":"presence","trainerId":"synthetic-other","online":\#(online)}"#), to: connection)
+        }
+        var reads = await events.refreshCount; XCTAssertEqual(reads, 1, "One colleague's flapping must not fan out while nobody looks")
+        await connection.setPopoverOpen(true)
+        reads = await events.refreshCount; XCTAssertEqual(reads, 2)
+        await connection.setPopoverOpen(false); await connection.setPopoverOpen(true)
+        reads = await events.refreshCount; XCTAssertEqual(reads, 2, "Only once, and only when something changed")
+        await send(.text(#"{"v":1,"type":"presence","trainerId":"synthetic-other","online":false}"#), to: connection)
+        reads = await events.refreshCount; XCTAssertEqual(reads, 3, "An open popover stays live")
+        await connection.stop()
+    }
+    func testAnOtherReadCoversTheMissedPresence() async throws {
+        let presence = #"{"v":1,"type":"presence","trainerId":"synthetic-other","online":true}"#
+        let (changed, _, _, changedEvents) = try await setup()
+        await send(.text(hello), to: changed); await send(.text(presence), to: changed)
+        await send(.text(#"{"v":1,"type":"group_changed","kind":"join"}"#), to: changed)
+        var reads = await changedEvents.refreshCount; XCTAssertEqual(reads, 2, "Group changes are rare and still read while closed")
+        await changed.setPopoverOpen(true)
+        reads = await changedEvents.refreshCount; XCTAssertEqual(reads, 2)
+        await changed.stop()
+
+        let (reconnected, clock, _, reconnectedEvents) = try await setup()
+        await send(.text(hello), to: reconnected); await send(.text(presence), to: reconnected)
+        await send(.closed(1006), to: reconnected); clock.advance(1); await reconnected.tick()
+        await send(.text(hello), to: reconnected)
+        await reconnected.setPopoverOpen(true)
+        reads = await reconnectedEvents.refreshCount; XCTAssertEqual(reads, 2, "The second hello already read everything")
+        await reconnected.stop()
+
+        let (polling, pollClock, _, pollingEvents) = try await setup()
+        await send(.text(hello), to: polling); await send(.text(presence), to: polling)
+        await send(.closed(1006), to: polling); pollClock.advance(1); await polling.tick()
+        await enterPolling(polling, pollClock)
+        await polling.setPopoverOpen(true)
+        reads = await pollingEvents.refreshCount; XCTAssertEqual(reads, 2, "Opening reads once, not once for polling and once for the mark")
+        await polling.stop()
+    }
+    func testAMessageTypeThisVersionDoesNotKnowIsIgnored() async throws {
+        let (connection, _, driver, events) = try await setup()
+        await send(.text(#"{"v":1,"type":"mystery"}"#), to: connection)
+        var state = await connection.snapshot(); XCTAssertEqual(state.state, .connecting, "Hello can still arrive")
+        await send(.text(hello), to: connection)
+        await send(.text(#"{"v":1,"type":"mystery","anything":{"nested":[1,2]}}"#), to: connection)
+        state = await connection.snapshot(); XCTAssertEqual(state.state, .connected)
+        XCTAssertEqual(state.connectionId, "synthetic-connection")
+        let socket = await driver.sockets[0]
+        let closes = await socket.closes; XCTAssertEqual(closes, 0)
+        await send(.text(#"{"v":1,"type":"group_changed"}"#), to: connection)
+        let reads = await events.refreshCount; XCTAssertEqual(reads, 2, "The socket keeps working after the unknown message")
+        await connection.stop()
+    }
+    func testConnectionTransitionsAreLoggedWithoutKeyOrAddress() async throws {
+        let clock = OnlineTestClock(), driver = OnlineTestSocketDriver(), sink = OnlineLogLines()
+        let connection = OnlineBattleConnection(driver: driver, clock: clock.clock, jitter: { $0 }, automaticTicks: false, log: { sink.append($0) })
+        await connection.configure(origin: try OnlineBattleOrigin("https://example.invalid"), accessKey: "synthetic-key")
+        await send(.text(hello), to: connection)
+        await send(.closed(1006), to: connection)
+        await connection.reconnectHint(.wake)
+        XCTAssertEqual(sink.lines, ["online connection: unconfigured -> connecting",
+                                    "online connection: connecting -> connected",
+                                    "online connection: connected -> retryWaiting",
+                                    "online connection: reconnect hint (wake) in retryWaiting",
+                                    "online connection: retryWaiting -> connecting"])
+        await send(.text(#"{"v":1,"type":"presence","online":true}"#), to: connection)
+        await send(.text(hello), to: connection)
+        await connection.reconnectHint(.network)
+        await connection.tick()
+        let all = sink.lines.joined(separator: "\n")
+        XCTAssertTrue(all.contains("reconnect hint (network) in connected"), all)
+        for secret in ["synthetic-key", "example.invalid", "synthetic-connection", "synthetic-trainer", "synthetic-group", "Bearer"] {
+            XCTAssertFalse(all.contains(secret), secret)
+        }
         await connection.stop()
     }
     func testReplacedOnlyRetriesOnNextPopoverOpening() async throws {
@@ -227,7 +403,7 @@ final class OnlineBattleConnectionTests: XCTestCase {
         await connection.stop()
     }
     func testUnsupportedProtocolOrMissingHelloIdentityStops() async throws {
-        for text in [#"{"v":2,"type":"hello"}"#, #"{"v":1,"type":"hello","online":[]}"#, #"{"v":1,"type":"mystery"}"#, "not-json"] {
+        for text in [#"{"v":2,"type":"hello"}"#, #"{"v":2,"type":"mystery"}"#, #"{"v":1,"type":"hello","online":[]}"#, "not-json"] {
             let (connection, _, _, _) = try await setup()
             await send(.text(text), to: connection)
             let state = await connection.snapshot(); XCTAssertEqual(state.state, .protocolError)
@@ -245,9 +421,17 @@ final class OnlineBattleConnectionTests: XCTestCase {
     }
     func testPresenceRefreshesAccountWhileBattleNotificationsStayScoped() async throws {
         let (connection, _, _, events) = try await setup()
+        await connection.setPopoverOpen(true)
         await send(.text(hello), to: connection)
         for text in [#"{"v":1,"type":"presence","trainerId":"synthetic-other","online":true}"#, #"{"v":1,"type":"battle_changed","battleId":"bt_synthetic"}"#, #"{"v":1,"type":"battle_round","battleId":"bt_synthetic"}"#, #"{"v":1,"type":"group_changed","kind":"join"}"#] { await send(.text(text), to: connection) }
         let count = await events.refreshCount; XCTAssertEqual(count, 3)
+        await connection.stop()
+    }
+    func testAKnownTypeThatBreaksItsOwnRulesStillStops() async throws {
+        let (connection, _, _, _) = try await setup()
+        await send(.text(hello), to: connection)
+        await send(.text(#"{"v":1,"type":"battle_changed","battleId":"not-a-battle-id"}"#), to: connection)
+        let state = await connection.snapshot(); XCTAssertEqual(state.state, .protocolError)
         await connection.stop()
     }
     func testGroupVoidNotificationRefreshesWithoutStoppingProtocol() async throws {
@@ -350,5 +534,44 @@ final class OnlineBattleConnectionTests: XCTestCase {
         state = await connection.snapshot(); XCTAssertEqual(state.state, .credentialsRequired)
         let requests = await driver.requests; XCTAssertTrue(requests.isEmpty)
         await connection.stop()
+    }
+}
+
+@MainActor
+final class OnlineReconnectSignalsTests: XCTestCase {
+    private func signals(_ center: NotificationCenter, _ received: XCTestExpectation) -> (OnlineReconnectSignals, () -> [OnlineBattleReconnectReason]) {
+        final class Box { var values: [OnlineBattleReconnectReason] = [] }
+        nonisolated(unsafe) let box = Box()
+        let signals = OnlineReconnectSignals(center: center) { reason in box.values.append(reason); received.fulfill() }
+        return (signals, { box.values })
+    }
+    func testWakeAndNetworkReturnBothSignal() async throws {
+        let center = NotificationCenter(), received = expectation(description: "both signals")
+        received.expectedFulfillmentCount = 2
+        let (signals, values) = signals(center, received)
+        signals.start(); signals.start()
+        center.post(name: NSWorkspace.didWakeNotification, object: nil)
+        signals.network.onReconnected?()
+        await fulfillment(of: [received], timeout: 2)
+        XCTAssertEqual(Set(values()), [.wake, .network])
+        XCTAssertEqual(values().count, 2, "Starting twice must not signal twice")
+        signals.stop()
+    }
+    func testNothingIsSignalledAfterStop() async throws {
+        let center = NotificationCenter(), received = expectation(description: "no signal")
+        received.isInverted = true
+        let (signals, values) = signals(center, received)
+        signals.start(); signals.stop()
+        center.post(name: NSWorkspace.didWakeNotification, object: nil)
+        await fulfillment(of: [received], timeout: 0.2)
+        XCTAssertEqual(values(), [])
+    }
+    /// The delegate cannot run under `swift test`, so this reads the wiring the way the other source guards do.
+    func testTheAppFeedsTheSignalsToTheSession() throws {
+        let app = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Sources/PokeTokenBar/PokeTokenBarApp.swift")
+        let source = try String(contentsOf: app, encoding: .utf8)
+        XCTAssertTrue(source.contains("OnlineReconnectSignals"), "No wake or network signal reaches the online session")
+        XCTAssertTrue(source.contains(".reconnectHint("), "The signals must end at the session")
     }
 }

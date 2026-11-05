@@ -415,6 +415,7 @@ private actor StageConnection: OnlineBattleConnecting {
     init(trainer: String) { self.trainer = trainer }
     func configure(origin: OnlineBattleOrigin?, accessKey: String?) {}
     func setPopoverOpen(_ open: Bool) {}
+    func reconnectHint(_ reason: OnlineBattleReconnectReason) {}
     func snapshot() -> OnlineBattleConnectionSnapshot { .init(state: .connected, generation: 1, connectionId: "connection", trainerId: trainer, groupId: "group") }
     func authenticationFailed(generation: UInt64) {}
     func stop() {}

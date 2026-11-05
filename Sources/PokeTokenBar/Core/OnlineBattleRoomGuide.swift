@@ -15,7 +15,9 @@ struct OnlineRoomProgress: Equatable, Sendable {
 
 /// Why a primary room or lobby button is disabled. Nil means the button is usable.
 enum OnlineActionBlock: Equatable, Sendable {
-    case busy, noOpponent, noEntry, fainted, held, entryUnavailable, connecting
+    case busy, noOpponent, noEntry, fainted, held, entryUnavailable
+    /// Why a live socket is missing. Each asks something different of the person, so they do not share a line.
+    case connecting, reconnecting, replaced, versionMismatch, signInNeeded
 }
 
 extension OnlineBattlePresentation {

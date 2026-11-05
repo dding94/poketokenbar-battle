@@ -27,7 +27,7 @@ final class OnlineAttentionFlowTests: XCTestCase {
                               group: .init(groupId: "synthetic-group", name: "동료들", hostTrainerId: "synthetic-foe"))
         model.members = [.init(trainerId: "synthetic-foe", displayEmail: Self.foeName, role: .host, status: .active, joinedAt: 0, online: true)]
         model.battles = battles; model.phase = phase; model.room = displayed
-        model.connectionStatus = L.onlineConnectedStatus
+        model.connectionStatus = .connection(.connected)
         if result { model.result = .init(title: "승리", detail: "경험치를 얻었어요.", xpAwarded: 10, hpApplied: true, isVoid: false) }
         return model
     }
@@ -207,8 +207,8 @@ final class OnlineAttentionFlowTests: XCTestCase {
         let waiting = model([])
         waiting.recoveryCode = "one-time-code"
         for l in [L(.ko), L(.en)] {
-            let line = l.onlineHomeSubtitle(input(waiting), connectionStatus: L.onlineConnectedStatus)
-            XCTAssertNotEqual(line, l.onlineHomeSubtitle(input(model([])), connectionStatus: L.onlineConnectedStatus))
+            let line = l.onlineHomeSubtitle(input(waiting), connection: .connected)
+            XCTAssertNotEqual(line, l.onlineHomeSubtitle(input(model([])), connection: .connected))
             XCTAssertFalse(line.contains("one-time-code"))
         }
     }
@@ -218,31 +218,31 @@ final class OnlineAttentionFlowTests: XCTestCase {
     func testTheHomeRowSaysARequestIsWaitingWithoutLightingTheMark() {
         let waiting = input(model([room("bt-out", .pending, mine: .p1)]))
         for l in [L(.ko), L(.en)] {
-            let line = l.onlineHomeSubtitle(waiting, connectionStatus: L.onlineConnectedStatus)
+            let line = l.onlineHomeSubtitle(waiting, connection: .connected)
             XCTAssertTrue(line.contains(Self.foeName), line)
             XCTAssertNil(l.onlineMenuMark(waiting))
-            XCTAssertNotEqual(line, l.onlineHomeSubtitle(input(model([])), connectionStatus: L.onlineConnectedStatus))
+            XCTAssertNotEqual(line, l.onlineHomeSubtitle(input(model([])), connection: .connected))
         }
     }
 
     func testEveryKindOfWaitReadsAsWaiting() {
-        let quiet = L(.ko).onlineHomeSubtitle(input(model([])), connectionStatus: L.onlineConnectedStatus)
+        let quiet = L(.ko).onlineHomeSubtitle(input(model([])), connection: .connected)
         for waiting in [room("bt-1", .accepted, mine: .p2), room("bt-2", .accepted, mine: .p2, confirmed: false)] {
-            XCTAssertNotEqual(L(.ko).onlineHomeSubtitle(input(model([waiting])), connectionStatus: L.onlineConnectedStatus), quiet)
+            XCTAssertNotEqual(L(.ko).onlineHomeSubtitle(input(model([waiting])), connection: .connected), quiet)
         }
         let two = input(model([room("bt-1", .pending, mine: .p1), room("bt-2", .pending, mine: .p1, createdAt: 2)]))
-        XCTAssertTrue(L(.ko).onlineHomeSubtitle(two, connectionStatus: L.onlineConnectedStatus).contains("2"))
+        XCTAssertTrue(L(.ko).onlineHomeSubtitle(two, connection: .connected).contains("2"))
     }
 
     func testAWaitPastItsExpiryIsNotClaimed() {
         let past = input(model([room("bt-out", .pending, mine: .p1, expiresIn: -60)]))
-        let quiet = L(.ko).onlineHomeSubtitle(input(model([])), connectionStatus: L.onlineConnectedStatus)
-        XCTAssertEqual(L(.ko).onlineHomeSubtitle(past, connectionStatus: L.onlineConnectedStatus), quiet)
+        let quiet = L(.ko).onlineHomeSubtitle(input(model([])), connection: .connected)
+        XCTAssertEqual(L(.ko).onlineHomeSubtitle(past, connection: .connected), quiet)
     }
 
     func testAnEventOutranksTheWaitOnTheHomeRow() {
         let both = input(model([room("bt-out", .pending, mine: .p1), room("bt-in", .pending, createdAt: 2)]))
-        XCTAssertEqual(L(.ko).onlineHomeSubtitle(both, connectionStatus: L.onlineConnectedStatus), "받은 신청 1건")
+        XCTAssertEqual(L(.ko).onlineHomeSubtitle(both, connection: .connected), "받은 신청 1건")
     }
 
     func testAnUnreadEndingLightsTheMarkAndTheHomeRowThenClears() {
@@ -250,7 +250,7 @@ final class OnlineAttentionFlowTests: XCTestCase {
         XCTAssertNil(L(.ko).onlineMenuMark(input(ended)), "Old history alone stays dark")
         ended.unreadEndedBattleIDs = ["bt-out"]
         XCTAssertEqual(L(.ko).onlineMenuMark(input(ended))?.text, OnlineMenuMark.attentionDot)
-        XCTAssertTrue(L(.ko).onlineHomeSubtitle(input(ended), connectionStatus: L.onlineConnectedStatus).contains("거절"))
+        XCTAssertTrue(L(.ko).onlineHomeSubtitle(input(ended), connection: .connected).contains("거절"))
         ended.acknowledgeEnded("bt-out", l: L(.ko))
         XCTAssertNil(L(.ko).onlineMenuMark(input(ended)))
     }
@@ -366,7 +366,7 @@ final class OnlineAttentionFlowTests: XCTestCase {
         XCTAssertNil(OnlineAttentionCalculator.current(quiet))
         let l = L(.ko)
         XCTAssertEqual(l.onlineMenuMark(quiet)?.tone, .ongoing, "The match is still going on")
-        XCTAssertFalse(l.onlineHomeSubtitle(quiet, connectionStatus: L.onlineConnectedStatus).contains("기술"))
+        XCTAssertFalse(l.onlineHomeSubtitle(quiet, connection: .connected).contains("기술"))
     }
 
     func testAnotherBattlesForcedTurnDoesNotHideMine() {

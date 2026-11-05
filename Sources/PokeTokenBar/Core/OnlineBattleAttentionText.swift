@@ -151,14 +151,14 @@ extension L {
     }
 
     /// One line under "Online battle" on the home screen.
-    /// `connectionStatus` is the presentation's connection line; only its connected and reconnecting wording is read here.
-    func onlineHomeSubtitle(_ input: OnlineAttentionInput, connectionStatus: String) -> String {
+    /// `polling` is not "reconnecting" here: on a network that blocks the socket it can last, and the HTTP read still brings news worth showing.
+    func onlineHomeSubtitle(_ input: OnlineAttentionInput, connection: OnlineBattleConnectionState?) -> String {
         guard let me = input.localTrainerID else {
             return online("동료와 겨루기 · 아직 가입 안 함", "Battle your group · Not joined yet")
         }
         if input.recoveryCodeShowing { return online("복구코드를 저장해 주세요", "Save your recovery code") }
         if input.hostCodeShowing { return online("복사하지 않은 코드가 있어요", "A code is waiting to be copied") }
-        if Self.onlineReconnectingStatuses.contains(connectionStatus) { return online("다시 연결하는 중", "Reconnecting") }
+        if connection == .connecting || connection == .retryWaiting { return online("다시 연결하는 중", "Reconnecting") }
         let active = OnlineAttentionCalculator.active(input)
         if let current = active.first {
             guard current.kind == .incomingChallenge || current.kind == .rematchRequested else {
@@ -169,7 +169,7 @@ extension L {
         }
         if input.hasOngoingRoom { return online("진행 중인 대전이 있어요", "A battle is in progress") }
         if let waiting = onlineWaitingLine(input, me: me) { return waiting }
-        return connectionStatus == Self.onlineConnectedStatus
+        return connection == .connected
             ? online("동료와 겨루기 · 접속 중", "Battle your group · Online")
             : online("동료와 겨루기", "Battle your group")
     }
@@ -189,7 +189,21 @@ extension L {
             : online("\(name)님의 응답 대기 중", "Waiting for \(name)")
     }
 
-    /// The wording OnlineBattleSession puts on `connectionStatus` for the connected and the not-yet-connected states.
-    static let onlineConnectedStatus = "접속 중"
-    static let onlineReconnectingStatuses: Set<String> = ["연결 중", "다시 연결할 때까지 기다리고 있어요"]
+    /// The line at the top of the online screen. Nil before anything has been reported.
+    func onlineConnectionLine(_ status: OnlineConnectionStatus) -> String? {
+        switch status {
+        case .unknown: nil
+        case .accessOff: "키체인 접근이 꺼져 있어요"
+        case .accessStopped: "키체인 접근이 꺼져 있어 온라인 배틀을 중단했어요"
+        case .connection(.unconfigured): "서버 주소를 설정해 주세요"
+        case .connection(.credentialsRequired): "접속 정보가 필요해요"
+        case .connection(.connecting): "연결 중"
+        case .connection(.connected): "접속 중"
+        case .connection(.retryWaiting): "다시 연결할 때까지 기다리고 있어요"
+        case .connection(.polling): "화면을 열 때 경기 정보를 확인해요"
+        case .connection(.replaced): "다른 기기에서 연결했어요. 다시 열면 연결해요"
+        case .connection(.revoked): "접속키가 만료되었어요. 복구코드로 다시 연결해 주세요"
+        case .connection(.protocolError): "서버와 앱 버전을 확인해 주세요"
+        }
+    }
 }

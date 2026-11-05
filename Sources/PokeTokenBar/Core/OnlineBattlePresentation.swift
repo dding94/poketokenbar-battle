@@ -1,13 +1,26 @@
 import Foundation
 import Observation
 
+/// What the connection line is about. Never a display string: the wording lives in `L.onlineConnectionLine`.
+enum OnlineConnectionStatus: Equatable, Sendable {
+    /// Nothing has been reported yet.
+    case unknown
+    /// Keychain access is off, before or after a session started.
+    case accessOff, accessStopped
+    case connection(OnlineBattleConnectionState)
+}
+
 /// App-lifetime UI state. The session owns I/O, credentials, clocks and deterministic replay.
 @MainActor
 @Observable
 final class OnlineBattlePresentation {
     enum Phase { case setup, lobby, room, arena, verifying, result }
     var phase: Phase = .setup
-    var connectionStatus = ""
+    var connectionStatus: OnlineConnectionStatus = .unknown
+    var connectionState: OnlineBattleConnectionState? {
+        if case .connection(let state) = connectionStatus { return state }
+        return nil
+    }
     var notice: String?
     /// True while the popover ignores outside clicks (entry, waiting and battle steps). Written by the app delegate.
     var popoverPinned = false
@@ -158,7 +171,7 @@ final class OnlineBattlePresentation {
         guard choiceSubmitted else { return nil }
         let foe = localSide == .p1 ? room.p2.trainerId : room.p1.trainerId
         guard members.first(where: { $0.trainerId == foe })?.online == false else { return .choosing }
-        return connectionStatus == L.onlineConnectedStatus ? .offline : .offlineMaybe
+        return connectionState == .connected ? .offline : .offlineMaybe
     }
     /// The slot of my choice in this round: the server's own record once it is in the room, else my click.
     var chosenSlot: Int? {

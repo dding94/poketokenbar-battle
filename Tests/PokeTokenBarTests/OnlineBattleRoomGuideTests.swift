@@ -111,6 +111,34 @@ final class OnlineBattleRoomGuideTests: XCTestCase {
         model.selectedEntryID = "synthetic-pikachu"; model.isBusy = true
         XCTAssertEqual(model.acceptBlock, .busy)
     }
+    /// Each state without a live socket asks something different of the person, so none borrows "connecting".
+    func testPrepareBlockSaysWhyThereIsNoSocket() {
+        let expected: [(OnlineConnectionStatus, OnlineActionBlock)] = [
+            (.unknown, .connecting), (.connection(.connecting), .connecting),
+            (.connection(.retryWaiting), .reconnecting), (.connection(.polling), .reconnecting),
+            (.connection(.replaced), .replaced), (.connection(.protocolError), .versionMismatch),
+            (.connection(.unconfigured), .signInNeeded), (.connection(.credentialsRequired), .signInNeeded),
+            (.connection(.revoked), .signInNeeded), (.accessOff, .signInNeeded), (.accessStopped, .signInNeeded),
+        ]
+        for (status, block) in expected {
+            let model = challenger(.accepted, confirmed: true)
+            model.canStart = false; model.connectionStatus = status
+            XCTAssertEqual(model.prepareBlock, block, "\(status)")
+            model.canStart = true
+            XCTAssertNil(model.prepareBlock, "\(status)")
+        }
+    }
+    func testTheReplacedAndVersionLinesDoNotClaimToBeConnecting() {
+        for l in [L(.ko), L(.en)] {
+            let connecting = l.onlineActionBlock(.connecting)
+            for block in [OnlineActionBlock.reconnecting, .replaced, .versionMismatch, .signInNeeded] {
+                XCTAssertNotEqual(l.onlineActionBlock(block), connecting, "\(block)")
+            }
+        }
+        XCTAssertFalse(L(.ko).onlineActionBlock(.replaced).contains("연결하는 중"))
+        XCTAssertFalse(L(.ko).onlineActionBlock(.versionMismatch).contains("연결"))
+        XCTAssertFalse(L(.en).onlineActionBlock(.replaced).contains("Connecting"))
+    }
     func testPrepareBlockShowsConnectingUntilTheSocketHelloArrives() {
         let model = challenger(.accepted, confirmed: true)
         XCTAssertNil(model.prepareBlock)
@@ -187,7 +215,7 @@ final class OnlineBattleRoomGuideTests: XCTestCase {
                     XCTAssertFalse(text.contains(promise), "\(text) promises delivery")
                 }
             }
-            for block in [OnlineActionBlock.busy, .noOpponent, .noEntry, .fainted, .held, .entryUnavailable, .connecting] {
+            for block in OnlineActionBlock.allKnown {
                 XCTAssertFalse(l.onlineActionBlock(block).isEmpty, "\(block)")
             }
             XCTAssertFalse(l.onlineOwnReady.isEmpty)
@@ -224,5 +252,6 @@ final class OnlineBattleRoomGuideTests: XCTestCase {
 }
 
 private extension OnlineActionBlock {
-    static let allKnown: [OnlineActionBlock] = [.busy, .noOpponent, .noEntry, .fainted, .held, .entryUnavailable, .connecting]
+    static let allKnown: [OnlineActionBlock] = [.busy, .noOpponent, .noEntry, .fainted, .held, .entryUnavailable,
+                                                .connecting, .reconnecting, .replaced, .versionMismatch, .signInNeeded]
 }

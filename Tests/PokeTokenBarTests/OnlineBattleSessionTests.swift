@@ -74,6 +74,8 @@ private actor SessionConnection: OnlineBattleConnecting {
     func setConnection(_ value: OnlineBattleConnectionState, id: String?) { state = value; connectionID = id }
     func configure(origin: OnlineBattleOrigin?, accessKey: String?) { configurationCount += 1 }
     func setPopoverOpen(_ open: Bool) {}
+    private(set) var hints: [OnlineBattleReconnectReason] = []
+    func reconnectHint(_ reason: OnlineBattleReconnectReason) { hints.append(reason) }
     func snapshot() -> OnlineBattleConnectionSnapshot { .init(state: state, generation: 1, connectionId: connectionID, trainerId: trainer, groupId: "group") }
     func authenticationFailed(generation: UInt64) {}
     private var pauseStop = false
@@ -2443,7 +2445,34 @@ final class OnlineBattleSessionTests: XCTestCase {
         await observer.callback?(.changed(await connection.snapshot()))
         XCTAssertEqual(session.preparedBattleIDs(), [accepted.battleId], "A socket blip is no reason to notify; the press is sent again on hello")
         XCTAssertFalse(session.presentation.localReady)
-        XCTAssertEqual(session.presentation.prepareBlock, .connecting)
+        XCTAssertEqual(session.presentation.prepareBlock, .reconnecting)
+    }
+    func testAReconnectHintReachesTheConnectionOnlyWithAnAccount() async throws {
+        let connection = SessionConnection(), observer = SessionObserver()
+        let (session, _, _, _) = try await setup([], connection: connection, observer: observer)
+        await session.reconnectHint(.wake)
+        var hints = await connection.hints; XCTAssertEqual(hints, [])
+        await session.bootstrap()
+        await session.reconnectHint(.network)
+        hints = await connection.hints; XCTAssertEqual(hints, [.network])
+        await connection.setState(.revoked)
+        await observer.callback?(.changed(await connection.snapshot()))
+        await session.reconnectHint(.wake)
+        hints = await connection.hints; XCTAssertEqual(hints, [.network], "A revoked key has nothing to reconnect")
+    }
+    func testEveryConnectionStateReachesThePresentationAsAType() async throws {
+        let connection = SessionConnection(), observer = SessionObserver()
+        let (session, _, _, _) = try await setup([], connection: connection, observer: observer)
+        await session.bootstrap()
+        for state in [OnlineBattleConnectionState.unconfigured, .credentialsRequired, .connecting, .connected, .retryWaiting, .polling, .replaced, .protocolError] {
+            await connection.setState(state)
+            await observer.callback?(.changed(await connection.snapshot()))
+            XCTAssertEqual(session.presentation.connectionStatus, .connection(state))
+            XCTAssertEqual(session.presentation.connectionState, state)
+        }
+        await connection.setState(.revoked)
+        await observer.callback?(.changed(await connection.snapshot()))
+        XCTAssertEqual(session.presentation.connectionState, .revoked)
     }
     func testPressedRoomOffScreenStaysOutOfTheMark() async throws {
         let accepted = try confirmedRoom()

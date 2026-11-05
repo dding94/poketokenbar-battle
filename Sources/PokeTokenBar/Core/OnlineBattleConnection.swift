@@ -10,6 +10,8 @@ struct OnlineBattleConnectionSnapshot: Equatable, Sendable {
     let trainerId: String?
     let groupId: String?
 }
+/// Why the Mac may have a usable network again. Only said in the transition log.
+enum OnlineBattleReconnectReason: String, Sendable { case wake, network }
 enum OnlineBattleConnectionEvent: Sendable {
     case changed(OnlineBattleConnectionSnapshot)
     /// Account changes and reconnects reconcile through authoritative HTTP reads.
@@ -38,6 +40,7 @@ struct OnlineBattleConnectionClock: Sendable {
 protocol OnlineBattleConnecting: Sendable {
     func configure(origin: OnlineBattleOrigin?, accessKey: String?) async
     func setPopoverOpen(_ open: Bool) async
+    func reconnectHint(_ reason: OnlineBattleReconnectReason) async
     func snapshot() async -> OnlineBattleConnectionSnapshot
     func authenticationFailed(generation: UInt64) async
     func stop() async
@@ -50,6 +53,7 @@ actor OnlineBattleConnection: OnlineBattleConnecting {
     private let jitter: @Sendable (TimeInterval) -> TimeInterval
     private let automaticTicks: Bool
     private let observer: Observer
+    private let log: @Sendable (String) -> Void
     private var state: OnlineBattleConnectionState = .unconfigured
     private var generation: UInt64 = 0
     private var origin: OnlineBattleOrigin?
@@ -70,8 +74,9 @@ actor OnlineBattleConnection: OnlineBattleConnecting {
     init(driver: any OnlineBattleSocketDriver = OnlineBattleURLSessionSocketDriver(),
          clock: OnlineBattleConnectionClock = .init(),
          jitter: @escaping @Sendable (TimeInterval) -> TimeInterval = { Double.random(in: 0...$0) },
-         automaticTicks: Bool = true, observer: @escaping Observer = { _ in }) {
-        self.driver = driver; self.clock = clock; self.jitter = jitter; self.automaticTicks = automaticTicks; self.observer = observer
+         automaticTicks: Bool = true, observer: @escaping Observer = { _ in },
+         log: @escaping @Sendable (String) -> Void = { AppLog.write($0) }) {
+        self.driver = driver; self.clock = clock; self.jitter = jitter; self.automaticTicks = automaticTicks; self.log = log; self.observer = observer
     }
     func snapshot() -> OnlineBattleConnectionSnapshot {
         .init(state: state, generation: generation, connectionId: connectionId, trainerId: trainerId, groupId: groupId)
@@ -93,6 +98,7 @@ actor OnlineBattleConnection: OnlineBattleConnecting {
         }
         if !open { nextPoll = nil }
     }
+    func reconnectHint(_ reason: OnlineBattleReconnectReason) async {}
     func authenticationFailed(generation epoch: UInt64) async {
         guard epoch == generation else { return }
         await terminate(.revoked)

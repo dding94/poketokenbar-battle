@@ -34,18 +34,18 @@ final class OnlineEntryRowRenderingTests: XCTestCase {
         let l = L(.ko)
         let without = try render(nil, named: "T03-home-row-no-subtitle.png")
         let states: [(String, String)] = [
-            ("not-joined", l.onlineHomeSubtitle(Self.input(joined: false), connectionStatus: "")),
-            ("online-idle", l.onlineHomeSubtitle(Self.input(joined: true), connectionStatus: "접속 중")),
-            ("request-received", l.onlineHomeSubtitle(Self.input(joined: true, incoming: 1), connectionStatus: "접속 중")),
-            ("requests-received-2", l.onlineHomeSubtitle(Self.input(joined: true, incoming: 2), connectionStatus: "접속 중")),
-            ("waiting", l.onlineHomeSubtitle(Self.input(joined: true, outgoing: 1), connectionStatus: "접속 중")),
-            ("reconnecting", l.onlineHomeSubtitle(Self.input(joined: true), connectionStatus: "연결 중")),
+            ("not-joined", l.onlineHomeSubtitle(Self.input(joined: false), connection: nil)),
+            ("online-idle", l.onlineHomeSubtitle(Self.input(joined: true), connection: .connected)),
+            ("request-received", l.onlineHomeSubtitle(Self.input(joined: true, incoming: 1), connection: .connected)),
+            ("requests-received-2", l.onlineHomeSubtitle(Self.input(joined: true, incoming: 2), connection: .connected)),
+            ("waiting", l.onlineHomeSubtitle(Self.input(joined: true, outgoing: 1), connection: .connected)),
+            ("reconnecting", l.onlineHomeSubtitle(Self.input(joined: true), connection: .connecting)),
         ]
         for (name, subtitle) in states {
             let height = try render(subtitle, named: "T03-home-row-\(name).png")
             XCTAssertGreaterThan(height, without, "\(name): the subtitle line makes the row taller")
         }
-        _ = try render(l.onlineHomeSubtitle(Self.input(joined: true, incoming: 1), connectionStatus: "접속 중"), scheme: .dark,
+        _ = try render(l.onlineHomeSubtitle(Self.input(joined: true, incoming: 1), connection: .connected), scheme: .dark,
                        named: "T03-home-row-request-received-dark.png")
         let long = try render(String(repeating: "아주 긴 부제 ", count: 20), named: "T03-home-row-long-subtitle.png")
         let one = try render("한 줄", named: "T03-home-row-one-line-check.png")

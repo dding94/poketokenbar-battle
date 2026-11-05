@@ -13,7 +13,7 @@ final class OnlineAttentionSourceTests: XCTestCase {
                      config: nil, roundSeq: 1, deadline: seconds.map { (Self.now.timeIntervalSince1970 + $0) * 1000 }, ownChoice: nil,
                      journal: [], result: nil, reason: nil, rematchOf: nil)
     }
-    private func source(_ battles: [OnlineBattleView], prepared: Set<String> = [], status: String = "접속 중") -> OnlineAttentionSource {
+    private func source(_ battles: [OnlineBattleView], prepared: Set<String> = [], status: OnlineConnectionStatus = .connection(.connected)) -> OnlineAttentionSource {
         let model = OnlineBattlePresentation()
         model.account = .init(trainer: .init(trainerId: "synthetic-me", displayEmail: "나래", role: .member, status: .active),
                               group: .init(groupId: "synthetic-group", name: "동료들", hostTrainerId: "synthetic-foe"))
@@ -33,7 +33,7 @@ final class OnlineAttentionSourceTests: XCTestCase {
     }
 
     func testTheSubtitleReadsTheConnectionStatusOfThePresentation() {
-        XCTAssertEqual(source([], status: "연결 중").homeSubtitle(l: L(.ko), now: Self.now), "다시 연결하는 중")
+        XCTAssertEqual(source([], status: .connection(.connecting)).homeSubtitle(l: L(.ko), now: Self.now), "다시 연결하는 중")
     }
 
     func testNextMarkChangeIsTheUrgentBoundaryThenTheDeadline() {

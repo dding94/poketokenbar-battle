@@ -33,7 +33,7 @@ final class OnlineAttentionSource {
     func openRoute(now: Date = Date()) -> OnlineOpenRoute? { OnlinePopoverPinning.openRoute(input(now: now)) }
 
     func menuMark(l: L, now: Date = Date()) -> OnlineMenuMark? { l.onlineMenuMark(input(now: now)) }
-    func homeSubtitle(l: L, now: Date = Date()) -> String { l.onlineHomeSubtitle(input(now: now), connectionStatus: presentation.connectionStatus) }
+    func homeSubtitle(l: L, now: Date = Date()) -> String { l.onlineHomeSubtitle(input(now: now), connection: presentation.connectionState) }
 
     /// The next moment the mark can change without any presentation change: a myTurn crossing ten seconds, then its deadline.
     func nextMarkChange(now: Date = Date()) -> Date? {

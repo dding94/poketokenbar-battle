@@ -149,7 +149,7 @@ final class OnlineBattleSession {
         presentation.room = nil; presentation.arena = nil; presentation.request = nil
         presentation.recoveryCode = nil; presentation.result = nil; presentation.canRetryCredentialSave = false
         presentation.canStart = false; presentation.isBusy = false; presentation.phase = .setup; presentation.restoringAccount = false
-        presentation.connectionStatus = "키체인 접근이 꺼져 있어 온라인 배틀을 중단했어요"
+        presentation.connectionStatus = .accessStopped
         await oldAPI?.setAccessKey(nil)
         await old?.stop()
     }
@@ -159,8 +159,10 @@ final class OnlineBattleSession {
         if refreshTask != nil { refreshAgain = true; requestStandingsRefresh() }
         else { Task { [weak self] in await self?.refresh() } }
     }
+    /// The Mac woke or got its network back. Without an account there is no socket to bring back.
+    func reconnectHint(_ reason: OnlineBattleReconnectReason) async {}
     func bootstrap() async {
-        guard onlineAllowed else { presentation.connectionStatus = "키체인 접근이 꺼져 있어요"; return }
+        guard onlineAllowed else { presentation.connectionStatus = .accessOff; return }
         guard !bootstrapped else { return }
         bootstrapped = true
         let epoch = generation
@@ -173,7 +175,7 @@ final class OnlineBattleSession {
             presentation.restoringAccount = true
             let key = try await credentials.load(scope: .init(profileID: settings.profileID, origin: origin))
             try current(epoch)
-            guard let key else { presentation.restoringAccount = false; presentation.connectionStatus = "접속 정보가 필요해요"; return }
+            guard let key else { presentation.restoringAccount = false; presentation.connectionStatus = .connection(.credentialsRequired); return }
             try await activate(key, epoch: epoch)
             await refresh()
         } catch {
@@ -236,18 +238,8 @@ final class OnlineBattleSession {
         case .changed(let snapshot):
             guard let connection, snapshot == (await connection.snapshot()), epoch == generation else { return }
             noteConnection(snapshot)
-            switch snapshot.state {
-            case .unconfigured: presentation.connectionStatus = "서버 주소를 설정해 주세요"
-            case .credentialsRequired: presentation.connectionStatus = "접속 정보가 필요해요"
-            case .connecting: presentation.connectionStatus = "연결 중"
-            case .connected: presentation.connectionStatus = "접속 중"
-            case .retryWaiting: presentation.connectionStatus = "다시 연결할 때까지 기다리고 있어요"
-            case .polling: presentation.connectionStatus = "화면을 열 때 경기 정보를 확인해요"
-            case .replaced: presentation.connectionStatus = "다른 기기에서 연결했어요. 다시 열면 연결해요"
-            case .revoked:
-                await revoke(epoch: epoch); return
-            case .protocolError: presentation.connectionStatus = "서버와 앱 버전을 확인해 주세요"
-            }
+            if snapshot.state == .revoked { await revoke(epoch: epoch); return }
+            presentation.connectionStatus = .connection(snapshot.state)
         case .refreshRequested:
             requestRefresh()
         case .standingsRefreshRequested:
@@ -1253,7 +1245,7 @@ final class OnlineBattleSession {
         presentation.canStart = false; presentation.phase = .setup; presentation.account = nil; presentation.restoringAccount = false
         resetBattleRuntime(); resetExtras(); clearHistory(); historyViews = [:]; presentation.battles = []; presentation.liveLogs = []
         dropStagings()
-        presentation.connectionStatus = "접속키가 만료되었어요. 복구코드로 다시 연결해 주세요"
+        presentation.connectionStatus = .connection(.revoked)
         ticker?.cancel(); ticker = nil
         await api?.setAccessKey(nil)
     }

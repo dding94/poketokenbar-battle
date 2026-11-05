@@ -58,6 +58,9 @@ final class OnlineBattleRoomGuideRenderingTests: XCTestCase {
         .init(name: "challenger-3b-ready-pressed") { challenger($0, state: .accepted, confirmed: true); $0.localReady = true },
         .init(name: "challenger-4b-both-ready-pressed") { challenger($0, state: .ready, confirmed: true); $0.localReady = true },
         .init(name: "challenger-3c-connecting") { challenger($0, state: .accepted, confirmed: true); $0.canStart = false },
+        .init(name: "challenger-3d-reconnecting") { offline($0, .polling) },
+        .init(name: "challenger-3e-replaced") { offline($0, .replaced) },
+        .init(name: "challenger-3f-version-mismatch") { offline($0, .protocolError) },
         .init(name: "receiver-1b-pending-fainted-entry") { receiver($0, state: .pending); $0.entryHP["synthetic-pikachu"] = 0 },
         .init(name: "receiver-3b-ready-pressed-long-nickname") {
             receiver($0, state: .accepted, confirmed: true); named($0, longNickname); $0.localReady = true
@@ -75,7 +78,12 @@ final class OnlineBattleRoomGuideRenderingTests: XCTestCase {
     static let allScenarios = baseScenarios
 #endif
     /// Scenarios also captured through the real 520pt scroll viewport, to show what is above the fold.
-    static let viewportScenarios: Set<String> = ["challenger-1-pending", "challenger-3-confirmed", "receiver-1-pending", "receiver-3-confirmed"]
+    static let viewportScenarios: Set<String> = ["challenger-1-pending", "challenger-3-confirmed", "receiver-1-pending", "receiver-3-confirmed",
+                                                 "challenger-3d-reconnecting", "challenger-3e-replaced", "challenger-3f-version-mismatch"]
+    static func offline(_ model: OnlineBattlePresentation, _ state: OnlineBattleConnectionState) {
+        challenger(model, state: .accepted, confirmed: true)
+        model.canStart = false; model.connectionStatus = .connection(state)
+    }
 
     private func publish(_ bitmapData: Data, _ name: String) throws {
         guard let path = ProcessInfo.processInfo.environment["PTB_SNAPSHOT_SCREENSHOT_DIR"] else { return }
@@ -129,6 +137,10 @@ final class OnlineBattleRoomGuideRenderingTests: XCTestCase {
             try await capture(OnlineBattleScreen(model: model, l: l, artwork: false, readInvitationClipboard: { nil },
                                                  speciesNameProvider: provider, speciesNameStore: names, onClose: {}),
                               named: "viewport-" + scenario.name)
+            guard model.connectionState != nil else { continue }
+            try await capture(OnlineBattleScreen(model: model, l: L(.en), artwork: false, readInvitationClipboard: { nil },
+                                                 speciesNameProvider: provider, speciesNameStore: names, onClose: {}),
+                              named: "viewport-en-" + scenario.name)
         }
     }
 }

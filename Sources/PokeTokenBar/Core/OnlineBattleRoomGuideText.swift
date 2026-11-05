@@ -43,6 +43,11 @@ extension L {
         case .held: online("이 포켓몬은 다른 정식전에 출전 중이에요", "This Pokémon is entered in another battle")
         case .entryUnavailable: online("이 포켓몬은 지금 출전할 수 없어요", "This Pokémon can't enter right now")
         case .connecting: online("서버에 연결하는 중…", "Connecting to the server…")
+        case .reconnecting: online("서버에 다시 연결하는 중…", "Reconnecting to the server…")
+        case .replaced: online("다른 기기에서 접속 중이에요. 팝오버를 닫았다가 다시 열면 여기로 연결해요",
+                               "Connected from another device. Close and reopen this window to connect here")
+        case .versionMismatch: online("서버와 앱 버전을 확인해 주세요", "Check the app and server versions")
+        case .signInNeeded: online("접속 정보가 필요해요", "Sign-in details are needed")
         }
     }
     func onlineRoomVersus(_ opponent: String?) -> String {

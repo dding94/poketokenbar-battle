@@ -81,7 +81,7 @@ final class OnlineBattleEndedNoticeRenderingTests: XCTestCase {
         let verifying = Fixture.model(); verifying.phase = .verifying; verifying.room = room(.reported)
         try await capture(screen(verifying), named: "verifying-auto-refresh")
         let restoring = Fixture.model(); restoring.account = nil; restoring.phase = .setup; restoring.restoringAccount = true
-        restoring.connectionStatus = "다시 연결할 때까지 기다리고 있어요"
+        restoring.connectionStatus = .connection(.retryWaiting)
         try await capture(screen(restoring), named: "saved-account-offline-waits")
     }
 }

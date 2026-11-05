@@ -249,10 +249,8 @@ extension OnlineBattlePresentationTests {
 // MARK: T15 waiting on the opponent
 
 extension OnlineBattlePresentationTests {
-    private static let polling = "화면을 열 때 경기 정보를 확인해요"
-
     /// A manual round in which my own choice is in and the foe's presence is `online`.
-    private func waiting(online: Bool = true, status: String = L.onlineConnectedStatus, submitted: Bool = true) -> OnlineBattlePresentation {
+    private func waiting(online: Bool = true, status: OnlineConnectionStatus = .connection(.connected), submitted: Bool = true) -> OnlineBattlePresentation {
         let model = OnlineBattleScreenRenderingTests.model(); OnlineBattleScreenRenderingTests.arena(model)
         model.members = [.init(trainerId: "synthetic-foe", displayEmail: "연습친구", role: .host, status: .active, joinedAt: 0, online: online)]
         model.connectionStatus = status
@@ -267,11 +265,19 @@ extension OnlineBattlePresentationTests {
 
     /// While the socket is down presence is not refreshed, so an offline flag may be old: it is only a maybe.
     func testAnOfflineFlagFromAStalePresenceIsNeverStatedAsFact() {
-        XCTAssertEqual(waiting(online: false, status: Self.polling).opponentWait, .offlineMaybe)
-        XCTAssertEqual(waiting(online: false, status: "연결 중").opponentWait, .offlineMaybe)
-        XCTAssertEqual(waiting(online: false, status: "").opponentWait, .offlineMaybe)
+        XCTAssertEqual(waiting(online: false, status: .connection(.polling)).opponentWait, .offlineMaybe)
+        XCTAssertEqual(waiting(online: false, status: .connection(.connecting)).opponentWait, .offlineMaybe)
+        XCTAssertEqual(waiting(online: false, status: .unknown).opponentWait, .offlineMaybe)
         // An old "online" proves nothing either way, so it keeps the neutral line.
-        XCTAssertEqual(waiting(online: true, status: Self.polling).opponentWait, .choosing)
+        XCTAssertEqual(waiting(online: true, status: .connection(.polling)).opponentWait, .choosing)
+    }
+
+    func testOnlyALiveSocketMakesAnOfflineFlagAFact() {
+        for state in [OnlineBattleConnectionState.unconfigured, .credentialsRequired, .connecting, .retryWaiting, .polling, .replaced, .revoked, .protocolError] {
+            XCTAssertEqual(waiting(online: false, status: .connection(state)).opponentWait, .offlineMaybe, "\(state)")
+        }
+        XCTAssertEqual(waiting(online: false, status: .accessOff).opponentWait, .offlineMaybe)
+        XCTAssertEqual(waiting(online: false, status: .connection(.connected)).opponentWait, .offline)
     }
 
     func testTheOpponentIsTheOtherSeatNotAlwaysThePlayerTwo() {

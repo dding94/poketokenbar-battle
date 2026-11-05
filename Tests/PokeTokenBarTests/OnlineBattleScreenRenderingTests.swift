@@ -524,7 +524,7 @@ final class OnlineBattleScreenRenderingTests: XCTestCase {
         model.moveSlugs[.p2] = ["hyperbeam": "hyper-beam", "earthquake": "earthquake", "flamethrower": "flamethrower", "thunderwave": "thunder-wave"]
         model.abilitySlugs[.p2] = ["intimidate": "intimidate"]
         let foeID = model.room.map { $0.p2.trainerId } ?? ""
-        for (online, status, needle) in [(false, L.onlineConnectedStatus, "disconnected"), (false, "", "offline")] {
+        for (online, status, needle) in [(false, OnlineConnectionStatus.connection(.connected), "disconnected"), (false, .unknown, "offline")] {
             model.members = [.init(trainerId: foeID, displayEmail: "foe", role: .member, status: .active, joinedAt: 0, online: online)]
             model.connectionStatus = status
             try await settleHost(host)
@@ -585,7 +585,7 @@ final class OnlineBattleScreenRenderingTests: XCTestCase {
             model.room = try JSONDecoder().decode(OnlineBattleView.self, from: JSONSerialization.data(withJSONObject: json))
         }
         try fixture.play(rounds: 2); fixture.staging.skipToEnd(); fixture.publish()
-        presence(true); model.connectionStatus = L.onlineConnectedStatus
+        presence(true); model.connectionStatus = .connection(.connected)
         let host = await host(model)
         var shots: [Data] = []
         func shot(_ name: String) async throws { shots.append(try await capture(host, named: name)) }
@@ -594,9 +594,9 @@ final class OnlineBattleScreenRenderingTests: XCTestCase {
         try await shot("t15-01-opponent-choosing.png")
         presence(false); try await settle(host)
         try await shot("t15-02-opponent-disconnected.png")
-        model.connectionStatus = "화면을 열 때 경기 정보를 확인해요"; try await settle(host)
+        model.connectionStatus = .connection(.polling); try await settle(host)
         try await shot("t15-03-opponent-maybe-offline.png")
-        model.connectionStatus = L.onlineConnectedStatus; presence(true)
+        model.connectionStatus = .connection(.connected); presence(true)
         model.choiceSubmitted = false; try flagged(true); try await settle(host)
         try await shot("t15-04-opponent-chosen-before-mine.png")
         model.send(.chooseMove(2)); try await settle(host)
