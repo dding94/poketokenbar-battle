@@ -1661,3 +1661,5 @@ read_when:
 - **신호가 도착한 순간의 상태만 보면 진행 중인 시도가 신호를 삼킨다.** 복귀 힌트를 polling과 retryWaiting에서만 처리하면, 네트워크가 돌아온 순간 마지막 시도가 진행 중일 때 그 실패가 세 번째로 세어져 120초를 쉰다. connecting에서는 새로 연결하지 않고 실패 횟수만 지운다.
 - **닫힌 상태에서 미룬 읽기는 다른 읽기가 대신한 것도 알아야 한다.** presence 표시를 열 때 갱신하는 조건으로만 쓰면 hello나 group_changed가 이미 읽은 뒤에도 한 번 더 읽는다. 모든 읽기 요청을 `requestRefresh` 하나로 지나게 해 표시를 함께 지운다.
 - **스윕 결과.** `grep -rnE 'connectionStatus|onlineConnectedStatus|onlineReconnectingStatuses|"접속 중"|"연결 중"' Sources`에서 `connectionStatus`의 읽기는 화면 줄(`L` 경유), `connectionState`, `connectionBlock`뿐이고 문자열 비교는 없다.
+
+- **글자 인식(OCR) 단언은 OS마다 다른 결과를 낸다.** T17 렌더링 테스트가 주황 배지의 흰 글자 `×2`를 OCR로 읽도록 단언해 로컬 macOS 27에서는 통과하고 CI의 macOS 15에서는 실패했다. CI가 올린 렌더 이미지에는 배지가 제대로 그려져 있어 앱 결함이 아니었다. 대비가 낮은 작은 배지는 OCR로 단언하지 않고, 카드에 전달된 데이터로 단언한다. 실패하면 먼저 `screen-renders-*` 아티팩트로 실제 화면을 본다.

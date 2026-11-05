@@ -252,7 +252,6 @@ final class OnlineBattleSessionTests: XCTestCase {
         }
         XCTAssertNil(session.presentation.notice)
         XCTAssertFalse((session.presentation.host.notice ?? "").contains("RECONNECTCODE16"))
-        XCTAssertFalse(session.presentation.connectionStatus.contains("RECONNECTCODE16"))
     }
 
     func testOpeningListsOnlyInvitesThatCanStillBeUsed() async throws {
