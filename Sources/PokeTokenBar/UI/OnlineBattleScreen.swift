@@ -83,7 +83,10 @@ struct OnlineBattleScreen: View {
         HStack(spacing: 6) {
             if model.isBusy { ProgressView().controlSize(.small) }
             if showsHostEntry {
-                Button { model.send(.host(.open)) } label: { Image(systemName: "person.2.badge.gearshape") }
+                // Spelled out: this is how a host recognizes the host role, and an icon alone did not say so.
+                Button { model.send(.host(.open)) } label: {
+                    Label(l.onlineHostOpen, systemImage: "person.2.badge.gearshape").font(.caption).lineLimit(1)
+                }
                     .buttonStyle(.borderless).disabled(!model.canOpenHostPanel)
                     .help(l.onlineHostOpen).accessibilityLabel(l.onlineHostOpen)
                     .accessibilityIdentifier("online.host.open")
