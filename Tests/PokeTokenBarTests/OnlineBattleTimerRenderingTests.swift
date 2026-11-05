@@ -171,8 +171,7 @@ final class OnlineBattleTimerRenderingTests: XCTestCase {
                                                       finalHp: .init(p1: 1, p2: 0)),
                                         reason: nil, rematchOf: nil)
             }
-            model.standings = .init(groupId: "g", championTrainerId: nil, rows: [
-                .init(trainerId: foeID, displayName: "x", wins: 99, losses: 0, draws: 0, streak: 12, bestStreak: 99, winRate: 1)])
+            model.opponentStreaks = [try XCTUnwrap(model.room?.battleId): 12]
             let seen = try XCTUnwrap(model.arena), foe = seen.p2
             model.arena = BattleView(turn: seen.turn, ended: false, p1: seen.p1,
                                      p2: .init(speciesNum: foe.speciesNum, species: foe.species, level: foe.level, types: foe.types, hp: foe.hp,
@@ -286,8 +285,7 @@ final class OnlineBattleTimerRenderingTests: XCTestCase {
                                                       journalHash: "j", finalHp: .init(p1: 1, p2: 0)),
                                         reason: nil, rematchOf: nil)
             }
-            model.standings = .init(groupId: "g", championTrainerId: nil, rows: [
-                .init(trainerId: foeID, displayName: "x", wins: 5, losses: 0, draws: 0, streak: 3, bestStreak: 5, winRate: 1)])
+            model.opponentStreaks = [try XCTUnwrap(model.room?.battleId): 3]
             model.deadline = Date().addingTimeInterval(29.5)
             let host = await screenHost(model, lang)
             try keep(host, as: "t18-splash-\(tag).png")
@@ -305,6 +303,51 @@ final class OnlineBattleTimerRenderingTests: XCTestCase {
             model.deadline = Date().addingTimeInterval(21.5)
             await settle(host, milliseconds: 1_300)
             try keep(host, as: "t18-playing-\(tag).png")
+        }
+    }
+}
+
+// MARK: - Review C, F4: the gap between rounds, a forced turn and the last round's beats on the board
+
+extension OnlineBattleTimerRenderingTests {
+    /// Each state stays inside the fixed board in both languages, and the prompt tells the gap from a kept move. The last
+    /// round's picker is the same grid as any other round's while it plays.
+    func testTheGapAForcedTurnAndTheLastBeatsStayInsideTheBoard() async throws {
+        for (lang, tag) in [(AppLanguage.ko, "ko"), (.en, "en")] {
+            for keeping in [false, true] {
+                let fixture = try arena(); defer { fixture.close() }
+                let model = fixture.model
+                model.opponentStreaks = [try XCTUnwrap(model.room?.battleId): 3]
+                try fixture.play(rounds: 1); fixture.staging.skipToEnd()
+                model.deadline = nil
+                let host = keeping ? await screenHost(model, lang) : await arenaHost(model, lang)
+                func check(_ name: String) async throws {
+                    await settle(host, milliseconds: 1_300)
+                    if keeping { try keep(host, as: "f4-\(name)-\(tag).png") }
+                    else { XCTAssertEqual(try inkBelowTheBoard(host), 0, "\(lang) \(name)") }
+                }
+                try await check("gap")
+                let empty = keeping ? [] : try band(host, fromPoint: 0, toPoint: footerTop)
+                model.send(.chooseMove(try XCTUnwrap(model.request?.moves.first?.slot)))
+                try await check("gap-held")
+                if !keeping { XCTAssertNotEqual(try band(host, fromPoint: 0, toPoint: footerTop), empty, "\(lang): the prompt says the move is kept") }
+                model.dropHeldChoice()
+                // The next round opened and only then is the picker the person's.
+                model.deadline = Date().addingTimeInterval(28.5)
+                try await check("open")
+                // A forced turn: the seconds run, nobody is hurried.
+                model.request = .init(kind: "forced", moves: [])
+                model.deadline = Date().addingTimeInterval(3.5)
+                try await check("forced")
+                // The last round: its beats play and the engine has already finished. The stage's speed is left alone, so
+                // it is drawn in the first beat.
+                fixture.publish()
+                model.deadline = nil
+                try fixture.play(rounds: fixture.battle.journal.count)
+                XCTAssertTrue(fixture.staging.isPlaying)
+                XCTAssertNotEqual(model.request?.kind, "move")
+                try await check("last-beats")
+            }
         }
     }
 }

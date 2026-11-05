@@ -111,6 +111,12 @@ struct OnlineBattleResultView: View {
                 Text(note).font(.caption).foregroundStyle(.secondary).lineLimit(1).minimumScaleFactor(0.8)
                     .accessibilityIdentifier("online.result.note")
             }
+            // Both seats asked at once, and my own request may be what holds the Pokémon this one needs.
+            if let mine = screen.cancelOwnRequest {
+                Button { model.send(.cancel(mine)) } label: { Text(l.onlineRematchCancelMine).frame(maxWidth: .infinity) }
+                    .buttonStyle(.bordered).disabled(model.isBusy)
+                    .accessibilityIdentifier("online.result.cancelMine")
+            }
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)

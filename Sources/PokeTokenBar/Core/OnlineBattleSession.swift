@@ -66,6 +66,8 @@ final class OnlineBattleSession {
         let readyToken: String
         let seq: Int
     }
+    /// Battles whose kept move is on its way to the server.
+    private var sendingHeld = Set<String>()
     private var advancing = Set<RoundWork>()
     private var reporting = Set<RoundWork>()
     private var fallback: [String: (work: RoundWork, due: TimeInterval)] = [:]
@@ -90,6 +92,8 @@ final class OnlineBattleSession {
     private var standingsTask: Task<Void, Never>?
     private var standingsAgain = false
     private var standingsRevision: UInt64 = 0
+    /// Matches whose other seat's streak was asked for. One read each, whether it worked or not.
+    private var opponentStreakReads = Set<String>()
     private var rematchFromHistory = false
     private var refreshTask: Task<Void, Never>?
     private var ticker: Task<Void, Never>?
@@ -363,7 +367,10 @@ final class OnlineBattleSession {
                     // relayView starts a round with no signal; a first-choice notice that outran its open notice carries it.
                     if notice.opponentSubmitted { opened.opponentSubmitted = true }
                     views[id] = opened
-                    cancelFallback(id); publish(); return
+                    cancelFallback(id); publish()
+                    // The round a kept move was waiting for. A failed send falls to the read below, which tries again.
+                    if presentation.heldChoice?.battleID == id { try await process(opened, account: account, api: api, epoch: epoch) }
+                    return
                 }
             }
             // Legacy, missing, changed, expired and terminal notifications all require HTTP proof.
@@ -594,6 +601,8 @@ final class OnlineBattleSession {
             if let previousView, previousView.opponentSubmitted == true, previousView.roundSeq == room.roundSeq,
                previousView.journal.count == room.journal.count { room.opponentSubmitted = true }
             views[room.battleId] = room
+            // A room that stopped running has no next round for a kept move.
+            if room.state != .running, presentation.heldChoice?.battleID == room.battleId { presentation.dropHeldChoice() }
             // A read that worked says nothing about a failing advance; only a room that moved does.
             if let previousView, previousView.state != room.state || previousView.roundSeq != room.roundSeq
                 || previousView.journal.count != room.journal.count { battleBackoff[room.battleId] = nil }
@@ -603,6 +612,8 @@ final class OnlineBattleSession {
             let key = try receiptKey(room, account: account)
             if [.void, .cancelled, .declined, .expired].contains(room.state) {
                 try effects.releaseOnlineBattle(key: key)
+                // No read follows on the socket path, and what this room held is free now.
+                try rebuildRoster()
                 resolvers.removeValue(forKey: room.battleId)?.close()
                 presentation.announceEnded(room, previous: previousView?.state, l: localization())
                 stagings.removeValue(forKey: room.battleId)?.skipToEnd()
@@ -612,7 +623,8 @@ final class OnlineBattleSession {
                 publish(); return
             }
             if room.state == .completed {
-                try settle(room, account: account); resolvers.removeValue(forKey: room.battleId)?.close(); publish(); return
+                // No read follows on the socket path, so the HP and the hold this settlement changed are taken here.
+                try settle(room, account: account); try rebuildRoster(); resolvers.removeValue(forKey: room.battleId)?.close(); publish(); return
             }
             if let own = side == .p1 ? room.p1.snapshot : room.p2.snapshot {
                 guard presentation.roster.contains(where: { $0.id == own.instanceId }) else { setAside(room.battleId); return }
@@ -670,6 +682,7 @@ final class OnlineBattleSession {
             }
             guard room.state == .running || room.state == .reported else { return }
             if let report = try resolver.terminalReport() {
+                if presentation.heldChoice?.battleID == room.battleId { presentation.dropHeldChoice() }
                 let reportKey = room.battleId + ":" + report.readyToken
                 if room.state == .reported, submittedReports.contains(reportKey) { return }
                 // Sending the identical deterministic report is safe after a response was lost.
@@ -686,6 +699,10 @@ final class OnlineBattleSession {
                 if room.state == .reported { views[room.battleId] = room; publish(); return }
                 continue
             }
+            if room.state == .running, room.mode == .manual, room.roundIsUnreleased, resolver.processedRoundSeq == room.journal.count {
+                guard let answer = try await sendHeldChoice(room, resolver: resolver, api: api, epoch: epoch) else { return }
+                room = answer; continue
+            }
             guard room.state == .running, resolver.processedRoundSeq == room.roundSeq, room.roundSeq > 0 else { return }
             let work = RoundWork(generation: epoch, battleID: room.battleId, readyToken: room.config!.readyToken, seq: resolver.processedRoundSeq)
             if side == .p2, fallbackWork != work { scheduleFallback(work); return }
@@ -698,6 +715,35 @@ final class OnlineBattleSession {
             room = updated
         }
         throw OnlineBattleFailure.invalidResponse
+    }
+    /// A round is open and a move was kept for it: send it there. nil when nothing went out. A refusal drops the move
+    /// and answers with a fresh read, so the screen says what happened. Any other failure keeps the move for the next read.
+    private func sendHeldChoice(_ room: OnlineBattleView, resolver: OnlineBattleResolver, api: OnlineBattleAPI, epoch: UInt64) async throws -> OnlineBattleView? {
+        guard let held = presentation.heldChoice, held.battleID == room.battleId, !sendingHeld.contains(room.battleId) else { return nil }
+        guard room.ownChoice == nil else { presentation.dropHeldChoice(); publish(); return nil }
+        let request = resolver.request
+        guard request.kind == "move", request.moves.contains(where: { $0.slot == held.slot && !$0.disabled && $0.pp > 0 }) else {
+            let l = localization()
+            let text = request.kind == "move" ? l.onlineHeldChoiceUnusable : l.onlineHeldChoiceForced
+            presentation.dropHeldChoice()
+            presentation.notice = text; presentation.stickyNotice = text
+            publish(); return nil
+        }
+        sendingHeld.insert(room.battleId)
+        defer { sendingHeld.remove(room.battleId) }
+        let answer: OnlineBattleView
+        do { answer = try await api.choose(id: room.battleId, roundSeq: room.roundSeq, slot: held.slot) }
+        catch let refused as OnlineBattleServerError where [.staleRound, .invalidState, .choiceConflict].contains(refused.code) {
+            try current(epoch)
+            presentation.dropHeldChoice()
+            await handle(refused.code == .choiceConflict ? OnlineBattleFailure.choiceAlreadyIn : OnlineBattleFailure.roundPassed, epoch: epoch, armsFullRead: false)
+            let fresh = try await api.battle(id: room.battleId)
+            try current(epoch)
+            return fresh
+        }
+        try current(epoch)
+        presentation.dropHeldChoice()
+        return answer
     }
     /// A press left on an older socket no longer counts on the server, and the peer's ready does not
     /// complete the room without it. The person already pressed, so the new socket answers for them.
@@ -823,6 +869,8 @@ final class OnlineBattleSession {
         let holdsArena = staging?.isPlaying == true
         presentation.stage = staging
         presentation.room = room
+        // A kept move belongs to its room: moving to another one, or to the lobby, takes it along.
+        if let held = presentation.heldChoice, held.battleID != room?.battleId { presentation.dropHeldChoice() }
         presentation.result = room.flatMap { resultByBattleID[$0.battleId] }
         presentation.arena = nil; presentation.request = nil; presentation.moveHints = [:]; presentation.deadline = nil
         presentation.choiceSubmitted = false
@@ -832,13 +880,15 @@ final class OnlineBattleSession {
         guard let room, let account = presentation.account else { presentation.phase = authenticated ? .lobby : .setup; return }
         presentation.localSide = room.side(for: account.trainer.trainerId) ?? .p1
         presentation.deadline = room.deadline.map { Date(timeIntervalSince1970: $0 / 1000) }
-        presentation.choiceSubmitted = room.ownChoice != nil
+        // A kept move going to the round that just opened reads as chosen, so no my-turn mark rises under it.
+        presentation.choiceSubmitted = room.ownChoice != nil || (room.deadline != nil && presentation.heldChoice?.battleID == room.battleId)
         presentation.arena = resolvers[room.battleId]?.view ?? staging?.lastView
         presentation.request = resolvers[room.battleId]?.request ?? staging?.lastRequest
         // Hints belong to the resolver's live request; a staged request that outlived its resolver has none.
         presentation.moveHints = resolvers[room.battleId]?.moveHints() ?? [:]
         presentation.liveLogs = OnlineBattleHistoryText.logs(resolvers[room.battleId]?.logs ?? [], localSide: presentation.localSide)
         publishDisclosedNames(room)
+        if room.state == .running { readOpponentStreakOnce(room, account: account) }
         switch room.state {
         case .pending, .accepted, .ready: presentation.phase = .room
         case .running: presentation.phase = .arena
@@ -909,7 +959,10 @@ final class OnlineBattleSession {
         for (side, visible, snapshot) in [(OnlineBattleSide.p1, view.p1, room.p1.snapshot), (.p2, view.p2, room.p2.snapshot)] {
             guard let snapshot else { continue }
             var ids = Set(visible.moves)
-            if side == presentation.localSide { ids.formUnion(presentation.request?.moves.map(\.id) ?? []) }
+            if side == presentation.localSide {
+                ids.formUnion(presentation.request?.moves.map(\.id) ?? [])
+                ids.formUnion(presentation.stage?.lastMoveRequest?.moves.map(\.id) ?? [])
+            }
             presentation.moveSlugs[side] = Dictionary(uniqueKeysWithValues: ids.compactMap { id in
                 snapshot.set.moves.first(where: { normalized($0) == normalized(id) }).map { (id, $0) }
             })
@@ -992,6 +1045,10 @@ final class OnlineBattleSession {
             clearHistory(keepOpen: onlineAllowed && authenticated && presentation.showsHistory); return
         case .challenge, .accept, .confirm, .prepareBattle, .decline, .cancel, .chooseMove:
             guard !presentation.showsHistory, !presentation.showsStandings, presentation.rematchSourceID == nil else { return }
+            // Between the press and here the round may have closed. Its number must not go out; the press waits for the next.
+            if case .chooseMove(let slot) = action, let room = presentation.room, room.state == .running, room.mode == .manual, !room.roundIsUnreleased {
+                presentation.holdChoice(slot: slot, battleID: room.battleId); publish(); return
+            }
         default: break
         }
         guard onlineAllowed, !actionInFlight else { return }
@@ -1037,6 +1094,8 @@ final class OnlineBattleSession {
         fallbackTasks.values.forEach { $0.cancel() }; fallbackTasks = [:]; fallback = [:]
         advancing = []; reporting = []; battleReads = []; battleReadAgain = []; battleRecovery = [:]
         otherSaveBattlesAnnounced = []
+        sendingHeld = []; presentation.dropHeldChoice()
+        opponentStreakReads = []; presentation.opponentStreaks = [:]
         restartRetries()
     }
     private func resetExtras(keepingHostCode: Bool = false) {
@@ -1044,6 +1103,19 @@ final class OnlineBattleSession {
         presentation.showsStandings = false; presentation.standings = nil; presentation.standingsError = nil
         presentation.rematchSourceID = nil; rematchFromHistory = false
         if !(keepingHostCode && presentation.hostSecretShowing) { presentation.host.close() }
+    }
+    /// The arena's card says the other seat's streak, and the arena never opens the standings. Read when the match's
+    /// room opens, kept apart from the overlay's value. A failed read leaves the line out and is not worth a banner.
+    private func readOpponentStreakOnce(_ room: OnlineBattleView, account: OnlineBattleAccount) {
+        guard let api, let side = room.side(for: account.trainer.trainerId),
+              opponentStreakReads.insert(room.battleId).inserted else { return }
+        let id = room.battleId, epoch = generation, group = account.group.groupId
+        let foe = side == .p1 ? room.p2.trainerId : room.p1.trainerId
+        Task { [weak self] in
+            guard let value = try? await api.standings() else { return }
+            guard let self, self.generation == epoch, value.groupId == group else { return }
+            self.presentation.opponentStreaks[id] = value.rows.first(where: { $0.trainerId == foe })?.streak
+        }
     }
     private func requestStandingsRefresh() {
         guard standingsVisible else { return }
@@ -1213,6 +1285,13 @@ final class OnlineBattleSession {
                 let opponent = side == .p1 ? source.p2.trainerId : source.p1.trainerId
                 guard presentation.selectedOpponentID == opponent, presentation.mode == source.mode,
                       presentation.members.contains(where: { $0.trainerId == opponent && $0.status == .active }) else { throw OnlineBattleFailure.invalidRequest }
+                // The read above found their request for this same match. Asking back would cross it: answer it instead.
+                if case .received(let asked)? = presentation.rematchOffer(for: source) {
+                    presentation.deferredRematchIDs.remove(asked.battleId)
+                    challengeIntent = nil; presentation.rematchSourceID = nil; rematchFromHistory = false; clearHistory()
+                    if navigation == navigationRevision { prefersLobby = false; selectedBattleID = staysOnSourceID ?? asked.battleId }
+                    try rebuildRoster(); publish(); return
+                }
             }
             let previousRoom = challengeIntent.flatMap { intent in
                 views.values.first { $0.state.isActive && $0.rematchOf == intent.sourceID && $0.p1.trainerId == account.trainer.trainerId && $0.p2.trainerId == intent.target && $0.p1.snapshot == intent.snapshot && $0.mode == intent.mode }
@@ -1312,6 +1391,10 @@ final class OnlineBattleSession {
                         result = room
                     } else { throw OnlineBattleFailure.invalidRequest }
                 case .chooseMove(let slot):
+                    // The read above may have found the round closed.
+                    if room.state == .running, room.mode == .manual, !room.roundIsUnreleased {
+                        presentation.holdChoice(slot: slot, battleID: room.battleId); publish(); return
+                    }
                     guard room.state == .running, room.mode == .manual, room.ownChoice == nil,
                           let request = resolvers[room.battleId]?.request, request.kind == "move",
                           request.moves.contains(where: { $0.slot == slot && !$0.disabled && $0.pp > 0 }) else { throw OnlineBattleFailure.invalidRequest }
@@ -1321,13 +1404,17 @@ final class OnlineBattleSession {
             } catch {
                 if endsRoom { presentation.allowEndedNotice(for: room.battleId) }
                 guard let rejected = error as? OnlineBattleServerError,
-                      [.invalidState, .staleRevision, .staleRound].contains(rejected.code) else { throw error }
+                      [.invalidState, .staleRevision, .staleRound, .choiceConflict].contains(rejected.code) else { throw error }
                 // The room moved before the press arrived. Read it, so the person hears what actually happened.
                 try current(epoch); await refresh(); try current(epoch)
                 guard reconciled else { throw OnlineBattleFailure.connectionUnavailable }
                 // A read during the press had its ending suppressed, and that read cannot announce it again.
                 if let latest = views[room.battleId] { presentation.announceEnded(latest, previous: room.state, l: localization()) }
-                throw rejected.code == .staleRound ? OnlineBattleFailure.roundPassed : OnlineBattleFailure.invalidRequest
+                switch rejected.code {
+                case .staleRound: throw OnlineBattleFailure.roundPassed
+                case .choiceConflict: throw OnlineBattleFailure.choiceAlreadyIn
+                default: throw OnlineBattleFailure.invalidRequest
+                }
             }
             try current(epoch)
         }
@@ -1396,6 +1483,8 @@ final class OnlineBattleSession {
         } else if error as? OnlineBattleFailure == .roundPassed {
             // It also explains a press that did nothing, and it never was the connection.
             presentation.notice = l.onlineErrorRoundPassed; presentation.stickyNotice = l.onlineErrorRoundPassed
+        } else if error as? OnlineBattleFailure == .choiceAlreadyIn {
+            presentation.notice = l.onlineErrorChoiceAlreadyIn; presentation.stickyNotice = l.onlineErrorChoiceAlreadyIn
         } else if error as? OnlineBattleFailure == .connectionUnavailable {
             // The failed read already said why, more exactly. A revoked account has its own status line.
             if authenticated, presentation.notice == nil { presentation.notice = l.onlineErrorGeneric }
@@ -1535,6 +1624,8 @@ extension OnlineBattleSession {
 }
 
 private extension OnlineBattleView {
+    /// The room's round has not been released yet. The journal, not the deadline, is what the server keys a choice on.
+    var roundIsUnreleased: Bool { roundSeq == journal.count + 1 }
     func relayView(roundSeq: Int, deadline: Double?, ownChoice: String?, journal: [OnlineBattlePair]) -> Self {
         .init(battleId: battleId, state: state, revision: revision, mode: mode, p1: p1, p2: p2,
               createdAt: createdAt, expiresAt: expiresAt, startedAt: startedAt, reportedAt: reportedAt,

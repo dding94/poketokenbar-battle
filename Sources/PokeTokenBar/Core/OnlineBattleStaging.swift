@@ -65,6 +65,7 @@ final class OnlineBattleStaging {
     /// Takes every round the resolver has consumed since the last call.
     func ingest(_ resolver: OnlineBattleResolver, mode: OnlineBattleMode, visible: Bool, secondsLeft: TimeInterval?) {
         lastView = resolver.view; lastRequest = resolver.request
+        if resolver.request.kind == "move" { lastMoveRequest = resolver.request; lastMoveHints = resolver.moveHints() }
         if needsResync { resync(resolver); return }
         if !seeded {
             // The opening never plays: `switch` seeds the display, and abilities wait for the next beat.
@@ -119,7 +120,10 @@ final class OnlineBattleStaging {
         stagedRounds += 1
         var events = events(ofSegment: stagedRounds, in: resolver)
         let pair = resolver.journal[stagedRounds - 1]
-        if (frame.seat(.player) == .p1 ? pair.p1 : pair.p2) == .timeout { events.insert(.timedOut, at: 0) }
+        // Only a round with moves to pick can run out of time. The server relays a forced seat as a timeout too.
+        if (frame.seat(.player) == .p1 ? pair.p1 : pair.p2) == .timeout, resolver.roundOpeningKinds[stagedRounds - 1] == "move" {
+            events.insert(.timedOut, at: 0)
+        }
         playback.enqueue(events)
     }
 

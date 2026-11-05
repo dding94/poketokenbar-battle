@@ -3857,6 +3857,22 @@ extension OnlineBattleSessionTests {
         XCTAssertEqual(session.presentation.chosenSlot, slot, "it is kept, not lost")
     }
 
+    /// A failed read makes the press read first, and that read can find the round closed. The press is kept, not posted.
+    func testAPressWhoseOwnReadFindsTheRoundClosedIsKeptNotPosted() async throws {
+        let (_, open, next) = try aroundTheGap()
+        let released = try changed(next, ["roundSeq": 1, "deadline": NSNull()])
+        let (session, http, _, _) = try await setup([open], trainer: "trainer-two")
+        await session.bootstrap()
+        await http.route("/v1/battles", errorBody("internal"), status: 500)
+        await session.refresh()
+        XCTAssertEqual(session.presentation.room?.journal.count, 0, "the screen still shows round 1 open")
+        try await list(http, [released])
+        await session.perform(.chooseMove(1))
+        let posted = await http.count(choicesPath(open)); XCTAssertEqual(posted, 0)
+        XCTAssertEqual(session.presentation.heldChoice?.slot, 1)
+        XCTAssertEqual(session.presentation.room?.journal.count, 1)
+    }
+
     /// The round that opens has nothing to pick (a real forced Struggle): the kept move goes and the person is told.
     func testAKeptMoveIsDroppedWithANoteWhenTheRoundThatOpensIsForced() async throws {
         let final = try battle(4), encoder = JSONEncoder()
@@ -3881,41 +3897,33 @@ extension OnlineBattleSessionTests {
         XCTAssertEqual(model.notice, copy.onlineHeldChoiceForced, "a background read must not wipe it unread")
     }
 
-    /// The round that opens is still a move request, just without that move. A real Recharge: after Hyper Beam the
-    /// engine lists only the recharge. The person is told to pick again.
-    func testAKeptMoveTheOpenedRoundNoLongerListsIsDroppedWithANote() async throws {
-        let final = try battle(3), encoder = JSONEncoder()
-        let trainer = "trainer-one"
-        let owner = try OnlineBattleResolver(battle: final, localTrainerID: trainer, engine: BattleEngine(url: engineURL))
-        defer { owner.close() }
-        var earlier: (rounds: Int, slot: Int)?
-        var later: Int?
-        for rounds in 0..<final.journal.count {
-            try owner.consume(journal: Array(final.journal.prefix(rounds)))
-            guard owner.request.kind == "move" else { continue }
-            let usable = owner.request.moves.filter { !$0.disabled && $0.pp > 0 }.map(\.slot)
-            if let found = earlier, !usable.contains(found.slot) { later = rounds; break }
-            if earlier == nil, rounds > 0, usable.count > 1, let slot = usable.last { earlier = (rounds, slot) }
+    /// The round that opens is still a move request, just without that move: a real Taunt landed in the round this seat
+    /// never saw open. The person is told to pick again and the other card stays open.
+    func testAKeptMoveTheOpenedRoundDisabledIsDroppedWithANoteAndThePickerStaysOpen() async throws {
+        let built = try OnlineBattleHintFixture.battle(p1: .init(species: 143, moves: ["splash", "tackle"]), p2: .init(species: 143, moves: ["splash", "taunt"]))
+        let final = try changed(built, ["battleId": "bt_taunted"])
+        func pair(_ seq: Int, _ p1: Int, _ p2: Int) -> OnlineBattlePair {
+            .init(roundSeq: seq, p1: .move(p1), p2: .move(p2), releasedAt: Double(seq) * 1000)
         }
-        let held = try XCTUnwrap(earlier), opened = try XCTUnwrap(later, "the recharge fixture has a turn without that move")
-        let gap = try changed(final, ["state": "RUNNING", "result": NSNull(), "roundSeq": held.rounds, "deadline": NSNull(),
-                                      "journal": JSONSerialization.jsonObject(with: encoder.encode(Array(final.journal.prefix(held.rounds))))])
-        let next = try changed(gap, ["roundSeq": opened + 1, "deadline": 9_000_000_000_000,
-                                     "journal": JSONSerialization.jsonObject(with: encoder.encode(Array(final.journal.prefix(opened))))])
-        let (session, http, _, _) = try await setup([gap], trainer: trainer, rosterOverride: roster(final))
+        func journal(_ pairs: [OnlineBattlePair]) throws -> Any { try JSONSerialization.jsonObject(with: JSONEncoder().encode(pairs)) }
+        let gap = try changed(final, ["roundSeq": 1, "deadline": NSNull(), "journal": journal([pair(1, 2, 1)])])
+        let opened = try changed(gap, ["roundSeq": 3, "deadline": 9_000_000_000_000, "journal": journal([pair(1, 2, 1), pair(2, 2, 2)])])
+        let (session, http, _, _) = try await setup([gap], rosterOverride: roster(final))
         await http.route("/v1/battles/\(final.battleId)/advance", try JSONEncoder().encode(gap))
         await session.bootstrap()
         let model = session.presentation
-        model.send(.chooseMove(held.slot)); await settleTasks()
-        XCTAssertEqual(model.heldChoice?.slot, held.slot)
-        try await list(http, [next])
+        XCTAssertTrue(model.canChooseMove(1), "Splash is fine until the Taunt lands")
+        model.send(.chooseMove(1)); await settleTasks()
+        XCTAssertEqual(model.heldChoice?.slot, 1)
+        try await list(http, [opened])
         await session.refresh()
         let posted = await http.count(choicesPath(final)); XCTAssertEqual(posted, 0)
         XCTAssertNil(model.heldChoice)
         XCTAssertEqual(model.request?.kind, "move")
         XCTAssertEqual(model.notice, copy.onlineHeldChoiceUnusable)
-        XCTAssertFalse(model.canChooseMove(held.slot))
         XCTAssertFalse(model.choiceSubmitted, "the round is the person's to answer again")
+        XCTAssertFalse(model.canChooseMove(1))
+        XCTAssertTrue(model.canChooseMove(2))
     }
 
     func testLeavingTheRoomOrTheMatchEndingDropsAKeptMove() async throws {
@@ -4135,7 +4143,7 @@ extension OnlineBattleSessionTests {
         if share < 1 { XCTAssertNotEqual(model.entryHP[own], before, "the HP it ended with, not the HP it started with") }
         let screen = try XCTUnwrap(model.resultScreen(l: copy))
         XCTAssertEqual(screen.rematch, .request(enabled: true))
-        XCTAssertNil(screen.note)
+        XCTAssertEqual(screen.note, copy.onlineRematchOpponentOffline, "the fixture's foe is offline; nothing blocks the button")
     }
 
     /// The same path answered VOID ends the room without a settlement. The hold goes the same way.

@@ -213,15 +213,20 @@ final class OnlineBattlePresentation {
         guard members.first(where: { $0.trainerId == foe })?.online == false else { return .choosing }
         return connectionState == .connected ? .offline : .offlineMaybe
     }
-    /// The slot of my choice in this round: the server's own record once it is in the room, else my click.
+    /// The slot of my choice in this round: a move kept for the next round, the server's own record once it is in the
+    /// room, else my click.
     var chosenSlot: Int? {
-        guard choiceSubmitted, let room else { return nil }
+        guard let room else { return nil }
+        if let heldChoice, heldChoice.battleID == room.battleId { return heldChoice.slot }
+        guard choiceSubmitted else { return nil }
         if let own = room.ownChoice, let slot = own.split(separator: " ").last.flatMap({ Int($0) }) { return slot }
         guard let click = localChoice, click.battleID == room.battleId, click.roundSeq == room.roundSeq else { return nil }
         return click.slot
     }
+    /// Between rounds a press only stays on this side, so a busy session (the first seat's own advance) does not lock it.
     func canChooseMove(_ slot: Int) -> Bool {
-        !showsHistory && !showsStandings && rematchSourceID == nil && phase == .arena && room?.state == .running && room?.mode == .manual && !isBusy && !choiceSubmitted &&
+        !showsHistory && !showsStandings && rematchSourceID == nil && phase == .arena && room?.state == .running && room?.mode == .manual && !choiceSubmitted &&
+        (!isBusy || !roundIsOpen) &&
         request?.kind == "move" && request?.moves.contains { $0.slot == slot && !$0.disabled && $0.pp > 0 } == true
     }
     /// Host actions that only change what is on screen are applied here and stop; the rest are checked and go on.
@@ -329,6 +334,8 @@ final class OnlineBattlePresentation {
         case .prepareBattle(let id): guard room?.battleId == id, canPrepare else { return }
         case .chooseMove(let slot):
             guard canChooseMove(slot) else { return }
+            // No round is open to send it to. It waits here, and the last card pressed is the one kept.
+            if let room, !roundIsOpen { holdChoice(slot: slot, battleID: room.battleId); return }
             if let room { localChoice = LocalChoice(battleID: room.battleId, roundSeq: room.roundSeq, slot: slot) }
             choiceSubmitted = true
         case .decline(let id):

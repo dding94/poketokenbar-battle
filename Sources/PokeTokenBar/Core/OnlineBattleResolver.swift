@@ -33,6 +33,8 @@ final class OnlineBattleResolver {
     private(set) var roundReveals: [[BattleLogReveal]] = []
     private let capturesReveals: Bool
     private(set) var journal: [OnlineBattlePair] = []
+    /// For the display only: what my request was when each journal round opened. A "timeout" on a forced round says nothing.
+    private(set) var roundOpeningKinds: [String] = []
     var processedRoundSeq: Int { journal.count }
     private let initial: OnlineBattleView
     private let config: OnlineBattleConfig
@@ -106,6 +108,7 @@ final class OnlineBattleResolver {
             }
             for pair in incoming.dropFirst(journal.count) {
                 guard result?.ended != true else { throw Failure.invalidJournal }
+                roundOpeningKinds.append(request.kind)
                 try apply(pair.p1, side: .p1)
                 try apply(pair.p2, side: .p2)
                 journal.append(pair)

@@ -90,10 +90,10 @@ final class OnlineBattleResultTests: XCTestCase {
     // MARK: opponent line
 
     func testOpponentLineShowsNameStreakAndRecordOnlyWhenTheyMeanSomething() {
-        XCTAssertEqual(ko.onlineResultOpponentLine(name: "하늘", streak: 3, record: (2, 1, 0)), "상대 · 하늘 · 연승 3 · 상대 전적 2승 1패")
-        XCTAssertEqual(ko.onlineResultOpponentLine(name: "하늘", streak: 1, record: (1, 0, 0)), "상대 · 하늘 · 상대 전적 1승 0패")
-        XCTAssertEqual(ko.onlineResultOpponentLine(name: "하늘", streak: 0, record: (1, 1, 2)), "상대 · 하늘 · 상대 전적 1승 1패 2무")
-        XCTAssertEqual(en.onlineResultOpponentLine(name: "Sky", streak: 3, record: (2, 1, 0)), "vs Sky · 3-win streak · Record 2W 1L")
+        XCTAssertEqual(ko.onlineResultOpponentLine(name: "하늘", streak: 3, record: .init(wins: 2, losses: 1, draws: 0)), "상대 · 하늘 · 연승 3 · 상대 전적 2승 1패")
+        XCTAssertEqual(ko.onlineResultOpponentLine(name: "하늘", streak: 1, record: .init(wins: 1, losses: 0, draws: 0)), "상대 · 하늘 · 상대 전적 1승 0패")
+        XCTAssertEqual(ko.onlineResultOpponentLine(name: "하늘", streak: 0, record: .init(wins: 1, losses: 1, draws: 2)), "상대 · 하늘 · 상대 전적 1승 1패 2무")
+        XCTAssertEqual(en.onlineResultOpponentLine(name: "Sky", streak: 3, record: .init(wins: 2, losses: 1, draws: 0)), "vs Sky · 3-win streak · Record 2W 1L")
     }
 
     // MARK: rematch wording
@@ -105,7 +105,7 @@ final class OnlineBattleResultTests: XCTestCase {
         XCTAssertEqual(ko.onlineResultToLobby, "로비로 돌아가기")
         XCTAssertEqual(ko.onlineRematchLater, "나중에")
         XCTAssertTrue(ko.onlineRematchReceived("하늘").contains("하늘님이"))
-        for block in [OnlineRematchBlock.noHealthyPokemon, .opponentLeft, .requestWaiting] {
+        for block in [OnlineRematchBlock.noHealthyPokemon, .opponentLeft, .requestWaiting, .entryHeld] {
             XCTAssertFalse(ko.onlineRematchBlockLine(block).isEmpty)
             XCTAssertFalse(hasHangul(en.onlineRematchBlockLine(block)), "\(block)")
             XCTAssertFalse(ko.onlineRematchBlockLine(block).contains("\n"), "one line")

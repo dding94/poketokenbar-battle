@@ -120,14 +120,24 @@ extension OnlineBattlePresentation {
 
     /// The open room that follows `source` as a rematch, newest first. A request still waiting is sent or received
     /// by who made it; one that moved on is a room to open.
+    /// Requests can cross when both seats ask at once. Then theirs is the one to answer, whichever came last.
     func rematchOffer(for source: OnlineBattleView) -> OnlineRematchOffer? {
         guard let me = localTrainerID else { return nil }
-        let open = battles
-            .filter { $0.rematchOf == source.battleId && $0.state.isActive && $0.side(for: me) != nil }
-            .max { ($0.createdAt, $0.battleId) < ($1.createdAt, $1.battleId) }
-        guard let room = open else { return nil }
-        guard room.state == .pending else { return .underway(room) }
-        return room.p1.trainerId == me ? .sent(room) : .received(room)
+        let open = openRematches(of: source, me: me)
+        if let moved = open.first(where: { $0.state != .pending }) { return .underway(moved) }
+        if let asked = open.first(where: { $0.p1.trainerId != me }) { return .received(asked) }
+        return open.first.map { .sent($0) }
+    }
+
+    private func openRematches(of source: OnlineBattleView, me: String) -> [OnlineBattleView] {
+        battles.filter { $0.rematchOf == source.battleId && $0.state.isActive && $0.side(for: me) != nil }
+            .sorted { ($0.createdAt, $0.battleId) > ($1.createdAt, $1.battleId) }
+    }
+
+    /// My own request when the other seat's is waiting too. It may be what holds the Pokémon their request needs.
+    func crossedRematch(for source: OnlineBattleView) -> OnlineBattleView? {
+        guard let me = localTrainerID, case .received? = rematchOffer(for: source) else { return nil }
+        return openRematches(of: source, me: me).first { $0.state == .pending && $0.p1.trainerId == me }
     }
 
     /// The room a room action may name: the one on screen, or while it is a finished room, its open rematch.
@@ -135,8 +145,8 @@ extension OnlineBattlePresentation {
     func actionRoom(_ id: String) -> OnlineBattleView? {
         guard let room else { return nil }
         if room.battleId == id { return room }
-        guard room.state == .completed, let offer = rematchOffer(for: room), offer.room.battleId == id else { return nil }
-        return offer.room
+        guard room.state == .completed, let me = localTrainerID else { return nil }
+        return openRematches(of: room, me: me).first { $0.battleId == id }
     }
 
     /// Who enters when a rematch request is accepted from the result: the selected Pokémon if it can fight, else the
@@ -156,8 +166,14 @@ extension OnlineBattlePresentation {
         guard !isBusy, !showsStandings, source.state == .completed, let target = opponentID(in: source) else { return nil }
         if case .received(let asked)? = rematchOffer(for: source), deferredRematchIDs.contains(asked.battleId) { return .requestWaiting }
         guard members.contains(where: { $0.trainerId == target && $0.status == .active }) else { return .opponentLeft }
-        guard roster.contains(where: entryIsEligible) else { return .noHealthyPokemon }
+        guard roster.contains(where: entryIsEligible) else { return unavailableEntryBlock }
         return nil
+    }
+
+    /// Nobody can enter. A Pokémon that is well and only held elsewhere is not a health problem.
+    private var unavailableEntryBlock: OnlineRematchBlock {
+        let held = roster.contains { $0.snapshot != nil && $0.blockedReason == nil && (entryHP[$0.id] ?? 0) > 0 && blockedEntryIDs.contains($0.id) }
+        return held ? .entryHeld : .noHealthyPokemon
     }
 
     /// True when the opponent is an active member who is not connected now: the request still reaches them.
@@ -167,8 +183,8 @@ extension OnlineBattlePresentation {
     }
 
     /// Wins and losses against one member among the completed battles.
-    func headToHead(against trainerID: String) -> (wins: Int, losses: Int, draws: Int) {
-        var record = (wins: 0, losses: 0, draws: 0)
+    func headToHead(against trainerID: String) -> OnlineBattleRecord {
+        var record = OnlineBattleRecord()
         for battle in battles where opponentID(in: battle) == trainerID {
             switch outcome(of: battle) {
             case .win?: record.wins += 1
@@ -219,13 +235,20 @@ extension OnlineBattlePresentation {
 
         var rematch = OnlineBattleResultScreen.Rematch.none
         var note: String?
+        var cancelOwnRequest: String?
         if room.state == .completed, side != nil {
             switch rematchOffer(for: room) {
             case .sent(let sent)?:
                 rematch = .waiting(label: l.onlineRematchWaitingCancel(foeName), battleID: sent.battleId)
             case .received(let asked)? where !deferredRematchIDs.contains(asked.battleId):
                 rematch = .answer(banner: l.onlineRematchReceived(foeName), battleID: asked.battleId)
-                note = answerEntry.map { l.onlineRematchAnswerEntry($0.name) } ?? l.onlineRematchBlockLine(.noHealthyPokemon)
+                let crossed = crossedRematch(for: room)
+                cancelOwnRequest = crossed?.battleId
+                note = answerEntry.map { l.onlineRematchAnswerEntry($0.name) }
+                    ?? (crossed != nil ? l.onlineRematchCrossedNote : l.onlineRematchBlockLine(unavailableEntryBlock))
+            case .received? where crossedRematch(for: room) != nil:
+                // Theirs was put off; mine is what is left to wait on, and it stays cancelable.
+                if let mine = crossedRematch(for: room) { rematch = .waiting(label: l.onlineRematchWaitingCancel(foeName), battleID: mine.battleId) }
             case .underway(let moved)?:
                 rematch = .open(battleID: moved.battleId)
             case .received?, nil:
@@ -241,6 +264,6 @@ extension OnlineBattlePresentation {
             subtitle: result.map { l.onlineResultSubtitle($0.kind, turns: turns, foe: foeName) } ?? "",
             opponent: opponent,
             effects: result.map { l.onlineResultEffectLines($0, name: ownName) } ?? [],
-            totals: totals, rematch: rematch, note: note, sourceID: room.battleId)
+            totals: totals, rematch: rematch, note: note, sourceID: room.battleId, cancelOwnRequest: cancelOwnRequest)
     }
 }

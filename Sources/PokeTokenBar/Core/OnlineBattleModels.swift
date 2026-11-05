@@ -31,7 +31,7 @@ struct OnlineBattleOrigin: Equatable, Sendable {
     }
     var hash: String { SHA256.hash(data: Data(url.absoluteString.utf8)).map { String(format: "%02x", $0) }.joined() }
 }
-enum OnlineBattleFailure: String, Error, Equatable, Sendable { case invalidSettings, credentialsDisabled, invalidOrigin, invalidRequest, transport, invalidResponse, staleGeneration, unauthorized, protocolError, credentialsUnavailable, peerCancelled, peerExpired, entryChanged, connectionUnavailable, roundPassed }
+enum OnlineBattleFailure: String, Error, Equatable, Sendable { case invalidSettings, credentialsDisabled, invalidOrigin, invalidRequest, transport, invalidResponse, staleGeneration, unauthorized, protocolError, credentialsUnavailable, peerCancelled, peerExpired, entryChanged, connectionUnavailable, roundPassed, choiceAlreadyIn }
 
 enum OnlineBattleMode: String, Codable, Sendable { case manual, auto }
 enum OnlineBattleState: String, Codable, Sendable {

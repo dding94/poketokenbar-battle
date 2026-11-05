@@ -2,7 +2,7 @@ import XCTest
 @testable import PokeTokenBar
 
 /// T18: the foe card's nickname and the head-to-head line. Only values the server already gave are used: the
-/// member list's nickname, the battles list's finished results and, when the standings were loaded, the streak.
+/// member list's nickname, the battles list's finished results and the streak read when the match opened.
 @MainActor
 final class OnlineBattleOpponentLineTests: XCTestCase {
     private let me = "synthetic-me", foe = "synthetic-foe", other = "synthetic-other"
@@ -86,17 +86,13 @@ final class OnlineBattleOpponentLineTests: XCTestCase {
         XCTAssertNil(model.opponentNickname)
     }
 
-    func testTheStreakComesFromTheLoadedStandingsOnlyAndOnlyWhenItIsAStreak() {
-        let model = model()
-        XCTAssertNil(model.opponentStreak, "standings were never loaded")
-        func standings(_ streak: Int) -> OnlineBattleStandings {
-            .init(groupId: "g", championTrainerId: nil, rows: [
-                .init(trainerId: foe, displayName: "연습친구", wins: 5, losses: 0, draws: 0, streak: streak, bestStreak: 5, winRate: 1)])
-        }
-        model.standings = standings(3); XCTAssertEqual(model.opponentStreak, 3)
-        model.standings = standings(1); XCTAssertNil(model.opponentStreak, "one win is not a streak")
-        model.standings = standings(0); XCTAssertNil(model.opponentStreak)
-        model.standings = .init(groupId: "g", championTrainerId: nil, rows: []); XCTAssertNil(model.opponentStreak)
+    func testTheStreakComesFromTheReadOfThisMatchOnlyAndOnlyWhenItIsAStreak() {
+        let model = model(), id = try! XCTUnwrap(model.room?.battleId)
+        XCTAssertNil(model.opponentStreak, "nothing was read")
+        model.opponentStreaks = [id: 3]; XCTAssertEqual(model.opponentStreak, 3)
+        model.opponentStreaks = [id: 1]; XCTAssertNil(model.opponentStreak, "one win is not a streak")
+        model.opponentStreaks = [id: 0]; XCTAssertNil(model.opponentStreak)
+        model.opponentStreaks = ["another-battle": 3]; XCTAssertNil(model.opponentStreak, "another match's read says nothing about this one")
     }
 
     // MARK: words

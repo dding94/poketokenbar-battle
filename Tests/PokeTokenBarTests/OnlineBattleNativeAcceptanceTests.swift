@@ -439,7 +439,7 @@ final class OnlineBattleNativeAcceptanceTests: XCTestCase {
     /// The gap between rounds on the real server, from both seats. A press there used to go out with the ended round's
     /// number: the same slot was acknowledged and forgotten, another one was refused as a conflict.
     func testAMovePressedBetweenRoundsReachesTheRoundThatOpens() async throws {
-        func waitFor(_ what: String, _ condition: () async throws -> Bool) async throws {
+        func waitFor(_ what: String, _ condition: @MainActor () async throws -> Bool) async throws {
             for _ in 0..<400 {
                 if try await condition() { return }
                 try await Task.sleep(for: .milliseconds(10))

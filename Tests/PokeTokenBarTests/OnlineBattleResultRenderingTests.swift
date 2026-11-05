@@ -285,3 +285,28 @@ final class OnlineBattleResultRenderingTests: XCTestCase {
         _ = try await capture(model, named: "t19-result-heaviest.png")
     }
 }
+
+// MARK: - Review C, F4 item 2: crossed requests on the result screen
+
+extension OnlineBattleResultRenderingTests {
+    /// Both seats asked at once and my own request holds the only Pokémon. The banner fits with its extra button, says
+    /// what is really in the way and lets me cancel mine.
+    func testCrossedRequestsDrawTheWayOutInBothLanguages() async throws {
+        let mine = view("synthetic-mine", .pending, me: .p1, createdAt: 1_793_683_550_000, rematchOf: Self.sourceID)
+        let theirs = view("synthetic-theirs", .pending, me: .p2, createdAt: 1_793_683_600_000, rematchOf: Self.sourceID)
+        let model = resultModel(.win, effects: .init(instanceID: "synthetic-pikachu", xp: 10_000_000, hpShare: 0.42), others: [mine, theirs])
+        model.blockedEntryIDs = Set(model.roster.map(\.id))
+        for (l, name) in [(ko, "f4-result-crossed-ko.png"), (L(.en), "f4-result-crossed-en.png")] {
+            let shown = try screen(model, l)
+            XCTAssertEqual(shown.cancelOwnRequest, "synthetic-mine")
+            XCTAssertEqual(shown.note, l.onlineRematchCrossedNote)
+            XCTAssertNotEqual(shown.note, l.onlineRematchBlockLine(.noHealthyPokemon))
+            XCTAssertFalse(model.canAccept(model.actionRoom("synthetic-theirs")))
+            _ = try await capture(model, l: l, named: name)
+        }
+        var sent: [String] = []
+        model.onAction = { if case .cancel(let id) = $0 { sent.append(id) } }
+        model.send(.cancel("synthetic-mine"))
+        XCTAssertEqual(sent, ["synthetic-mine"], "a room action may name my own crossed request")
+    }
+}

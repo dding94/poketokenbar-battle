@@ -16,7 +16,7 @@ struct OnlineBattleArena: View {
 
     /// Says the turn start when it is due (see `OnlineBattlePresentation.claimTurnAnnouncement`).
     func announceTurnIfDue(now: Date = .now) {
-        guard let line = model.claimTurnAnnouncement(l: l, pickerOpen: footer == .moves, playing: playing, now: now) else { return }
+        guard let line = model.claimTurnAnnouncement(l: l, pickerOpen: turnIsOpen, playing: playing, now: now) else { return }
         announce(line)
     }
 
@@ -30,8 +30,10 @@ struct OnlineBattleArena: View {
         let shown: Bool
     }
     private var turnCue: TurnCue {
-        TurnCue(battleID: model.room?.battleId, turn: model.arena?.turn, open: footer == .moves, playing: playing, shown: model.screenShown)
+        TurnCue(battleID: model.room?.battleId, turn: model.arena?.turn, open: turnIsOpen, playing: playing, shown: model.screenShown)
     }
+    /// The picker is open and the server's clock runs for it. The picker alone is open between rounds too (D6).
+    private var turnIsOpen: Bool { footer == .moves && model.roundIsOpen }
 
     /// What fills the place under the beat lines.
     enum Footer: Equatable {
@@ -41,7 +43,8 @@ struct OnlineBattleArena: View {
         case sent
         /// Both sides play by policy.
         case automatic
-        /// A terminal round's last beats play and the request is already gone.
+        /// Beats play and the live request has no moves (the last round's, or the round before a forced turn). The last
+        /// move request stays on the cards, locked, so the picker does not tell what the beats have not shown yet.
         case waiting
         /// A required action the engine takes itself.
         case forced
@@ -150,7 +153,7 @@ struct OnlineBattleArena: View {
     private func header(_ view: BattleView) -> some View {
         // The server's clock keeps running while beats play; hiding the screen never pauses it.
         OnlineBattleClockBand(title: mode == .auto ? l.onlineAutomatic : l.onlineManual, l: l, mode: mode, footer: footer,
-                              deadline: model.deadline, playing: playing, stagedTurn: shownTurn(view), viewTurn: view.turn)
+                              deadline: model.deadline, playing: playing, stagedTurn: shownTurn(view), viewTurn: choosingTurn(view))
     }
 
     /// The state the bar is in at `now`, from the model alone. Internal so tests can read it.
@@ -160,7 +163,11 @@ struct OnlineBattleArena: View {
 
     /// The turn the header names: the seconds belong to the turn being chosen, which the beats on screen have not
     /// reached yet. With no clock the turn on screen is the beat's.
-    func clockTurn(_ view: BattleView, state: OnlineBattleTurnClock.State) -> Int { state == .idle ? shownTurn(view) : view.turn }
+    func clockTurn(_ view: BattleView, state: OnlineBattleTurnClock.State) -> Int { state == .idle ? shownTurn(view) : choosingTurn(view) }
+
+    /// The turn after the beat on screen. The engine's turn stops at the last round, and a header that stopped with it
+    /// would tell the match is over before the beats do.
+    private func choosingTurn(_ view: BattleView) -> Int { playing ? max(view.turn, shownTurn(view) + 1) : view.turn }
 
     /// The turn of the beat on screen; the view is already at the next turn while its beats still play.
     func shownTurn(_ view: BattleView) -> Int { model.stage?.playback.beat?.turn ?? view.turn }
@@ -262,8 +269,9 @@ struct OnlineBattleArena: View {
                 // One line inside the board's fixed height; the grid below keeps the picked card marked.
                 waitLine
             case .moves:
-                Text(playing ? l.practicePlayingTurn : l.practiceWhatNext)
-                    .font(.callout.weight(.semibold)).foregroundStyle(playing ? Color.secondary : Color.primary)
+                Text(movePrompt)
+                    .font(.callout.weight(.semibold)).foregroundStyle(turnIsOpen && !playing ? Color.primary : Color.secondary)
+                    .lineLimit(1).minimumScaleFactor(0.8)
                 // Only the fact that the other side is done shows while I still choose; it never says what they chose.
                 if model.opponentWait == .submitted { waitLine }
             case .automatic:
@@ -278,7 +286,7 @@ struct OnlineBattleArena: View {
                 Button(l.practiceSkip) { model.send(.skipStage) }
                     .buttonStyle(.borderless).font(.caption)
                     .accessibilityIdentifier("online.skip")
-            } else if footer == .moves, model.opponentWait != .submitted {
+            } else if turnIsOpen, model.opponentWait != .submitted {
                 // The key hint is the first thing to go when the other side's news needs the room.
                 Text(l.practiceKeyHint).font(.caption2).foregroundStyle(.secondary)
             }
@@ -303,7 +311,9 @@ struct OnlineBattleArena: View {
                 if let moves = model.request?.moves.prefix(4), !moves.isEmpty { moveGrid(Array(moves)) } else { waitingCard }
             case .automatic:
                 automaticCard
-            case .waiting, .forced:
+            case .waiting:
+                if waitingMoves.isEmpty { waitingCard } else { moveGrid(waitingMoves) }
+            case .forced:
                 waitingCard
             }
         }
@@ -315,7 +325,11 @@ struct OnlineBattleArena: View {
     func movesLocked(_ slot: Int) -> Bool { !model.canChooseMove(slot) }
 
     /// The line over an open picker.
-    var movePrompt: String { playing ? l.practicePlayingTurn : l.practiceWhatNext }
+    var movePrompt: String {
+        if model.heldChoice != nil { return l.onlineChoiceHeld }
+        if playing { return l.practicePlayingTurn }
+        return model.roundIsOpen ? l.practiceWhatNext : l.onlineRoundOpening
+    }
 
     /// The cards drawn, locked, while beats play and the live request has no moves. They come from the last move request.
     var waitingMoves: [BattleMove] { footer == .waiting ? Array((model.stage?.lastMoveRequest?.moves ?? []).prefix(4)) : [] }
@@ -334,7 +348,8 @@ struct OnlineBattleArena: View {
 
     /// Internal and concrete so tests can check what each card is given.
     func moveCard(_ move: BattleMove) -> PracticeMoveCard {
-        PracticeMoveCard(move: namedMove(move), key: move.slot, snapshot: ownSnapshot, hint: model.moveHints[move.slot],
+        PracticeMoveCard(move: namedMove(move), key: move.slot, snapshot: ownSnapshot,
+                         hint: footer == .waiting ? model.stage?.lastMoveHints[move.slot] : model.moveHints[move.slot],
                          l: l, artwork: artwork, locked: movesLocked(move.slot), chosen: moveChosen(move.slot)) {
             model.send(.chooseMove(move.slot))
         }

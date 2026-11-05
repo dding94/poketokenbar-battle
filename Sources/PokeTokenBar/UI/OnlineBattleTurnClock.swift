@@ -9,9 +9,10 @@ enum OnlineBattleTurnClock {
     private static let scheduleSeconds = 30
 
     enum State: Equatable, Sendable {
-        /// Nobody is waited on: an automatic battle, a forced action, or the last beats of a finished round.
+        /// Nobody is waited on: an automatic battle.
         case idle
-        /// A manual round with no deadline yet (right after a round, until the next one opens). Not zero seconds.
+        /// A manual round with no deadline yet (right after a round, until the next one opens). Not zero seconds. The
+        /// last round's beats read the same, so the bar never tells the match is over before they do.
         case preparing
         /// Seconds left to the server's deadline. `mine` is true while I am the one still choosing; after my choice
         /// the clock runs for the other side and the last seconds are no alarm.
@@ -38,7 +39,8 @@ enum OnlineBattleTurnClock {
 
     /// `playing` is taken so a caller cannot forget it exists, and is never read: beats do not touch the clock.
     static func state(mode: OnlineBattleMode, footer: OnlineBattleArena.Footer, deadline: Date?, playing: Bool, now: Date) -> State {
-        guard mode == .manual, footer == .moves || footer == .sent else { return .idle }
+        // A forced turn runs on the same clock; it is simply never mine, so it hurries nobody.
+        guard mode == .manual else { return .idle }
         guard let deadline else { return .preparing }
         let left = deadline.timeIntervalSince(now)
         return .counting(remaining: max(0, Int(ceil(left))), fraction: min(1, max(0, left / turnSeconds)), mine: footer == .moves)

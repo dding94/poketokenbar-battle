@@ -53,7 +53,7 @@ extension L {
     }
 
     /// "Opponent · Sky · Streak 3 · Record 2W 1L". The streak shows from two wins on; draws show only when there are some.
-    func onlineResultOpponentLine(name: String, streak: Int, record: (wins: Int, losses: Int, draws: Int)) -> String {
+    func onlineResultOpponentLine(name: String, streak: Int, record: OnlineBattleRecord) -> String {
         var parts = [online("상대 · \(name)", "vs \(name)")]
         if streak >= 2 { parts.append(online("연승 \(streak)", "\(streak)-win streak")) }
         let draws = record.draws > 0 ? online(" \(record.draws)무", " \(record.draws)D") : ""

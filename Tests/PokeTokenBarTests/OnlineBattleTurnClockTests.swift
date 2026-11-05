@@ -62,12 +62,10 @@ final class OnlineBattleTurnClockTests: XCTestCase {
         XCTAssertEqual(state(.moves, deadline: at(20), playing: true), .counting(remaining: 20, fraction: 20 / 30, mine: true))
     }
 
-    func testNobodyIsWaitedOnInAnAutomaticBattleAForcedActionOrTheLastBeatsOfARound() {
+    func testNobodyIsWaitedOnInAnAutomaticBattle() {
         for deadline in [at(30), at(4), nil] {
             XCTAssertEqual(state(.automatic, mode: .auto, deadline: deadline), .idle, "automatic")
             XCTAssertEqual(state(.moves, mode: .auto, deadline: deadline), .idle, "automatic whatever the footer says")
-            XCTAssertEqual(state(.forced, deadline: deadline), .idle, "the engine takes the action itself")
-            XCTAssertEqual(state(.waiting, deadline: deadline), .idle, "a terminal round's last beats")
         }
     }
 
@@ -134,7 +132,7 @@ final class OnlineBattleTurnClockTests: XCTestCase {
         XCTAssertEqual(arena.turnClock(now: now), .preparing)
         fixture.model.request = .init(kind: "none", moves: [])
         fixture.model.deadline = at(18)
-        XCTAssertEqual(arena.turnClock(now: now), .idle, "a terminal round: nobody chooses")
+        XCTAssertEqual(arena.turnClock(now: now), .counting(remaining: 18, fraction: 18 / 30, mine: false), "not mine to choose, and the seconds still run")
     }
 
     func testAnAutomaticBattleHasNoBar() throws {
