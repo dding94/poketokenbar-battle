@@ -20,7 +20,7 @@ final class OnlineBattlePresentation {
     var noticeSurvivesRefresh: Bool { stickyNotice != nil && notice == stickyNotice }
     var isBusy = false
     var serverAddress = ""
-    /// True when the build fixed the server address (T08); T09 hides manual address entry.
+    /// True when the build fixed the server address (T08); the setup form then shows no address entry.
     var serverIsEmbedded = false
     /// Memory-only drafts survive popover disposal; never encode these in settings or saves.
     var setupInput = OnlineBattleSetupInput()
@@ -166,7 +166,16 @@ final class OnlineBattlePresentation {
         case .decline: guard !showsHistory, !showsStandings, rematchSourceID == nil, !isBusy, localSide == .p2, room?.state == .pending else { return }
         case .cancel: guard !showsHistory, !showsStandings, rematchSourceID == nil, !isBusy, [.pending, .accepted, .ready].contains(room?.state) else { return }
         case .retryCredentialSave: guard !isBusy, canRetryCredentialSave else { return }
-        case .applyingServer: return
+        case .applyingServer(let address, let inner):
+            // Manual builds only: the session saves this address, then runs the inner setup request against it.
+            guard !isBusy, !serverIsEmbedded, (try? OnlineBattleOrigin(address)) != nil else { return }
+            switch inner {
+            case .join(let code, let email):
+                guard !code.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+            case .recover(let code), .reconnect(let code):
+                guard !code.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+            default: return
+            }
         case .configureServer(let address): guard !isBusy, (try? OnlineBattleOrigin(address)) != nil else { return }
         case .join(let code, let email): guard !isBusy, !code.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         case .recover(let code), .reconnect(let code): guard !isBusy, !code.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }

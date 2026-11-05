@@ -702,7 +702,13 @@ final class OnlineBattleSession {
         case .dismissResult, .backToLobby: resetExtras(); clearHistory(); prefersLobby = true; navigationRevision &+= 1; selectedBattleID = nil; publish(); return
         case .openBattle(let id): prefersLobby = false; navigationRevision &+= 1; selectedBattleID = id; publish(); return
         case .configureServer(let value): await configureServer(value); return
-        case .applyingServer: return
+        case .applyingServer(let address, let inner):
+            // Save the typed address first, then run the setup request against it. If it cannot be saved
+            // (an embedded build, a failed write) the error is already shown and nothing is sent.
+            guard onlineAllowed, let target = (try? OnlineBattleOrigin(address))?.url.absoluteString else { return }
+            await configureServer(address)
+            guard settings.serverURL == target else { return }
+            await perform(inner); return
         case .showHistory:
             guard onlineAllowed, authenticated, presentation.account != nil else { return }
             guard !presentation.showsStandings, presentation.rematchSourceID == nil else { return }

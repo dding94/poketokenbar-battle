@@ -69,7 +69,8 @@ final class OnlineBattleSetupTests: XCTestCase {
             ("ABCD-EFGH-JKMN\n1234-5678-9012", embedded, .ambiguous),
             ("https://one.example\nhttps://two.example", nil, .ambiguous),
             ("https://battle.example\nABCD-EFGH-JKMN\n1234-5678-9012", nil, .ambiguous),
-            ("서버 주소: ABCD-EFGH-JKMN\n초대코드: https://battle.example", nil, .ambiguous),
+            ("서버 주소: ABCD-EFGH-JKMN\n초대코드: https://battle.example", nil, .invalidServer),
+            ("안녕하세요!\n초대코드 보내요.", embedded, .noInviteCode),
         ]
         for (text, embeddedServer, expected) in cases {
             var input = drafts

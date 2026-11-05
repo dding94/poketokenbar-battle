@@ -7,25 +7,34 @@ extension L {
     var onlinePinned: String { online("고정됨", "Pinned") }
     var onlineSetup: String { online("동료와 정식전 시작하기", "Battle with your group") }
     var onlineServer: String { online("서버 주소", "Server address") }
-    var onlineSaveServer: String { online("서버 주소 적용", "Apply server address") }
-    var onlineServerHint: String { online("① 방장이 보낸 HTTPS 서버 주소는 한 번 적용하면 저장돼요.", "① Apply the HTTPS server address from your host once to save it.") }
+    var onlineAdvanced: String { online("고급: 서버 주소", "Advanced: server address") }
+    var onlineServerHint: String { online("방장이 알려 준 https:// 서버 주소예요. 그룹에 참여하거나 계정을 연결할 때 저장돼요.", "The https:// server address from your host. It is saved when you join or reconnect.") }
+    var onlineServerPending: String { online("이 주소로 연결하고 저장할게요.", "This address will be used and saved.") }
     var onlinePasteInvitation: String { online("초대 정보 붙여넣기", "Paste invitation details") }
-    var onlinePasteInvitationFailed: String { online("서버 주소 하나와 12자리 초대코드가 함께 있는 내용을 복사해 주세요. 입력한 내용은 유지돼요.", "Copy one HTTPS server address and one 12-character invite code together. Your entries are unchanged.") }
-    var onlinePasteInvitationEmbedded: String { onlinePasteInvitation }
-    var onlineAdvanced: String { onlineServer }
-    func onlinePasteFailure(_ failure: OnlineBattleSetupInput.PasteFailure) -> String { "" }
+    var onlinePasteInvitationEmbedded: String { online("초대코드 붙여넣기", "Paste invite code") }
+    func onlinePasteFailure(_ failure: OnlineBattleSetupInput.PasteFailure) -> String {
+        let reason: String
+        switch failure {
+        case .empty: reason = online("복사된 글자가 없어요. 방장의 초대 메시지를 복사한 뒤 눌러 주세요.", "There is nothing to paste. Copy your host's invitation first.")
+        case .tooLong: reason = online("복사한 내용이 너무 길어요. 초대코드가 있는 줄만 복사해 주세요.", "What you copied is too long. Copy only the line with the invite code.")
+        case .noInviteCode: reason = online("12자리 초대코드를 찾지 못했어요. 코드가 보이게 다시 복사해 주세요.", "No 12-character invite code found. Copy it again so the code is included.")
+        case .invalidServer: reason = online("서버 주소가 올바르지 않아요. https:// 로 시작하는 주소만 쓸 수 있어요.", "That server address is not valid. Only https:// addresses work.")
+        case .serverMismatch: reason = online("초대 메시지의 서버가 이 앱의 서버와 달라요. 방장에게 확인해 주세요.", "The invitation names a different server than this app uses. Ask your host.")
+        case .serverMissing: reason = online("서버 주소가 없어요. 주소도 함께 복사하거나 아래 ‘고급’에 먼저 입력해 주세요.", "No server address. Copy it with the code, or enter it under Advanced first.")
+        case .ambiguous: reason = online("코드나 주소가 여러 개라 고를 수 없어요. 하나만 남기고 다시 복사해 주세요.", "There is more than one code or address. Copy just one and try again.")
+        }
+        return reason + online(" 입력한 내용은 바뀌지 않았어요.", " Your entries are unchanged.")
+    }
     var onlineInvite: String { online("초대코드", "Invite code") }
     var onlineNickname: String { online("닉네임", "Nickname") }
-    var onlineNicknameHint: String { online("② 초대코드와 공백 없는 닉네임을 입력하세요. 이메일은 필요 없어요.", "② Enter your invite code and nickname without spaces. No email is required.") }
-    var onlineServerSaved: String { online("주소가 적용됐어요. 아래에서 그룹에 참여하세요.", "Address saved. Join your group below.") }
+    var onlineNicknameHint: String { online("공백 없이 최대 254자까지 쓸 수 있어요. 이메일은 필요 없어요.", "No spaces, up to 254 characters. No email is required.") }
     func onlineSetupRequirement(_ requirement: OnlineBattleSetupInput.Requirement) -> String {
         switch requirement {
         case .busy: online("처리하고 있어요. 잠시 기다려 주세요.", "Working. Please wait.")
-        case .serverMissing: online("먼저 방장에게 받은 https:// 서버 주소를 입력하세요.", "First enter the HTTPS server address from your host.")
-        case .serverChanged: online("위의 ‘서버 주소 적용’을 먼저 눌러 주세요.", "Apply the server address above first.")
-        case .inviteMissing: online("방장에게 받은 초대코드를 입력하세요.", "Enter the invite code from your host.")
+        case .serverMissing: online("아래 ‘고급’을 열어 방장에게 받은 https:// 서버 주소를 입력하세요.", "Open Advanced below and enter the HTTPS server address from your host.")
         case .nicknameMissing: online("함께 사용할 닉네임을 입력하세요.", "Enter your nickname.")
-        case .nicknameInvalid: ""
+        case .nicknameInvalid: online("닉네임에는 공백을 쓸 수 없고 254자까지 가능해요.", "A nickname cannot contain spaces and is limited to 254 characters.")
+        case .inviteMissing: online("방장에게 받은 초대코드를 입력하세요.", "Enter the invite code from your host.")
         case .ready: online("준비됐어요. ‘그룹 참여’를 눌러 주세요.", "Ready. Select Join group.")
         }
     }

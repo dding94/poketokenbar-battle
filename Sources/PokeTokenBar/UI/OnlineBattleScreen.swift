@@ -167,60 +167,81 @@ private struct OnlineBattleSetupForm: View {
     let l: L
     let readInvitationClipboard: () -> String?
     private var input: OnlineBattleSetupInput { model.setupInput }
+    private var requirement: OnlineBattleSetupInput.Requirement {
+        input.requirement(isBusy: model.isBusy, serverIsEmbedded: model.serverIsEmbedded)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(l.onlineSetup).font(.headline)
-            Button(l.onlinePasteInvitation) {
-                model.setupPasteFailure = model.setupInput.pasteInvitation(readInvitationClipboard(), embeddedServer: model.serverIsEmbedded ? model.serverAddress : nil)
+            // Only a click reads the clipboard; nothing here ever reads it on its own.
+            Button(model.serverIsEmbedded ? l.onlinePasteInvitationEmbedded : l.onlinePasteInvitation) {
+                model.setupPasteFailure = model.setupInput.pasteInvitation(
+                    readInvitationClipboard(), embeddedServer: model.serverIsEmbedded ? model.serverAddress : nil)
             }
             .disabled(model.isBusy)
             .accessibilityIdentifier("online.pasteInvitation")
-            if model.setupPasteFailure != nil {
-                Text(l.onlinePasteInvitationFailed).font(.caption).foregroundStyle(.orange)
+            if let failure = model.setupPasteFailure {
+                Text(l.onlinePasteFailure(failure)).font(.caption).foregroundStyle(.orange)
                     .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("online.pasteFailure")
             }
             VStack(alignment: .leading, spacing: 7) {
-                Text(l.onlineServerHint).font(.caption).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                TextField(l.onlineServer, text: $model.setupInput.server).textFieldStyle(.roundedBorder)
-                    .accessibilityIdentifier("online.server")
-                Button(l.onlineSaveServer) {
-                    if let address = input.serverToApply { model.send(.configureServer(address)) }
-                }
-                .disabled(model.isBusy || input.serverToApply == nil)
-                if input.hasAppliedServer(model.serverAddress) {
-                    Text(l.onlineServerSaved).font(.caption2).foregroundStyle(.secondary)
-                }
-            }.practiceCard()
-            VStack(alignment: .leading, spacing: 7) {
-                TextField(l.onlineInvite, text: $model.setupInput.invite).textFieldStyle(.roundedBorder)
-                    .accessibilityIdentifier("online.invite")
                 TextField(l.onlineNickname, text: $model.setupInput.nickname).textFieldStyle(.roundedBorder)
                     .accessibilityIdentifier("online.nickname")
                 Text(l.onlineNicknameHint).font(.caption2).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+                TextField(l.onlineInvite, text: $model.setupInput.invite).textFieldStyle(.roundedBorder)
+                    .accessibilityIdentifier("online.invite")
                 Button(l.onlineJoin) {
-                    if let action = input.joinAction(appliedServer: model.serverAddress, isBusy: model.isBusy, serverIsEmbedded: model.serverIsEmbedded) {
-                        model.send(action)
+                    if let join = input.joinAction(appliedServer: model.serverAddress, isBusy: model.isBusy, serverIsEmbedded: model.serverIsEmbedded) {
+                        model.send(join)
                     }
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(input.requirement(appliedServer: model.serverAddress, isBusy: model.isBusy) != .ready)
-                Text(l.onlineSetupRequirement(input.requirement(appliedServer: model.serverAddress, isBusy: model.isBusy)))
+                .disabled(requirement != .ready)
+                .accessibilityIdentifier("online.join")
+                Text(l.onlineSetupRequirement(requirement))
                     .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }.practiceCard()
             DisclosureGroup(l.onlineRecovery, isExpanded: $model.setupRecoveryExpanded) {
                 VStack(alignment: .leading, spacing: 7) {
+                    if !model.serverIsEmbedded, input.serverToApply == nil {
+                        Text(l.onlineSetupRequirement(.serverMissing)).font(.caption2).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                     SecureField(l.onlineRecoveryCode, text: $model.setupInput.recovery).textFieldStyle(.roundedBorder)
-                    Button(l.onlineRecover) { model.send(.recover(code: input.recovery)) }
-                        .disabled(model.isBusy || input.recovery.isEmpty || !input.hasAppliedServer(model.serverAddress))
+                    Button(l.onlineRecover) {
+                        if let recover = input.recoverAction(appliedServer: model.serverAddress, isBusy: model.isBusy, serverIsEmbedded: model.serverIsEmbedded) {
+                            model.send(recover)
+                        }
+                    }
+                    .disabled(input.recoverAction(appliedServer: model.serverAddress, isBusy: model.isBusy, serverIsEmbedded: model.serverIsEmbedded) == nil)
                     Divider()
                     SecureField(l.onlineReconnectCode, text: $model.setupInput.reconnect).textFieldStyle(.roundedBorder)
-                    Button(l.onlineReconnect) { model.send(.reconnect(code: input.reconnect)) }
-                        .disabled(model.isBusy || input.reconnect.isEmpty || !input.hasAppliedServer(model.serverAddress))
+                    Button(l.onlineReconnect) {
+                        if let reconnect = input.reconnectAction(appliedServer: model.serverAddress, isBusy: model.isBusy, serverIsEmbedded: model.serverIsEmbedded) {
+                            model.send(reconnect)
+                        }
+                    }
+                    .disabled(input.reconnectAction(appliedServer: model.serverAddress, isBusy: model.isBusy, serverIsEmbedded: model.serverIsEmbedded) == nil)
                 }.padding(.top, 6)
             }.practiceCard()
+            // A build without a fixed server keeps manual entry, collapsed at the very bottom.
+            if !model.serverIsEmbedded {
+                DisclosureGroup(l.onlineAdvanced, isExpanded: $model.setupAdvancedExpanded) {
+                    VStack(alignment: .leading, spacing: 7) {
+                        Text(l.onlineServerHint).font(.caption).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        TextField(l.onlineServer, text: $model.setupInput.server).textFieldStyle(.roundedBorder)
+                            .accessibilityIdentifier("online.server")
+                        if input.serverToApply != nil, !input.hasAppliedServer(model.serverAddress) {
+                            Text(l.onlineServerPending).font(.caption2).foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }.padding(.top, 6)
+                }.practiceCard()
+            }
         }
     }
 }
