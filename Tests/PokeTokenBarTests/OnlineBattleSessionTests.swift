@@ -934,6 +934,76 @@ final class OnlineBattleSessionTests: XCTestCase {
         let advances = await http.count("/v1/battles/\(final.battleId)/advance"), reads = await http.count("/v1/battles/\(final.battleId)")
         XCTAssertEqual(advances, 0); XCTAssertEqual(reads, 0)
     }
+    // D7: the server's first-choice signal is a battle_changed with the same revision, round and deadline plus one flag.
+    private func signal(_ room: OnlineBattleView, seq: Int = 1, deadline: Double = 60000, flag: Any? = true) -> [String: Any] {
+        var fields: [String: Any] = ["type": "battle_changed", "state": "RUNNING", "revision": room.revision, "roundSeq": seq, "deadline": deadline]
+        if let flag { fields["opponentSubmitted"] = flag }
+        return fields
+    }
+    func testFirstChoiceSignalMarksTheOpponentWithoutAnyReadAndResetsNextRound() async throws {
+        let final = try battle(), observer = SessionObserver(), connection = SessionConnection()
+        let initial = try changed(final, ["state": "RUNNING", "result": NSNull(), "roundSeq": 1, "deadline": 60000, "journal": []])
+        let (session, http, _, _) = try await setup([initial], trainer: "trainer-two", connection: connection, observer: observer)
+        await session.bootstrap()
+        let before = await http.count("/v1/battles/\(final.battleId)"), meBefore = await http.count("/v1/me")
+        XCTAssertNotEqual(session.presentation.room?.opponentSubmitted, true)
+        try await notify(observer, connection, room: final, fields: signal(initial))
+        XCTAssertEqual(session.presentation.room?.opponentSubmitted, true)
+        XCTAssertEqual(session.presentation.room?.roundSeq, 1); XCTAssertEqual(session.presentation.room?.deadline, 60000)
+        try await notify(observer, connection, room: final, fields: signal(initial)) // a duplicate changes nothing
+        XCTAssertEqual(session.presentation.room?.opponentSubmitted, true)
+        // The pair for that round and the next round's open notice clear it.
+        try await notify(observer, connection, room: final, fields: pairNotice(final))
+        XCTAssertNotEqual(session.presentation.room?.opponentSubmitted, true)
+        try await notify(observer, connection, room: final, fields: ["type": "battle_changed", "state": "RUNNING", "revision": initial.revision, "roundSeq": 2, "deadline": 61000])
+        XCTAssertEqual(session.presentation.room?.roundSeq, 2); XCTAssertNotEqual(session.presentation.room?.opponentSubmitted, true)
+        try await notify(observer, connection, room: final, fields: signal(initial, seq: 2, deadline: 61000))
+        XCTAssertEqual(session.presentation.room?.opponentSubmitted, true); XCTAssertEqual(session.presentation.room?.roundSeq, 2)
+        let reads = await http.count("/v1/battles/\(final.battleId)"), me = await http.count("/v1/me"), advances = await http.count("/v1/battles/\(final.battleId)/advance")
+        XCTAssertEqual(reads, before); XCTAssertEqual(me, meBefore); XCTAssertEqual(advances, 0)
+    }
+    func testFirstChoiceSignalIsIgnoredWhenOldMissingFalseOrForAnotherDeadline() async throws {
+        let final = try battle(), observer = SessionObserver(), connection = SessionConnection()
+        let initial = try changed(final, ["state": "RUNNING", "result": NSNull(), "roundSeq": 1, "deadline": 60000, "journal": []])
+        let (session, http, _, _) = try await setup([initial], trainer: "trainer-two", connection: connection, observer: observer)
+        await http.route("/v1/battles/\(final.battleId)", try JSONEncoder().encode(initial)); await session.bootstrap()
+        // An older notice without the field, and a field that is not true, leave the view and the HTTP count alone.
+        for flag: Any? in [nil, false, NSNull(), "yes"] {
+            try await notify(observer, connection, room: final, fields: signal(initial, flag: flag))
+            XCTAssertNotEqual(session.presentation.room?.opponentSubmitted, true)
+        }
+        var reads = await http.count("/v1/battles/\(final.battleId)"); XCTAssertEqual(reads, 0)
+        // A different deadline is not provably the same round: the old rule applies and one authoritative read follows.
+        try await notify(observer, connection, room: final, fields: signal(initial, seq: 1, deadline: 99000))
+        reads = await http.count("/v1/battles/\(final.battleId)"); XCTAssertEqual(reads, 1)
+        XCTAssertNotEqual(session.presentation.room?.opponentSubmitted, true)
+        // A signal for a round already released is late and dropped without another read.
+        try await notify(observer, connection, room: final, fields: pairNotice(final))
+        try await notify(observer, connection, room: final, fields: signal(initial))
+        XCTAssertNotEqual(session.presentation.room?.opponentSubmitted, true)
+        reads = await http.count("/v1/battles/\(final.battleId)"); XCTAssertEqual(reads, 1)
+    }
+    func testFirstChoiceSignalForAFinishedRoomIsIgnored() async throws {
+        let final = try battle(), observer = SessionObserver(), connection = SessionConnection()
+        let (session, http, _, _) = try await setup([final], trainer: "trainer-two", connection: connection, observer: observer)
+        await session.bootstrap()
+        let before = await http.count("/v1/battles/\(final.battleId)")
+        try await notify(observer, connection, room: final, fields: signal(final, seq: 1, deadline: 60000))
+        let reads = await http.count("/v1/battles/\(final.battleId)")
+        XCTAssertEqual(reads, before); XCTAssertNotEqual(session.presentation.room?.opponentSubmitted, true)
+    }
+    func testFirstChoiceSignalThatArrivesInsteadOfAMissedOpenNoticeStillMarksTheNewRound() async throws {
+        let final = try battle(), observer = SessionObserver(), connection = SessionConnection()
+        let initial = try changed(final, ["state": "RUNNING", "result": NSNull(), "roundSeq": 1,
+            "journal": JSONSerialization.jsonObject(with: JSONEncoder().encode(Array(final.journal.prefix(1))))])
+        let deadline = final.journal[0].releasedAt + 30_000
+        let (session, http, _, _) = try await setup([initial], trainer: "trainer-two", connection: connection, observer: observer)
+        await session.bootstrap()
+        try await notify(observer, connection, room: final, fields: signal(initial, seq: 2, deadline: deadline))
+        let reads = await http.count("/v1/battles/\(final.battleId)")
+        XCTAssertEqual(reads, 0); XCTAssertEqual(session.presentation.room?.roundSeq, 2)
+        XCTAssertEqual(session.presentation.room?.opponentSubmitted, true)
+    }
     func testMissingPairLegacyMetadataAndInvalidTokensRecoverOnlyThatBattle() async throws {
         let final = try battle(), observer = SessionObserver(), connection = SessionConnection(), clock = SessionClock()
         let initial = try changed(final, ["state": "RUNNING", "result": NSNull(), "roundSeq": 1, "deadline": 60000, "journal": []])
