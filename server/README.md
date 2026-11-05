@@ -43,6 +43,27 @@ Free plan and register the workers.dev subdomain, deploy once
 `npx wrangler secret put <NAME> --env dev`, then measure. Secret values are never written to
 the repository. Workers Logs/observability stays explicitly off in both environments.
 
+## First group for a new environment
+
+A new environment has no group, and the app cannot create one. Order of steps (the user does
+the first three; agents never deploy or handle secret values):
+
+1. Deploy the Worker (`npx wrangler deploy`, with the user).
+2. Set the secrets `CODE_PEPPER` and `OPERATOR_SECRET` (`npx wrangler secret put <NAME>`).
+3. Run `scripts/bootstrap-group.mjs`. It creates the group and prints the group id, the host
+   trainer id and the host's recovery code once. It never prints the access key or the operator
+   secret, writes no file and sends the secret only in the request body.
+4. Paste the recovery code into the app's recovery field to connect as host.
+
+```sh
+read -rs OPERATOR_SECRET; export OPERATOR_SECRET
+node server/scripts/bootstrap-group.mjs https://<worker-host> "<group name>" "<host nickname>"
+unset OPERATOR_SECRET
+```
+
+The URL must be https (`http://localhost` is allowed for local runs). Server errors print only
+the error code. Run it once per environment: every run creates another group.
+
 ## Measurement script
 
 `scripts/measure.mjs` (Node 24, no dependencies) produces the PR 05 load against a deployed
