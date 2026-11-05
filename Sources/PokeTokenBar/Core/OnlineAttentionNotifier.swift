@@ -143,15 +143,10 @@ final class OnlineAttentionNotifier {
 /// `current()` traps in a raw `swift run` binary. Authorization is shared with the usage-limit alerts.
 @MainActor
 final class SystemOnlineNotificationCenter: OnlineNotificationCenter {
-    private var center: UNUserNotificationCenter { UNUserNotificationCenter.current() }
-
-    func permission() async -> OnlineNotificationPermission {
-        // The settings object is not Sendable, so only its status crosses back (Swift 6.1 rejects the async form).
-        let center = center
-        let status = await withCheckedContinuation { (continuation: CheckedContinuation<UNAuthorizationStatus, Never>) in
-            center.getNotificationSettings { continuation.resume(returning: $0.authorizationStatus) }
-        }
-        return switch status {
+    // The async calls stay nonisolated: the center is not Sendable, and a completion-handler closure written in a
+    // main-actor method would inherit that isolation and trap when the framework calls it on its own queue.
+    nonisolated func permission() async -> OnlineNotificationPermission {
+        switch await UNUserNotificationCenter.current().notificationSettings().authorizationStatus {
         case .notDetermined: .notDetermined
         case .denied: .denied
         case .authorized, .provisional, .ephemeral: .allowed
@@ -159,21 +154,22 @@ final class SystemOnlineNotificationCenter: OnlineNotificationCenter {
         }
     }
 
-    func requestPermission() async -> Bool {
-        (try? await center.requestAuthorization(options: [.alert, .sound])) ?? false
+    nonisolated func requestPermission() async -> Bool {
+        (try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound])) ?? false
     }
 
-    func add(_ request: OnlineNotificationRequest) async {
+    nonisolated func add(_ request: OnlineNotificationRequest) async {
         let content = UNMutableNotificationContent()
         content.title = request.title
         content.body = request.body
         content.sound = .default
         content.threadIdentifier = "online-attention.\(request.battleId)"
         content.userInfo = [OnlineAttentionNotifier.userInfoBattleKey: request.battleId]
-        try? await center.add(UNNotificationRequest(identifier: request.identifier, content: content, trigger: nil))
+        try? await UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: request.identifier, content: content, trigger: nil))
     }
 
     func withdraw(identifiers: [String]) {
+        let center = UNUserNotificationCenter.current()
         center.removePendingNotificationRequests(withIdentifiers: identifiers)
         center.removeDeliveredNotifications(withIdentifiers: identifiers)
     }
