@@ -144,7 +144,7 @@ final class OnlineBattleSession {
         resetBattleRuntime(); resetExtras(); clearHistory(); presentation.liveLogs = []
         presentation.room = nil; presentation.arena = nil; presentation.request = nil
         presentation.recoveryCode = nil; presentation.result = nil; presentation.canRetryCredentialSave = false
-        presentation.canStart = false; presentation.isBusy = false; presentation.phase = .setup
+        presentation.canStart = false; presentation.isBusy = false; presentation.phase = .setup; presentation.restoringAccount = false
         presentation.connectionStatus = "키체인 접근이 꺼져 있어 온라인 배틀을 중단했어요"
         await oldAPI?.setAccessKey(nil)
         await old?.stop()
@@ -165,12 +165,17 @@ final class OnlineBattleSession {
             guard let address = settings.serverURL else { return }
             let origin = try OnlineBattleOrigin(address)
             self.origin = origin; api = OnlineBattleAPI(origin: origin, transport: transport)
+            // Assumed until the key is read, so a relaunch does not flash the sign-up form.
+            presentation.restoringAccount = true
             let key = try await credentials.load(scope: .init(profileID: settings.profileID, origin: origin))
             try current(epoch)
-            guard let key else { presentation.connectionStatus = "접속 정보가 필요해요"; return }
+            guard let key else { presentation.restoringAccount = false; presentation.connectionStatus = "접속 정보가 필요해요"; return }
             try await activate(key, epoch: epoch)
             await refresh()
-        } catch { await handle(error, epoch: epoch) }
+        } catch {
+            if epoch == generation { presentation.restoringAccount = false }
+            await handle(error, epoch: epoch)
+        }
     }
     func configureServer(_ value: String) async {
         do {
@@ -194,7 +199,7 @@ final class OnlineBattleSession {
             presentation.room = nil; presentation.arena = nil; presentation.request = nil
             presentation.result = nil; presentation.recoveryCode = nil; presentation.notice = nil
             presentation.canRetryCredentialSave = false; presentation.canStart = false
-            presentation.phase = .setup; presentation.isBusy = false
+            presentation.phase = .setup; presentation.isBusy = false; presentation.restoringAccount = false
             await old?.stop()
             await bootstrap()
         } catch { await handle(error, epoch: generation) }
@@ -421,7 +426,7 @@ final class OnlineBattleSession {
             resetBattleRuntime(); resetExtras(); clearHistory(); presentation.liveLogs = []
             presentation.room = nil; presentation.arena = nil; presentation.request = nil
             presentation.result = nil; presentation.recoveryCode = nil; presentation.canStart = false
-            presentation.phase = .setup
+            presentation.phase = .setup; presentation.restoringAccount = false
             pendingGrant = grant; presentation.canRetryCredentialSave = true
             await api.setAccessKey(nil)
             await old?.stop(); try current(epoch)
@@ -475,7 +480,7 @@ final class OnlineBattleSession {
                 throw OnlineBattleFailure.unauthorized
             }
             if presentation.account == nil { presentation.clearSetupCodes() }
-            presentation.account = account; presentation.members = group.members
+            presentation.account = account; presentation.members = group.members; presentation.restoringAccount = false
             historyViews = [:]
             for room in battles where !room.state.isActive && room.side(for: account.trainer.trainerId) != nil {
                 historyViews[room.battleId] = room
@@ -1229,7 +1234,7 @@ final class OnlineBattleSession {
         guard epoch == generation else { return }
         if authenticated { presentation.clearSetupCodes() }
         authenticated = false; reconciled = false
-        presentation.canStart = false; presentation.phase = .setup; presentation.account = nil
+        presentation.canStart = false; presentation.phase = .setup; presentation.account = nil; presentation.restoringAccount = false
         resetBattleRuntime(); resetExtras(); clearHistory(); historyViews = [:]; presentation.battles = []; presentation.liveLogs = []
         dropStagings()
         presentation.connectionStatus = "접속키가 만료되었어요. 복구코드로 다시 연결해 주세요"

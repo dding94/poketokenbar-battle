@@ -137,7 +137,7 @@ extension L {
     func onlineHP(_ value: Int) -> String { "HP \(value)%" }
     /// One room in a list. ACCEPTED covers two steps, so the row follows the same step the room's guide shows.
     func onlineRoomState(_ battle: OnlineBattleView) -> String {
-        onlineState(battle.state)
+        onlineState(battle.state == .accepted && battle.confirmed ? .ready : battle.state)
     }
     func onlineState(_ state: OnlineBattleState) -> String {
         switch state {

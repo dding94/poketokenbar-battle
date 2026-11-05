@@ -99,7 +99,12 @@ struct OnlineBattleScreen: View {
                                 speciesNameProvider: speciesNameProvider, speciesNameStore: speciesNameStore)
         } else {
         switch model.phase {
-        case .setup: OnlineBattleSetupForm(model: model, l: l, readInvitationClipboard: readInvitationClipboard)
+        case .setup:
+            if model.showsRestoringAccount {
+                OnlineBattleRestoringAccount(model: model, l: l)
+            } else {
+                OnlineBattleSetupForm(model: model, l: l, readInvitationClipboard: readInvitationClipboard)
+            }
         case .lobby: OnlineBattleLobby(model: model, l: l, artwork: artwork)
         case .room: OnlineBattleRoom(model: model, l: l, artwork: artwork, speciesNameProvider: speciesNameProvider, speciesNameStore: speciesNameStore)
         case .arena: OnlineBattleArena(model: model, l: l, artwork: artwork, speciesNameProvider: speciesNameProvider, speciesNameStore: speciesNameStore)
@@ -158,6 +163,30 @@ struct OnlineBattleScreen: View {
                 .buttonStyle(.borderedProminent)
         }.practiceCard()
         .privacySensitive()
+    }
+}
+
+/// A saved account is on its way back. Nothing here is for the person to fill in, so no draft can be lost when it connects.
+@MainActor
+private struct OnlineBattleRestoringAccount: View {
+    let model: OnlineBattlePresentation
+    let l: L
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Label(l.onlineRestoringTitle, systemImage: "person.crop.circle.badge.checkmark").font(.headline)
+                    .fixedSize(horizontal: false, vertical: true)
+                ProgressView().controlSize(.small)
+            }
+            Text(l.onlineRestoringHint).font(.callout).fixedSize(horizontal: false, vertical: true)
+            Button(l.onlineRetry) { model.send(.refresh) }.disabled(model.isBusy)
+                .accessibilityIdentifier("online.restoring.retry")
+            Button(l.onlineRestoringOther) { model.send(.showSetupWhileRestoring) }
+                .buttonStyle(.borderless).font(.caption)
+                .accessibilityIdentifier("online.restoring.other")
+        }
+        .frame(maxWidth: .infinity, alignment: .leading).practiceCard()
     }
 }
 
