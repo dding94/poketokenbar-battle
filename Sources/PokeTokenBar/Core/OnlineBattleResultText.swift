@@ -68,6 +68,9 @@ extension L {
     func onlineRematchReceived(_ name: String) -> String { online("\(name)님이 한 번 더 겨루자고 해요", "\(name) wants to fight again") }
     /// Who enters when the request is accepted from the result.
     func onlineRematchAnswerEntry(_ name: String) -> String { online("수락하면 \(name) 출전", "Accepting sends \(name)") }
+    /// Under a request that crossed mine, when my own request is what keeps the Pokémon from answering.
+    var onlineRematchCrossedNote: String { online("내 신청을 취소하면 수락할 수 있어요", "Cancel your request to accept theirs") }
+    var onlineRematchCancelMine: String { online("내 신청 취소", "Cancel my request") }
     var onlineRematchOpenRoom: String { online("재대결 방 열기", "Open the rematch room") }
     var onlineRematchLater: String { online("나중에", "Later") }
     var onlineResultToLobby: String { online("로비로 돌아가기", "Back to lobby") }
@@ -77,6 +80,7 @@ extension L {
         switch block {
         case .noHealthyPokemon: online("건강한 포켓몬이 없어요 · 기절했다면 되살려요", "No healthy Pokémon · revive fainted ones")
         case .opponentLeft: online("상대가 그룹을 떠났어요", "Your opponent left the group")
+        case .entryHeld: online("포켓몬이 다른 신청이나 경기에 나가 있어요", "Your Pokémon is in another request or match")
         case .requestWaiting: online("상대의 신청이 기다리고 있어요 · 로비에서 답해요", "Their request is waiting · answer in the lobby")
         }
     }

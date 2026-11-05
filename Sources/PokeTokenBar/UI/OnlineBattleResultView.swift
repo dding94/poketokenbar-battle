@@ -51,11 +51,13 @@ struct OnlineBattleResultView: View {
                   initial: true) { announceResultIfDue(screen) }
     }
 
+    /// Whose sprite the hero draws: this person's own entry, from their seat. Internal so tests can read it.
+    var heroEntry: OnlineBattleSnapshot? { (model.localSide == .p1 ? model.room?.p1 : model.room?.p2)?.snapshot }
+
     private func hero(_ screen: OnlineBattleResultScreen) -> some View {
-        let seat = model.localSide == .p1 ? model.room?.p1 : model.room?.p2
         let won = model.result?.kind == .win
         return VStack(spacing: 3) {
-            PracticeSpriteTile(set: seat?.snapshot?.set, size: 48, artwork: artwork)
+            PracticeSpriteTile(set: heroEntry?.set, size: 48, artwork: artwork)
                 .practiceFainted(model.result?.effects?.fainted == true)
             Text(screen.title)
                 .font(.system(size: 26, weight: .bold))

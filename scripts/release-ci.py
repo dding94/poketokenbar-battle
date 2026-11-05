@@ -31,6 +31,7 @@ NATIVE_TESTS = (
     'testNativeManualAndAutomaticReportsPrivacyReplayAndRematch',
     'testSessionsRecoverCommittedResponseLossAndApplyDurablyOnce',
     'testSessionsStillStartWhenOneSideReconnectsAfterPressingReady',
+    'testAMovePressedBetweenRoundsReachesTheRoundThatOpens',
     'testAWakeHintBringsBackASessionThatGaveUpAndItsReadyStillCounts',
     'testSessionsReleaseVoidWithoutHealthXPWalletOrUsageEffects',
 )

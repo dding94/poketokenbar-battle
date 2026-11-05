@@ -1354,7 +1354,7 @@ API(`/v1`, JSON 본문, 응답은 `cache-control: no-store`):
 PR 13 릴리스 준비 인터페이스: `release.sh --check-only`는 점검 실패를 종료 코드로 반환하고, `--prepare <version>`은 로컬 검토 산출물만 만든다. `--prepare-build <version>`은 별도 서명 준비 뒤 설치 없는 공용 번들을 만든다. 두 준비 경로는 추적 VERSION·Git 상태·외부 서비스를 변경하지 않는다. `<version>` 게시 경로의 별도 승인·main/서명/격리 조건은 유지한다.
 
 - 빌드 준비·게시 경로에서는 로컬 전체 XCTest/OCR를 실행하지 않는다. `PTB_CI_RUN_ID`는 확인할 실행의 숫자 ID일 뿐 승인/성공 우회값이 아니다. 읽기 전용 GitHub 조회로 포크 저장소·CI workflow·현재 HEAD·완료/성공을 확인하고, 추적 소스 변경이 있으면 거절한다. changes, 앱 두 갈래, test-union, secret-scan, server, macOS 15/26 결정성 작업과 필수 단계가 모두 성공해야 한다. 부분 실행·누락·skip·조회 실패는 빌드 전 실패한다.
-- rest 로그에서 네이티브 인수 검사 다섯 건의 실제 통과와 wrapper의 `required=5 passed=5 skipped=0`을 확인한다(개수는 `scripts/release-ci.py`의 `NATIVE_TESTS`가 정하고, `test_release_workflow.py`가 실행기·Swift 테스트 파일과 대조한다). 기존 선택적 테스트 skip은 별도 미검증이며 통과 수에 합치지 않는다. `--prepare`는 계속 오프라인 검토 전용이고 빌드 준비의 CI 확인은 키 생성·로그인·원격 변경을 하지 않는다.
+- rest 로그에서 네이티브 인수 검사 여섯 건의 실제 통과와 wrapper의 `required=6 passed=6 skipped=0`을 확인한다(개수는 `scripts/release-ci.py`의 `NATIVE_TESTS`가 정하고, `test_release_workflow.py`가 실행기·Swift 테스트 파일과 대조한다). 기존 선택적 테스트 skip은 별도 미검증이며 통과 수에 합치지 않는다. `--prepare`는 계속 오프라인 검토 전용이고 빌드 준비의 CI 확인은 키 생성·로그인·원격 변경을 하지 않는다.
 
 ### H.5 하루 100판 목표를 유지하는 저장 구조 개선
 

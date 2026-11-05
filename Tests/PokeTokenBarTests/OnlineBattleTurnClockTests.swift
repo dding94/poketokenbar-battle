@@ -211,3 +211,25 @@ final class OnlineBattleTurnClockTests: XCTestCase {
         XCTAssertEqual(L(.ko).onlineSplashSkip, "건너뛰기"); XCTAssertEqual(L(.en).onlineSplashSkip, "Skip")
     }
 }
+
+// MARK: - Review C, F4 items 5 and 6
+
+extension OnlineBattleTurnClockTests {
+    /// A forced turn still runs on the server's clock. The seconds show, and nobody is hurried.
+    func testAForcedTurnShowsTheSecondsLeftWithoutHurryingAnyone() {
+        XCTAssertEqual(state(.forced, deadline: at(18)), .counting(remaining: 18, fraction: 18 / 30, mine: false))
+        let last = state(.forced, deadline: at(3))
+        XCTAssertFalse(last.isUrgent, "no orange and no auto-pick line: nothing here is the person's to do")
+        for l in [L(.ko), L(.en)] {
+            XCTAssertEqual(l.onlineClockText(last, turn: 9), l.onlineTurn(9, seconds: 3))
+        }
+        XCTAssertFalse(OnlineBattleSpoken.clock(l: L(.ko), state: last, turn: 9).contains("자동 선택"))
+    }
+
+    /// The last round's beats read like any other round's: the clock does not go quiet ahead of them.
+    func testTheLastBeatsLookLikeAnyRoundsBeats() {
+        XCTAssertEqual(state(.waiting, deadline: nil), state(.moves, deadline: nil))
+        XCTAssertEqual(state(.waiting, deadline: nil), .preparing)
+        XCTAssertEqual(state(.forced, deadline: nil), .preparing)
+    }
+}

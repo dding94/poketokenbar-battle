@@ -95,6 +95,7 @@ with tempfile.TemporaryDirectory(prefix='ptb-native-acceptance-') as temporary:
             expected = ['testNativeManualAndAutomaticReportsPrivacyReplayAndRematch',
                 'testSessionsRecoverCommittedResponseLossAndApplyDurablyOnce',
                 'testSessionsStillStartWhenOneSideReconnectsAfterPressingReady',
+                'testAMovePressedBetweenRoundsReachesTheRoundThatOpens',
                 'testAWakeHintBringsBackASessionThatGaveUpAndItsReadyStillCounts',
                 'testSessionsReleaseVoidWithoutHealthXPWalletOrUsageEffects']
             for name in expected:

@@ -136,6 +136,8 @@ final class OnlineBattlePresentation {
     var abilitySlugs: [OnlineBattleSide: [String: String]] = [:]
     var deadline: Date?
     var choiceSubmitted = false
+    /// The other seat's streak by battle, read from the standings once when that battle's arena opened.
+    var opponentStreaks: [String: Int] = [:]
     /// Transient onboarding output only; never an access key or persisted UI state.
     var recoveryCode: String? {
         // The check belongs to the code it was made for: a new code, or none, starts unchecked.
@@ -192,6 +194,13 @@ final class OnlineBattlePresentation {
     /// The click that sent a choice, kept with its round so a later round never inherits the mark.
     private struct LocalChoice { let battleID: String; let roundSeq: Int; let slot: Int }
     private var localChoice: LocalChoice?
+    /// A move picked while no round was open. It stays on this side until a round opens, and the session sends it there.
+    struct HeldChoice: Equatable { let battleID: String; let slot: Int }
+    private(set) var heldChoice: HeldChoice?
+    func holdChoice(slot: Int, battleID: String) { heldChoice = HeldChoice(battleID: battleID, slot: slot) }
+    func dropHeldChoice() { heldChoice = nil }
+    /// True while the server's clock runs for a manual round. Between rounds there is no deadline.
+    var roundIsOpen: Bool { room?.state == .running && room?.mode == .manual && deadline != nil }
     /// Said in a live manual round once the other seat's choice is in (whether or not mine is) or mine is in;
     /// nil before that, so the moves stay uncluttered. A choice that is in wins over any presence.
     /// A foe flagged offline is stated as fact only while the socket is up. Presence is not refreshed while

@@ -234,3 +234,67 @@ final class OnlineBattleArenaTests: XCTestCase {
         XCTAssertNil(arenaView(model).sideCard(.opponent, view: view).snapshot)
     }
 }
+
+// MARK: - Review C, F4 item 6: the last round does not tell before its beats do
+
+extension OnlineBattleArenaTests {
+    /// Every round but the last is drawn the same while it plays. Whatever differs in the last one says the match is over.
+    func testTheLastRoundsBeatsDrawTheSamePickerAndClockAsAnyOtherRound() throws {
+        for seat in [OnlineBattleSide.p1, .p2] {
+            let fixture = try OnlineBattleArenaFixture.arena(seat: seat); defer { fixture.close() }
+            let arena = arenaView(fixture.model), model = fixture.model
+            let rounds = fixture.battle.journal.count
+            try fixture.play(rounds: rounds - 1)
+            fixture.staging.skipToEnd()
+            let before = try XCTUnwrap(model.request).moves.map(\.id)
+            XCTAssertFalse(before.isEmpty)
+            let hints = model.moveHints
+            model.deadline = nil
+            try fixture.play(rounds: 1)
+            XCTAssertTrue(fixture.staging.isPlaying)
+            XCTAssertNotEqual(model.request?.kind, "move", "the engine has already finished")
+            XCTAssertEqual(arena.waitingMoves.map(\.id), before, "\(seat): the cards stay")
+            for move in arena.waitingMoves {
+                XCTAssertTrue(arena.movesLocked(move.slot), "\(seat): and nothing can be pressed")
+                XCTAssertEqual(arena.moveCard(move).hint, hints[move.slot], "\(seat): hints stay too")
+            }
+            let view = try XCTUnwrap(model.arena)
+            let clock = arena.turnClock(now: Date())
+            XCTAssertEqual(clock, .preparing, "\(seat): the clock does not look finished")
+            XCTAssertEqual(arena.clockTurn(view, state: clock), rounds + 1, "\(seat): it names the next turn, as it does in every other round")
+        }
+    }
+}
+
+// MARK: - Review C, F4 item 7: seats in the arena's cards
+
+extension OnlineBattleArenaTests {
+    /// The cards read the slugs of their own seat. A seat-blind read passes from the first seat, so both are checked.
+    func testEachCardReadsTheSlugsOfItsOwnSeatFromEitherSeat() throws {
+        for seat in [OnlineBattleSide.p1, .p2] {
+            let fixture = try OnlineBattleArenaFixture.arena(seat: seat); defer { fixture.close() }
+            let model = fixture.model, view = try XCTUnwrap(model.arena), arena = arenaView(model)
+            model.moveSlugs = [.p1: ["seatone": "seat-one"], .p2: ["seattwo": "seat-two"]]
+            model.abilitySlugs = [.p1: ["seatoneability": "seat-one-ability"], .p2: ["seattwoability": "seat-two-ability"]]
+            let foe: OnlineBattleSide = seat == .p1 ? .p2 : .p1
+            let own = arena.sideCard(.player, view: view), other = arena.sideCard(.opponent, view: view)
+            XCTAssertEqual(own.moveSlugs, model.moveSlugs[seat], "\(seat)")
+            XCTAssertEqual(own.abilitySlugs, model.abilitySlugs[seat], "\(seat)")
+            XCTAssertEqual(other.moveSlugs, model.moveSlugs[foe], "\(seat)")
+            XCTAssertEqual(other.abilitySlugs, model.abilitySlugs[foe], "\(seat)")
+        }
+    }
+
+    /// The result's hero is the person's own entry from either seat, never the other trainer's.
+    func testTheResultHeroIsMyOwnEntryFromEitherSeat() throws {
+        let battle = try OnlineBattleArenaFixture.golden("manual")
+        let first = try XCTUnwrap(battle.p1.snapshot), second = try XCTUnwrap(battle.p2.snapshot)
+        XCTAssertNotEqual(first.instanceId, second.instanceId)
+        for (seat, expected) in [(OnlineBattleSide.p1, first), (.p2, second)] {
+            let model = OnlineBattleScreenRenderingTests.model()
+            model.room = battle; model.localSide = seat; model.phase = .result
+            let view = OnlineBattleResultView(model: model, l: L(.ko), artwork: false)
+            XCTAssertEqual(view.heroEntry?.instanceId, expected.instanceId, "\(seat)")
+        }
+    }
+}

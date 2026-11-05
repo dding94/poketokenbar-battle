@@ -46,6 +46,8 @@ enum OnlineRematchOffer: Equatable {
 /// Why the result screen's rematch button is off. Said in one line below it.
 enum OnlineRematchBlock: Equatable {
     case noHealthyPokemon, opponentLeft
+    /// A healthy Pokémon exists, but another request or match of mine holds it.
+    case entryHeld
     /// The other seat's request is waiting and was put off; asking again would cross it.
     case requestWaiting
 }
@@ -75,6 +77,8 @@ struct OnlineBattleResultScreen: Equatable {
     let note: String?
     /// The finished room's id, which "Fight again" is about.
     let sourceID: String?
+    /// My own request when it crossed theirs: the room the extra "cancel mine" button ends.
+    var cancelOwnRequest: String? = nil
 
     /// What the main control sends: ask again, cancel the request, answer theirs, or open the room. Each names the room
     /// it is about. nil when there is no control.

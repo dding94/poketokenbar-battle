@@ -45,6 +45,9 @@ final class OnlineBattleStaging {
     /// The newest view and request. They outlive the resolver, so a final beat still draws after a completion.
     private(set) var lastView: BattleView?
     private(set) var lastRequest: BattleRequest?
+    /// The last request that had moves to pick, and its hints. The final round's beats keep drawing these, locked.
+    private(set) var lastMoveRequest: BattleRequest?
+    private(set) var lastMoveHints: [Int: PracticeMoveHint] = [:]
     var isPlaying: Bool { playback.isPlaying }
 
     @ObservationIgnored private var parser: PracticeEventParser

@@ -869,3 +869,49 @@ final class OnlineBattleStagingSessionTests: XCTestCase {
 private enum SHA256Hex {
     static func of(_ text: String) -> String { SHA256.hash(data: Data(text.utf8)).map { String(format: "%02x", $0) }.joined() }
 }
+
+// MARK: - Review C, F4 item 5: a forced turn is not a timeout
+
+extension OnlineBattleStagingEngineTests {
+    /// The server relays "timeout" for a seat that had nothing to pick, because it never receives a choice from it.
+    /// A real forced Struggle: the PP fixture's round 9 leaves the second seat nothing to pick.
+    func testAForcedRoundThatClosedOnTheClockIsNotCalledATimeout() throws {
+        let battle = try fixture("pp")
+        var journal = battle.journal
+        let pair = journal[8]
+        journal[8] = .init(roundSeq: pair.roundSeq, p1: pair.p1, p2: .timeout, releasedAt: pair.releasedAt)
+        let owner = try resolver(battle, .p2), clock = Clock()
+        defer { owner.close() }
+        let staging = OnlineBattleStaging(resolver: owner, clock: { clock.now })
+        try owner.consume(journal: Array(journal.prefix(8)))
+        staging.ingest(owner, mode: .manual, visible: false, secondsLeft: nil)
+        XCTAssertEqual(owner.request.kind, "forced")
+        let before = staging.playback.history.count
+        try owner.consume(journal: Array(journal.prefix(9)))
+        staging.ingest(owner, mode: .manual, visible: false, secondsLeft: nil)
+        let beats = staging.playback.history.dropFirst(before)
+        XCTAssertFalse(beats.isEmpty)
+        XCTAssertFalse(beats.contains { $0.callouts.contains(.timedOut) }, "nothing was picked for me because nothing could be")
+    }
+
+    /// Two rounds handed over at once: each is judged by the request it opened with, not the newest one.
+    func testTheTimeoutCalloutReadsTheRequestOfItsOwnRound() throws {
+        let battle = try fixture("pp")
+        var journal = battle.journal
+        let move = journal[7], forced = journal[8]
+        journal[7] = .init(roundSeq: move.roundSeq, p1: move.p1, p2: .timeout, releasedAt: move.releasedAt)
+        journal[8] = .init(roundSeq: forced.roundSeq, p1: forced.p1, p2: .timeout, releasedAt: forced.releasedAt)
+        let owner = try resolver(battle, .p2), clock = Clock()
+        defer { owner.close() }
+        let staging = OnlineBattleStaging(resolver: owner, clock: { clock.now })
+        try owner.consume(journal: Array(journal.prefix(7)))
+        staging.ingest(owner, mode: .manual, visible: false, secondsLeft: nil)
+        XCTAssertEqual(owner.request.kind, "move")
+        let before = staging.playback.history.count
+        try owner.consume(journal: Array(journal.prefix(9)))
+        staging.ingest(owner, mode: .manual, visible: false, secondsLeft: nil)
+        let marked = staging.playback.history.dropFirst(before).filter { $0.callouts.contains(.timedOut) }
+        XCTAssertEqual(marked.count, 1, "round 8 had moves to pick and did time out; round 9 did not")
+        XCTAssertEqual(marked.first?.turn, 8)
+    }
+}

@@ -314,6 +314,12 @@ struct OnlineBattleArena: View {
     /// running and the choice may be made while the last turn is still on screen.
     func movesLocked(_ slot: Int) -> Bool { !model.canChooseMove(slot) }
 
+    /// The line over an open picker.
+    var movePrompt: String { playing ? l.practicePlayingTurn : l.practiceWhatNext }
+
+    /// The cards drawn, locked, while beats play and the live request has no moves. They come from the last move request.
+    var waitingMoves: [BattleMove] { footer == .waiting ? Array((model.stage?.lastMoveRequest?.moves ?? []).prefix(4)) : [] }
+
     /// The card of the choice that is already in; nil slot means nothing is marked.
     func moveChosen(_ slot: Int) -> Bool { model.chosenSlot == slot }
 

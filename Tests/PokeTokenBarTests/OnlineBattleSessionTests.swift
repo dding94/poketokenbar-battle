@@ -3755,3 +3755,436 @@ extension OnlineBattleSessionTests {
     }
 }
 // END F3 tests
+
+// MARK: - Review C, F4 item 1: a move pressed between rounds
+
+extension OnlineBattleSessionTests {
+    private func settleTasks() async { for _ in 0..<200 { await Task.yield() } }
+    private func usableSlots(_ session: OnlineBattleSession) throws -> [Int] {
+        try XCTUnwrap(session.presentation.request).moves.filter { !$0.disabled && $0.pp > 0 }.map(\.slot)
+    }
+    private func choicesPath(_ room: OnlineBattleView) -> String { "/v1/battles/\(room.battleId)/choices" }
+    /// A server's own round 1 open, round 1 released and round 2 open.
+    private func aroundTheGap() throws -> (final: OnlineBattleView, open: OnlineBattleView, next: OnlineBattleView) {
+        let final = try battle(), open = try runningRoom()
+        let next = try changed(open, ["roundSeq": 2, "deadline": final.journal[0].releasedAt + 30_000,
+                                      "journal": JSONSerialization.jsonObject(with: JSONEncoder().encode(Array(final.journal.prefix(1))))])
+        return (final, open, next)
+    }
+    private func openNotice(_ next: OnlineBattleView) throws -> [String: Any] {
+        ["type": "battle_changed", "state": "RUNNING", "revision": next.revision, "roundSeq": next.roundSeq, "deadline": try XCTUnwrap(next.deadline)]
+    }
+    private func choiceBody(_ data: Data) throws -> [String: Any] {
+        try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+    }
+
+    /// The second seat's gap: the pair arrived by socket and the first seat has not advanced. Nothing goes out, the last
+    /// card pressed wins, and it goes to the round that opens with that round's number.
+    func testASecondSeatPressBetweenRoundsIsKeptSwappedAndSentToTheRoundThatOpens() async throws {
+        let (final, open, next) = try aroundTheGap(), observer = SessionObserver(), connection = SessionConnection()
+        let (session, http, _, _) = try await setup([open], trainer: "trainer-two", connection: connection, observer: observer)
+        await session.bootstrap()
+        try await notify(observer, connection, room: final, fields: pairNotice(final))
+        let model = session.presentation, choices = choicesPath(open)
+        XCTAssertEqual(model.room?.journal.count, 1)
+        XCTAssertFalse(model.roundIsOpen)
+        let slots = try usableSlots(session)
+        XCTAssertGreaterThan(slots.count, 1)
+        XCTAssertTrue(model.canChooseMove(slots[0]), "D6: the picker stays open between rounds")
+        model.send(.chooseMove(slots[0])); await settleTasks()
+        var posted = await http.count(choices); XCTAssertEqual(posted, 0, "nothing goes to the round that already ended")
+        XCTAssertEqual(model.chosenSlot, slots[0], "the card shows as picked at once")
+        XCTAssertTrue(model.canChooseMove(slots[1]), "another card can still replace it")
+        model.send(.chooseMove(slots[1])); await settleTasks()
+        posted = await http.count(choices); XCTAssertEqual(posted, 0)
+        XCTAssertEqual(model.chosenSlot, slots[1], "the last press wins")
+        await http.suspendNext(choices)
+        let opening = Task { try await self.notify(observer, connection, room: final, fields: self.openNotice(next)) }
+        await http.waitUntilBlocked()
+        XCTAssertTrue(model.choiceSubmitted, "while it is on its way the round reads as chosen, so no my-turn mark rises")
+        XCTAssertEqual(model.chosenSlot, slots[1])
+        XCTAssertFalse(model.canChooseMove(slots[0]), "once sent it cannot be swapped")
+        await http.resume(try response(changed(next, ["ownChoice": "move \(slots[1])"])))
+        try await opening.value
+        let bodies = await http.bodies(choices)
+        XCTAssertEqual(bodies.count, 1)
+        let body = try choiceBody(XCTUnwrap(bodies.first))
+        XCTAssertEqual(body["roundSeq"] as? Int, 2)
+        XCTAssertEqual(body["choice"] as? String, "move \(slots[1])")
+        XCTAssertNil(model.heldChoice)
+        XCTAssertTrue(model.choiceSubmitted)
+        XCTAssertEqual(model.chosenSlot, slots[1])
+        XCTAssertNil(model.notice)
+    }
+
+    /// The first seat's gap is its own advance round trip, under the action that sent the choice: the session is busy.
+    func testAFirstSeatPressDuringItsAdvanceIsKeptAndSentWhenTheAdvanceAnswers() async throws {
+        let (_, open, next) = try aroundTheGap()
+        let released = try changed(next, ["roundSeq": 1, "deadline": NSNull()])
+        let (session, http, _, _) = try await setup([open])
+        await session.bootstrap()
+        let model = session.presentation, choices = choicesPath(open), advance = "/v1/battles/\(open.battleId)/advance"
+        await http.queue(choices, [try response(released)])
+        await http.suspendNext(advance)
+        let press = Task { await session.perform(.chooseMove(1)) }
+        await http.waitUntilBlocked()
+        XCTAssertTrue(model.isBusy)
+        XCTAssertFalse(model.roundIsOpen)
+        let slot = try XCTUnwrap(usableSlots(session).last)
+        XCTAssertTrue(model.canChooseMove(slot), "a busy session still takes a press between rounds")
+        model.send(.chooseMove(slot)); await settleTasks()
+        var posted = await http.count(choices); XCTAssertEqual(posted, 1, "only the first press went out")
+        await http.route(choices, try JSONEncoder().encode(changed(next, ["ownChoice": "move \(slot)"])))
+        await http.resume(try response(next))
+        await press.value
+        posted = await http.count(choices); XCTAssertEqual(posted, 2)
+        let sent = await http.bodies(choices)
+        let body = try choiceBody(XCTUnwrap(sent.last))
+        XCTAssertEqual(body["roundSeq"] as? Int, 2)
+        XCTAssertEqual(body["choice"] as? String, "move \(slot)")
+        XCTAssertEqual(model.chosenSlot, slot)
+    }
+
+    /// A direct request between rounds cannot reach the server with the ended round's number either.
+    func testNoPathPostsTheRoundThatAlreadyEnded() async throws {
+        let (final, open, _) = try aroundTheGap(), observer = SessionObserver(), connection = SessionConnection()
+        let (session, http, _, _) = try await setup([open], trainer: "trainer-two", connection: connection, observer: observer)
+        await session.bootstrap()
+        try await notify(observer, connection, room: final, fields: pairNotice(final))
+        let slot = try XCTUnwrap(usableSlots(session).first)
+        await session.perform(.chooseMove(slot))
+        let posted = await http.count(choicesPath(open)); XCTAssertEqual(posted, 0)
+        XCTAssertEqual(session.presentation.chosenSlot, slot, "it is kept, not lost")
+    }
+
+    /// The round that opens has nothing to pick (a real forced Struggle): the kept move goes and the person is told.
+    func testAKeptMoveIsDroppedWithANoteWhenTheRoundThatOpensIsForced() async throws {
+        let final = try battle(4), encoder = JSONEncoder()
+        let gap = try changed(final, ["state": "RUNNING", "result": NSNull(), "roundSeq": 7, "deadline": NSNull(),
+                                      "journal": JSONSerialization.jsonObject(with: encoder.encode(Array(final.journal.prefix(7))))])
+        let forced = try changed(gap, ["roundSeq": 9, "deadline": 9_000_000_000_000,
+                                       "journal": JSONSerialization.jsonObject(with: encoder.encode(Array(final.journal.prefix(8))))])
+        let (session, http, _, _) = try await setup([gap], trainer: "trainer-two", rosterOverride: roster(final))
+        await session.bootstrap()
+        let model = session.presentation
+        XCTAssertEqual(model.request?.kind, "move")
+        model.send(.chooseMove(try XCTUnwrap(usableSlots(session).first))); await settleTasks()
+        XCTAssertNotNil(model.heldChoice)
+        try await list(http, [forced])
+        await session.refresh()
+        let posted = await http.count(choicesPath(final)); XCTAssertEqual(posted, 0)
+        XCTAssertNil(model.heldChoice)
+        XCTAssertEqual(model.request?.kind, "forced")
+        XCTAssertFalse(model.choiceSubmitted)
+        XCTAssertEqual(model.notice, copy.onlineHeldChoiceForced)
+        await session.refresh()
+        XCTAssertEqual(model.notice, copy.onlineHeldChoiceForced, "a background read must not wipe it unread")
+    }
+
+    /// The round that opens is still a move request, just without that move. A real Recharge: after Hyper Beam the
+    /// engine lists only the recharge. The person is told to pick again.
+    func testAKeptMoveTheOpenedRoundNoLongerListsIsDroppedWithANote() async throws {
+        let final = try battle(3), encoder = JSONEncoder()
+        let trainer = "trainer-one"
+        let owner = try OnlineBattleResolver(battle: final, localTrainerID: trainer, engine: BattleEngine(url: engineURL))
+        defer { owner.close() }
+        var earlier: (rounds: Int, slot: Int)?
+        var later: Int?
+        for rounds in 0..<final.journal.count {
+            try owner.consume(journal: Array(final.journal.prefix(rounds)))
+            guard owner.request.kind == "move" else { continue }
+            let usable = owner.request.moves.filter { !$0.disabled && $0.pp > 0 }.map(\.slot)
+            if let found = earlier, !usable.contains(found.slot) { later = rounds; break }
+            if earlier == nil, rounds > 0, usable.count > 1, let slot = usable.last { earlier = (rounds, slot) }
+        }
+        let held = try XCTUnwrap(earlier), opened = try XCTUnwrap(later, "the recharge fixture has a turn without that move")
+        let gap = try changed(final, ["state": "RUNNING", "result": NSNull(), "roundSeq": held.rounds, "deadline": NSNull(),
+                                      "journal": JSONSerialization.jsonObject(with: encoder.encode(Array(final.journal.prefix(held.rounds))))])
+        let next = try changed(gap, ["roundSeq": opened + 1, "deadline": 9_000_000_000_000,
+                                     "journal": JSONSerialization.jsonObject(with: encoder.encode(Array(final.journal.prefix(opened))))])
+        let (session, http, _, _) = try await setup([gap], trainer: trainer, rosterOverride: roster(final))
+        await http.route("/v1/battles/\(final.battleId)/advance", try JSONEncoder().encode(gap))
+        await session.bootstrap()
+        let model = session.presentation
+        model.send(.chooseMove(held.slot)); await settleTasks()
+        XCTAssertEqual(model.heldChoice?.slot, held.slot)
+        try await list(http, [next])
+        await session.refresh()
+        let posted = await http.count(choicesPath(final)); XCTAssertEqual(posted, 0)
+        XCTAssertNil(model.heldChoice)
+        XCTAssertEqual(model.request?.kind, "move")
+        XCTAssertEqual(model.notice, copy.onlineHeldChoiceUnusable)
+        XCTAssertFalse(model.canChooseMove(held.slot))
+        XCTAssertFalse(model.choiceSubmitted, "the round is the person's to answer again")
+    }
+
+    func testLeavingTheRoomOrTheMatchEndingDropsAKeptMove() async throws {
+        let (final, open, next) = try aroundTheGap(), observer = SessionObserver(), connection = SessionConnection()
+        let (session, http, _, _) = try await setup([open], trainer: "trainer-two", connection: connection, observer: observer)
+        await session.bootstrap()
+        try await notify(observer, connection, room: final, fields: pairNotice(final))
+        let model = session.presentation, slot = try XCTUnwrap(usableSlots(session).first)
+        model.send(.chooseMove(slot)); await settleTasks()
+        XCTAssertNotNil(model.heldChoice)
+        await session.perform(.backToLobby)
+        XCTAssertNil(model.heldChoice, "moving away takes it along")
+        try await notify(observer, connection, room: final, fields: openNotice(next))
+        var posted = await http.count(choicesPath(open)); XCTAssertEqual(posted, 0)
+
+        let (ended, endedHTTP, _, _) = try await setup([open], trainer: "trainer-two", connection: connection, observer: observer)
+        await ended.bootstrap()
+        try await notify(observer, connection, room: final, fields: pairNotice(final))
+        ended.presentation.send(.chooseMove(slot)); await settleTasks()
+        XCTAssertNotNil(ended.presentation.heldChoice)
+        try await list(endedHTTP, [final])
+        await ended.refresh()
+        XCTAssertNil(ended.presentation.heldChoice, "a finished match has no next round")
+        posted = await endedHTTP.count(choicesPath(open)); XCTAssertEqual(posted, 0)
+    }
+
+    /// The server has my other move from a press whose response was lost. It is not a connection problem.
+    func testAConflictingChoiceSaysTheFirstMoveStandsAndShowsIt() async throws {
+        let room = try runningRoom()
+        let (session, http, _, _) = try await setup([room])
+        await session.bootstrap()
+        await http.route(choicesPath(room), errorBody("choice_conflict"), status: 409)
+        try await list(http, [try changed(room, ["ownChoice": "move 2"])])
+        await session.perform(.chooseMove(1))
+        XCTAssertEqual(session.presentation.notice, copy.onlineErrorChoiceAlreadyIn)
+        XCTAssertNotEqual(session.presentation.notice, copy.onlineErrorGeneric)
+        XCTAssertEqual(session.presentation.chosenSlot, 2, "the card that counts is the one marked")
+        XCTAssertTrue(session.presentation.choiceSubmitted)
+    }
+
+    /// The same refusal on the kept move's way out says the same thing, and the move is gone.
+    func testARefusedKeptMoveIsDroppedWithTheWordsForWhatHappened() async throws {
+        for (code, words) in [("choice_conflict", copy.onlineErrorChoiceAlreadyIn), ("stale_round", copy.onlineErrorRoundPassed)] {
+            let (final, open, next) = try aroundTheGap(), observer = SessionObserver(), connection = SessionConnection()
+            let (session, http, _, _) = try await setup([open], trainer: "trainer-two", connection: connection, observer: observer)
+            await session.bootstrap()
+            try await notify(observer, connection, room: final, fields: pairNotice(final))
+            session.presentation.send(.chooseMove(try XCTUnwrap(usableSlots(session).first))); await settleTasks()
+            await http.route(choicesPath(open), errorBody(code), status: 409)
+            await http.route("/v1/battles/\(open.battleId)", try JSONEncoder().encode(next))
+            try await notify(observer, connection, room: final, fields: openNotice(next))
+            XCTAssertNil(session.presentation.heldChoice, code)
+            XCTAssertEqual(session.presentation.notice, words, code)
+            let posted = await http.count(choicesPath(open)); XCTAssertEqual(posted, 1, code)
+        }
+    }
+
+    /// A failed send proves nothing, so the move stays and the next read sends it.
+    func testAKeptMoveSurvivesAFailedSendAndTheNextReadSendsIt() async throws {
+        let (final, open, next) = try aroundTheGap(), observer = SessionObserver(), connection = SessionConnection()
+        let (session, http, _, _) = try await setup([open], trainer: "trainer-two", connection: connection, observer: observer)
+        await session.bootstrap()
+        try await notify(observer, connection, room: final, fields: pairNotice(final))
+        let slot = try XCTUnwrap(usableSlots(session).first)
+        session.presentation.send(.chooseMove(slot)); await settleTasks()
+        await http.route(choicesPath(open), errorBody("internal"), status: 500)
+        await http.route("/v1/battles/\(open.battleId)", try JSONEncoder().encode(next))
+        try await notify(observer, connection, room: final, fields: openNotice(next))
+        XCTAssertEqual(session.presentation.heldChoice?.slot, slot)
+        await http.route(choicesPath(open), try JSONEncoder().encode(changed(next, ["ownChoice": "move \(slot)"])))
+        try await list(http, [next])
+        await session.refresh()
+        XCTAssertNil(session.presentation.heldChoice)
+        XCTAssertEqual(session.presentation.chosenSlot, slot)
+        XCTAssertTrue(session.presentation.choiceSubmitted)
+    }
+
+    /// No turn-start line and no "what will you do" until the round has really opened.
+    func testTheTurnStartWaitsForTheRoundToOpen() async throws {
+        let (final, open, next) = try aroundTheGap(), observer = SessionObserver(), connection = SessionConnection()
+        let (session, http, _, _) = try await setup([open], trainer: "trainer-two", connection: connection, observer: observer)
+        await session.perform(.setStageSpeed(.instant))
+        await session.bootstrap()
+        await session.perform(.setPopoverVisible(true)); await session.perform(.setOnlineScreenVisible(true))
+        var lines: [String] = []
+        let arena = OnlineBattleArena(model: session.presentation, l: copy, artwork: false, announce: { lines.append($0) })
+        arena.announceTurnIfDue()
+        XCTAssertEqual(lines.count, 1, "round 1 is open")
+        try await notify(observer, connection, room: final, fields: pairNotice(final))
+        arena.announceTurnIfDue()
+        XCTAssertEqual(lines.count, 1, "the next turn is not open yet")
+        XCTAssertEqual(arena.movePrompt, copy.onlineRoundOpening)
+        session.presentation.send(.chooseMove(try XCTUnwrap(usableSlots(session).first))); await settleTasks()
+        XCTAssertEqual(arena.movePrompt, copy.onlineChoiceHeld)
+        session.presentation.dropHeldChoice()
+        try await notify(observer, connection, room: final, fields: openNotice(next))
+        arena.announceTurnIfDue()
+        XCTAssertEqual(lines.count, 2, "now it is")
+        XCTAssertEqual(arena.movePrompt, copy.practiceWhatNext)
+        arena.announceTurnIfDue()
+        XCTAssertEqual(lines.count, 2, "once")
+        _ = http
+    }
+}
+
+// MARK: - Review C, F4 item 2: rematch requests that cross
+
+extension OnlineBattleSessionTests {
+    /// The other seat's rematch request of `source`: they sit first, I have no entry in it yet.
+    private func theirRematch(_ source: OnlineBattleView, id: String = "bt_theirs", newerBy: Double = 0) throws -> OnlineBattleView {
+        let them = try JSONSerialization.jsonObject(with: JSONEncoder().encode(source.p2))
+        return try changed(rematchPending(source), [
+            "battleId": id, "p1": them, "createdAt": source.createdAt + newerBy,
+            "p2": ["trainerId": "trainer-one", "snapshot": NSNull(), "publicInfo": NSNull(), "hpPercent": NSNull()]])
+    }
+
+    /// Their request arrived while my draft was open. The read before submitting sees it: no second room, and the
+    /// result answers theirs.
+    func testSubmittingARematchWhenTheirsIsAlreadyWaitingAnswersItInsteadOfCrossing() async throws {
+        let source = try battle(), theirs = try theirRematch(source)
+        let (session, http, _, _) = try await setup([source])
+        try await activeOpponent(http)
+        await session.bootstrap(); await session.perform(.openBattle(source.battleId)); await session.perform(.prepareRematch(source.battleId))
+        session.presentation.selectedEntryID = "instance-one"
+        try await list(http, [source, theirs])
+        await http.route("/v1/battles/\(source.battleId)/rematch", try JSONEncoder().encode(rematchPending(source)))
+        await session.perform(.submitRematch)
+        let posted = await http.count("/v1/battles/\(source.battleId)/rematch"); XCTAssertEqual(posted, 0, "no second request")
+        let model = session.presentation
+        XCTAssertNil(model.rematchSourceID)
+        XCTAssertEqual(model.room?.battleId, source.battleId)
+        guard case .answer(_, let id)? = model.resultScreen(l: copy)?.rematch else { return XCTFail("the result answers theirs") }
+        XCTAssertEqual(id, theirs.battleId)
+        XCTAssertNil(model.notice)
+    }
+
+    /// Both POSTs passed each other. With one Pokémon, my own request holds it, so nobody can answer. The result names
+    /// that, not "no healthy Pokémon", and offers the way out.
+    func testCrossedRequestsOfferToCancelMineAndDoNotBlameTheHealthOfThePokemon() async throws {
+        for newerBy in [Double(-1000), 1000] {
+            let source = try battle(), mine = try rematchPending(source), theirs = try theirRematch(source, newerBy: newerBy)
+            let (session, http, _, _) = try await setup([source, mine, theirs], rosterOverride: [roster(source)[0]])
+            try await activeOpponent(http)
+            await session.bootstrap(); await session.perform(.openBattle(source.battleId))
+            let model = session.presentation
+            XCTAssertEqual(model.blockedEntryIDs, ["instance-one"], "my own request holds the only Pokémon")
+            var screen = try XCTUnwrap(model.resultScreen(l: copy))
+            guard case .answer(_, let asked) = screen.rematch else { return XCTFail("their request is answered here: \(screen.rematch)") }
+            XCTAssertEqual(asked, theirs.battleId)
+            XCTAssertEqual(screen.cancelOwnRequest, mine.battleId)
+            XCTAssertEqual(screen.note, copy.onlineRematchCrossedNote)
+            XCTAssertNotEqual(screen.note, copy.onlineRematchBlockLine(.noHealthyPokemon))
+            XCTAssertFalse(model.canAccept(model.actionRoom(asked)), "not until mine is gone")
+            let cancelled = try changed(mine, ["state": "CANCELLED", "revision": mine.revision + 1])
+            await http.route("/v1/battles/\(mine.battleId)/cancel", try JSONEncoder().encode(cancelled))
+            try await list(http, [source, cancelled, theirs])
+            model.send(.cancel(mine.battleId))
+            for _ in 0..<2000 where model.blockedEntryIDs.isEmpty == false || model.isBusy { await Task.yield() }
+            let calls = await http.count("/v1/battles/\(mine.battleId)/cancel"); XCTAssertEqual(calls, 1)
+            screen = try XCTUnwrap(model.resultScreen(l: copy))
+            XCTAssertNil(screen.cancelOwnRequest)
+            XCTAssertEqual(screen.note, copy.onlineRematchAnswerEntry(try XCTUnwrap(model.roster.first?.name)))
+            XCTAssertEqual(model.room?.battleId, source.battleId, "the result stays")
+            XCTAssertTrue(model.canAccept(model.actionRoom(asked)))
+        }
+    }
+
+    /// "Later" on a crossed request leaves my own request to wait on, cancelable, not a dead button.
+    func testPuttingOffACrossedRequestShowsMyOwnRequestWaiting() async throws {
+        let source = try battle(), mine = try rematchPending(source), theirs = try theirRematch(source, newerBy: 1000)
+        let (session, http, _, _) = try await setup([source, mine, theirs], rosterOverride: [roster(source)[0]])
+        try await activeOpponent(http)
+        await session.bootstrap(); await session.perform(.openBattle(source.battleId))
+        session.presentation.send(.deferRematch(theirs.battleId))
+        guard case .waiting(_, let id)? = session.presentation.resultScreen(l: copy)?.rematch else { return XCTFail("mine is what is left") }
+        XCTAssertEqual(id, mine.battleId)
+    }
+
+    /// Held by a request about some other match: still not a health problem.
+    func testAPokemonHeldByAnotherRequestIsNotCalledUnhealthy() async throws {
+        let source = try battle(), elsewhere = try changed(rematchPending(source), ["battleId": "bt_elsewhere", "rematchOf": NSNull()])
+        let (session, http, _, _) = try await setup([source, elsewhere], rosterOverride: [roster(source)[0]])
+        try await activeOpponent(http)
+        await session.bootstrap(); await session.perform(.openBattle(source.battleId))
+        let screen = try XCTUnwrap(session.presentation.resultScreen(l: copy))
+        XCTAssertEqual(screen.rematch, .request(enabled: false))
+        XCTAssertEqual(screen.note, copy.onlineRematchBlockLine(.entryHeld))
+    }
+}
+
+// MARK: - Review C, F4 item 3: the roster after a settlement on the socket path
+
+extension OnlineBattleSessionTests {
+    private func lastRoundOpen(_ final: OnlineBattleView) throws -> OnlineBattleView {
+        try changed(final, ["state": "RUNNING", "result": NSNull(), "roundSeq": final.journal.count, "deadline": 9_000_000_000_000,
+                            "journal": JSONSerialization.jsonObject(with: JSONEncoder().encode(Array(final.journal.dropLast())))])
+    }
+
+    /// The whole path of the second seat to report: the last pair by socket, the report answered COMPLETED, settlement.
+    /// No read follows, so the roster has to be rebuilt where the settlement happens.
+    func testTheSecondReporterOnTheSocketPathHasAFreshRosterForTheRematch() async throws {
+        let final = try battle(), observer = SessionObserver(), connection = SessionConnection()
+        let (session, http, _, effects) = try await setup([lastRoundOpen(final)], rosterOverride: [roster(final)[0]], connection: connection, observer: observer)
+        try await activeOpponent(http)
+        await http.route("/v1/battles/\(final.battleId)/report", try JSONEncoder().encode(final))
+        await session.bootstrap()
+        let model = session.presentation, own = "instance-one"
+        XCTAssertEqual(model.blockedEntryIDs, [own], "the match holds it")
+        let before = model.entryHP[own]
+        try await notify(observer, connection, room: final, fields: pairNotice(final, seq: final.journal.count))
+        XCTAssertEqual(effects.applications, 1)
+        XCTAssertEqual(model.room?.state, .completed)
+        XCTAssertEqual(model.blockedEntryIDs, [], "the settlement released it")
+        let maxHP = try XCTUnwrap(final.p1.snapshot?.publicInfo.stats["hp"])
+        let share = effects.healthShare(of: own)
+        XCTAssertEqual(model.entryHP[own], share <= 0 ? 0 : max(1, Int((min(1, share) * Double(maxHP)).rounded(.down))))
+        if share < 1 { XCTAssertNotEqual(model.entryHP[own], before, "the HP it ended with, not the HP it started with") }
+        let screen = try XCTUnwrap(model.resultScreen(l: copy))
+        XCTAssertEqual(screen.rematch, .request(enabled: true))
+        XCTAssertNil(screen.note)
+    }
+
+    /// The same path answered VOID ends the room without a settlement. The hold goes the same way.
+    func testAVoidAnswerOnTheSocketPathAlsoFreesTheRoster() async throws {
+        let final = try battle(), observer = SessionObserver(), connection = SessionConnection()
+        let voided = try changed(final, ["state": "VOID", "result": NSNull(), "reason": "mismatch"])
+        let (session, http, _, _) = try await setup([lastRoundOpen(final)], rosterOverride: [roster(final)[0]], connection: connection, observer: observer)
+        await http.route("/v1/battles/\(final.battleId)/report", try JSONEncoder().encode(voided))
+        await session.bootstrap()
+        XCTAssertEqual(session.presentation.blockedEntryIDs, ["instance-one"])
+        try await notify(observer, connection, room: final, fields: pairNotice(final, seq: final.journal.count))
+        XCTAssertEqual(session.presentation.room?.state, .void)
+        XCTAssertEqual(session.presentation.blockedEntryIDs, [])
+    }
+}
+
+// MARK: - Review C, F4 item 4: the other seat's streak on the card
+
+extension OnlineBattleSessionTests {
+    private func standingsBody(streak: Int) -> Data {
+        Data(#"{"groupId":"group","championTrainerId":null,"rows":[{"trainerId":"trainer-two","displayName":"x","wins":5,"losses":0,"draws":0,"streak":\#(streak),"bestStreak":5,"winRate":1}]}"#.utf8)
+    }
+
+    /// The arena never opens the standings overlay, so the streak is read when the match's room opens: once.
+    func testTheFoesStreakIsReadOnceWhenTheMatchOpensAndOutlivesTheOverlayReset() async throws {
+        let room = try runningRoom()
+        let (session, http, _, _) = try await setup([room])
+        await http.route("/v1/standings", standingsBody(streak: 3))
+        await session.bootstrap()
+        let model = session.presentation
+        for _ in 0..<2000 where model.opponentStreak == nil { await Task.yield() }
+        XCTAssertEqual(model.opponentStreak, 3)
+        XCTAssertNil(model.standings, "the overlay's own value stays out of it")
+        await session.refresh(); await session.refresh(); await settleTasks()
+        var reads = await http.count("/v1/standings"); XCTAssertEqual(reads, 1, "one read per match")
+        await session.perform(.backToLobby)
+        await session.perform(.openBattle(room.battleId)); await settleTasks()
+        XCTAssertEqual(model.opponentStreak, 3, "going to the lobby and back keeps it")
+        reads = await http.count("/v1/standings"); XCTAssertEqual(reads, 1)
+    }
+
+    func testAFailedStreakReadLeavesTheLineOutAndIsNotRetriedInTheSameMatch() async throws {
+        let room = try runningRoom()
+        let (session, http, _, _) = try await setup([room])
+        await http.route("/v1/standings", errorBody("internal"), status: 500)
+        await session.bootstrap(); await settleTasks()
+        XCTAssertNil(session.presentation.opponentStreak)
+        XCTAssertNil(session.presentation.notice, "a line on a card is not worth a banner")
+        await session.refresh(); await settleTasks()
+        let reads = await http.count("/v1/standings"); XCTAssertEqual(reads, 1)
+    }
+}
