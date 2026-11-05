@@ -641,6 +641,27 @@ final class OnlineBattleStagingSessionTests: XCTestCase {
         XCTAssertEqual(h.model.phase, .lobby)
     }
 
+    /// A completion ahead of the resolver is not consumed, so verification keeps its own path. The beats on
+    /// screen still finish before the result.
+    func testCompletionAheadOfTheResolverFinishesTheBeatsWithoutStagingTheRest() async throws {
+        let final = try battle(), first = try running(final, rounds: 1, ["roundSeq": 2, "deadline": 61000])
+        let h = try await setup([first], roomForRoster: final)
+        await showScreen(h)
+        await h.session.bootstrap()
+        let stage = try XCTUnwrap(h.model.stage)
+        XCTAssertTrue(stage.isPlaying)
+        try await list(h, [final])
+        await h.session.refresh()
+        XCTAssertEqual(h.effects.applications, 1)
+        XCTAssertEqual(h.model.phase, .arena)
+        XCTAssertEqual(h.model.arena?.turn, stage.lastView?.turn)
+        XCTAssertEqual(h.model.arena?.ended, false, "the last consumed view, not the unconsumed end")
+        drainBeats(h)
+        XCTAssertEqual(h.model.phase, .result)
+        XCTAssertEqual(h.effects.applications, 1)
+        XCTAssertLessThan(Set(stage.playback.history.map(\.turn)).count, final.journal.count)
+    }
+
     func testReportedGoesToVerifyingOnceTheBeatsEnd() async throws {
         let final = try battle(), terminal = try running(final, rounds: final.journal.count)
         let h = try await setup([terminal], roomForRoster: final)
@@ -799,7 +820,8 @@ final class OnlineBattleStagingSessionTests: XCTestCase {
             let h = try await setup([first], roomForRoster: final)
             await showScreen(h)
             await h.session.bootstrap()
-            XCTAssertEqual(h.model.stage?.isPlaying, true)
+            let old = try XCTUnwrap(h.model.stage)
+            XCTAssertTrue(old.isPlaying)
             switch reset {
             case 0: await h.session.setEnabled(false)
             case 1: await h.session.configureServer("https://new-battle.example.invalid")
@@ -809,7 +831,9 @@ final class OnlineBattleStagingSessionTests: XCTestCase {
                 try await list(h, [])
                 await h.session.perform(.join(inviteCode: "SYNTHETIC", email: "synthetic@example.invalid"))
             }
-            XCTAssertNil(h.model.stage, "reset \(reset)")
+            // The mock server still lists the room after a server change, so a new stage may follow; never the old one.
+            XCTAssertFalse(h.model.stage === old, "reset \(reset)")
+            if reset != 1 { XCTAssertNil(h.model.stage, "reset \(reset)") }
         }
     }
 }

@@ -65,6 +65,10 @@ final class OnlineBattleSession {
     private var historyViews: [String: OnlineBattleView] = [:]
     private var resolvers: [String: OnlineBattleResolver] = [:]
     private var resultByBattleID: [String: OnlineBattleUIResult] = [:]
+    /// The display of each battle. It outlives the popover's views and, for a final beat, the resolver.
+    private var stagings: [String: OnlineBattleStaging] = [:]
+    private var onlineScreenVisible = false
+    private var stageDriver: Task<Void, Never>?
     private var prefersLobby = false
     private var navigationRevision: UInt64 = 0
     private var selectedBattleID: String?
@@ -107,7 +111,7 @@ final class OnlineBattleSession {
         let old = connection, oldAPI = api; connection = nil
         authenticated = false; reconciled = false; bootstrapped = false; actionInFlight = false
         pendingGrant = nil; challengeIntent = nil; prepared = [:]; acknowledgedStarts = []; submittedReports = []
-        for resolver in resolvers.values { resolver.close() }; resolvers = [:]; views = [:]; historyViews = [:]
+        for resolver in resolvers.values { resolver.close() }; resolvers = [:]; views = [:]; historyViews = [:]; dropStagings()
         selectedBattleID = nil; resultByBattleID = [:]; prefersLobby = false; checkedDeadlines = [:]; nextRecoveryRead = nil
         presentation.account = nil; presentation.members = []; presentation.battles = []
         resetBattleRuntime(); resetExtras(); clearHistory(); presentation.liveLogs = []
@@ -148,6 +152,7 @@ final class OnlineBattleSession {
             refreshTask?.cancel(); refreshTask = nil; ticker?.cancel(); ticker = nil
             let old = connection; connection = nil
             for resolver in resolvers.values { resolver.close() }
+            dropStagings()
             resolvers = [:]; views = [:]; historyViews = [:]; selectedBattleID = nil; resultByBattleID = [:]; prefersLobby = false; checkedDeadlines = [:]
             api = nil; origin = nil; pendingGrant = nil; challengeIntent = nil
             authenticated = false; reconciled = false; actionInFlight = false
@@ -367,6 +372,7 @@ final class OnlineBattleSession {
             let old = connection; connection = nil
             authenticated = false; reconciled = false
             for resolver in resolvers.values { resolver.close() }
+            dropStagings()
             resolvers = [:]; views = [:]; historyViews = [:]; resultByBattleID = [:]
             selectedBattleID = nil; prefersLobby = false; checkedDeadlines = [:]; nextRecoveryRead = nil
             prepared = [:]; acknowledgedStarts = []; submittedReports = []; challengeIntent = nil
@@ -489,6 +495,7 @@ final class OnlineBattleSession {
                 try effects.releaseOnlineBattle(key: key)
                 resolvers.removeValue(forKey: room.battleId)?.close()
                 presentation.announceEnded(room, previous: previousView?.state, l: localization())
+                stagings.removeValue(forKey: room.battleId)?.skipToEnd()
                 if room.state == .void {
                     resultByBattleID[room.battleId] = .init(title: "경기 무효", detail: "체력과 경험치는 바뀌지 않았어요.", xpAwarded: 0, hpApplied: false, isVoid: true)
                 }
@@ -513,6 +520,7 @@ final class OnlineBattleSession {
                 guard !refetched else { throw OnlineBattleResolver.Failure.invalidJournal }
                 refetched = true
                 resolver.close(); resolvers[room.battleId] = nil
+                stagings[room.battleId]?.markResync()
                 // One authoritative refetch and a fresh engine, then fail closed if the server remains invalid.
                 let fresh = try await api.battle(id: room.battleId); try current(epoch)
                 guard views[room.battleId] == room else { return }
@@ -522,6 +530,8 @@ final class OnlineBattleSession {
                 views[room.battleId] = nil
                 resolvers[room.battleId] = rebuilt; room = fresh; continue
             }
+            // Every consumed round passes here: WebSocket, read and fallback alike.
+            ingestStage(room, resolver: resolver)
             publish()
             if room.state == .ready, prepared[room.battleId] == room.revision, let connection {
                 let snapshot = await connection.snapshot(); try current(epoch)
@@ -622,15 +632,25 @@ final class OnlineBattleSession {
         guard let own = side == .p1 ? room.p1.snapshot : room.p2.snapshot,
               try selectedSnapshot(allow: receiptKey(room, account: account), id: own.instanceId) == own else { throw OnlineBattleFailure.invalidRequest }
     }
-    private func publish() {
-        var listed = views
-        for (id, room) in historyViews { listed[id] = room }
-        presentation.battles = listed.values.sorted { ($0.createdAt, $0.battleId) > ($1.createdAt, $1.battleId) }
+    /// The live room on screen. Only processed live views can drive the live room/result; archive summaries cannot settle it.
+    private func displayedRoom() -> OnlineBattleView? {
+        guard !prefersLobby else { return nil }
         // Only processed live views can drive the live room/result; archive summaries cannot settle it.
         let live = views.values.sorted { ($0.createdAt, $0.battleId) > ($1.createdAt, $1.battleId) }
         // A match in play or being verified outranks a newer request, so a relaunch returns to it.
         let inPlay = live.first(where: { $0.state == .running || $0.state == .reported })
-        let room = prefersLobby ? nil : (selectedBattleID.flatMap { views[$0] } ?? inPlay ?? live.first(where: { $0.state.isActive }) ?? live.first)
+        return selectedBattleID.flatMap { views[$0] } ?? inPlay ?? live.first(where: { $0.state.isActive }) ?? live.first
+    }
+    private func publish() {
+        syncStages()
+        var listed = views
+        for (id, room) in historyViews { listed[id] = room }
+        presentation.battles = listed.values.sorted { ($0.createdAt, $0.battleId) > ($1.createdAt, $1.battleId) }
+        let room = displayedRoom()
+        let staging = room.flatMap { stagings[$0.battleId] }
+        // Progress is already done when this holds; it only keeps the arena up until the last beat ends.
+        let holdsArena = staging?.isPlaying == true
+        presentation.stage = staging
         presentation.room = room
         presentation.result = room.flatMap { resultByBattleID[$0.battleId] }
         presentation.arena = nil; presentation.request = nil; presentation.deadline = nil
@@ -642,16 +662,72 @@ final class OnlineBattleSession {
         presentation.localSide = room.side(for: account.trainer.trainerId) ?? .p1
         presentation.deadline = room.deadline.map { Date(timeIntervalSince1970: $0 / 1000) }
         presentation.choiceSubmitted = room.ownChoice != nil
-        presentation.arena = resolvers[room.battleId]?.view; presentation.request = resolvers[room.battleId]?.request
+        presentation.arena = resolvers[room.battleId]?.view ?? staging?.lastView
+        presentation.request = resolvers[room.battleId]?.request ?? staging?.lastRequest
         presentation.liveLogs = OnlineBattleHistoryText.logs(resolvers[room.battleId]?.logs ?? [], localSide: presentation.localSide)
         publishDisclosedNames(room)
         switch room.state {
         case .pending, .accepted, .ready: presentation.phase = .room
         case .running: presentation.phase = .arena
-        case .reported: presentation.phase = .verifying
-        case .completed, .void: presentation.phase = .result
+        case .reported: presentation.phase = holdsArena ? .arena : .verifying
+        case .completed: presentation.phase = holdsArena ? .arena : .result
+        case .void: presentation.phase = .result
         case .declined, .cancelled, .expired: presentation.phase = .lobby
         }
+    }
+    private func ingestStage(_ room: OnlineBattleView, resolver: OnlineBattleResolver) {
+        let staging: OnlineBattleStaging
+        if let existing = stagings[room.battleId] { staging = existing }
+        else {
+            staging = OnlineBattleStaging(resolver: resolver, clock: clock.now)
+            staging.playback.timeScale = presentation.stageSpeed.timeScale
+            stagings[room.battleId] = staging
+        }
+        staging.ingest(resolver, mode: room.mode, visible: stageIsVisible(room.battleId, displayed: displayedRoom()?.battleId),
+                       secondsLeft: room.deadline.map { $0 / 1000 - clock.now() })
+    }
+    private func stageIsVisible(_ id: String, displayed: String?) -> Bool {
+        popoverOpen && onlineScreenVisible && id == displayed && presentation.stageSpeed != .instant
+            && !presentation.showsHistory && !presentation.showsStandings && presentation.rematchSourceID == nil
+    }
+    /// A stage nobody can see has nothing to play, so reopening never shows old beats and a held phase lets go.
+    private func syncStages() {
+        let displayed = displayedRoom()?.battleId
+        for (id, staging) in stagings {
+            if !stageIsVisible(id, displayed: displayed) { staging.skipToEnd() }
+            // A finished battle off screen will never draw again; the one on screen waits for its result to go.
+            if id != displayed, let room = views[id], !room.state.isActive { stagings[id] = nil }
+        }
+        let playing = displayed.flatMap { stagings[$0] }?.isPlaying == true
+        if playing, automaticTicks { startStageDriver() } else { stopStageDriver() }
+    }
+    private func startStageDriver() {
+        guard stageDriver == nil else { return }
+        let clock = clock
+        stageDriver = Task { [weak self] in
+            while !Task.isCancelled {
+                do { try await clock.sleep(0.1) } catch { return }
+                guard !Task.isCancelled else { return }
+                self?.tickStage()
+            }
+        }
+    }
+    private func stopStageDriver() { stageDriver?.cancel(); stageDriver = nil }
+    private func dropStagings() {
+        stagings = [:]; presentation.stage = nil
+        stopStageDriver()
+    }
+    /// A visibility change has to reach the phase too, which only `publish()` sets.
+    private func refreshStageVisibility() {
+        if authenticated, presentation.account != nil { publish() } else { syncStages() }
+    }
+    /// Moves the beat on screen; the driver calls it every 100 ms and tests call it directly. It also catches
+    /// an overlay opened since the last publish. When the last beat ends, a held phase moves on.
+    func tickStage() {
+        let wasPlaying = stagings.values.contains(where: \.isPlaying)
+        syncStages()
+        displayedRoom().flatMap { stagings[$0.battleId] }?.advance()
+        if wasPlaying, !stagings.values.contains(where: \.isPlaying) { refreshStageVisibility() }
     }
     private func publishDisclosedNames(_ room: OnlineBattleView) {
         guard let view = presentation.arena else { return }
@@ -673,7 +749,20 @@ final class OnlineBattleSession {
         case .setPopoverVisible(let open):
             popoverOpen = open
             if open { requestStandingsRefresh() } else { invalidateStandingsRead() }
+            // The popover's views are released on close with no guaranteed onDisappear; the screen's onAppear sets it again.
+            if !open { onlineScreenVisible = false }
+            refreshStageVisibility()
             await connection?.setPopoverOpen(open); return
+        case .setOnlineScreenVisible(let visible):
+            onlineScreenVisible = visible
+            refreshStageVisibility(); return
+        case .skipStage:
+            presentation.stage?.skipToEnd()
+            refreshStageVisibility(); return
+        case .setStageSpeed(let speed):
+            presentation.stageSpeed = speed
+            for staging in stagings.values { staging.playback.timeScale = speed.timeScale }
+            refreshStageVisibility(); return
         case .showStandings:
             guard onlineAllowed, authenticated, presentation.account != nil, presentation.phase == .lobby,
                   !actionInFlight, presentation.rematchSourceID == nil else { return }
@@ -1011,7 +1100,6 @@ final class OnlineBattleSession {
         try await process(result, account: account, api: api, epoch: epoch)
         try rebuildRoster(); publish()
     }
-    func tickStage() {}
     func tick() async {
         guard onlineAllowed, authenticated else { return }
         let now = clock.now()
@@ -1033,6 +1121,7 @@ final class OnlineBattleSession {
         authenticated = false; reconciled = false
         presentation.canStart = false; presentation.phase = .setup; presentation.account = nil
         resetBattleRuntime(); resetExtras(); clearHistory(); historyViews = [:]; presentation.battles = []; presentation.liveLogs = []
+        dropStagings()
         presentation.connectionStatus = "접속키가 만료되었어요. 복구코드로 다시 연결해 주세요"
         ticker?.cancel(); ticker = nil
         await api?.setAccessKey(nil)

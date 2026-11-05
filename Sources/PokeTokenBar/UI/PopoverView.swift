@@ -127,6 +127,8 @@ struct PopoverView: View {
                 RecapScreen(store: store, companion: companion) { nav.showingRecap = false }
             } else if nav.showingOnlineBattle, let onlineBattle {
                 OnlineBattleScreen(model: onlineBattle, l: l, onClosePopover: { nav.closePopover() }) { nav.showingOnlineBattle = false }
+                    .onAppear { onlineBattle.send(.setOnlineScreenVisible(true)) }
+                    .onDisappear { onlineBattle.send(.setOnlineScreenVisible(false)) }
             } else if nav.showingPractice, let practice {
                 // Back only leaves the screen; the session keeps the battle (and pauses manual turns).
                 PracticeScreen(session: practice, bag: companion, l: l) { nav.showingPractice = false }
