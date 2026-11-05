@@ -66,12 +66,12 @@ it.each(["p1", "p2"] as const)("stores second %s choice and pair in one write wi
     const secondWrites = writes(sql, () => { expect(relay.choice(b, second, 1, "move 2", 1002, effects)).toEqual({ ok: true, value: true }); store.put(b); });
     const retryWrites = writes(sql, () => expect(relay.choice(b, second, 1, "move 2", 1003, effects)).toEqual({ ok: true, value: false }));
     const conflict = relay.choice(b, second, 1, "move 4", 1003, effects);
-    return { firstWrites, secondWrites, retryWrites, privateRound, privateJournal, privateEffects, conflict, journal: store.journal(b), effects };
+    return { secondTrainer: b[second], firstWrites, secondWrites, retryWrites, privateRound, privateJournal, privateEffects, conflict, journal: store.journal(b), effects };
   }));
   expect(result.privateRound![second]).toBeNull(); expect(result.privateRound!.pair).toBeNull();
-  expect(result.privateJournal).toEqual([]); expect(result.privateEffects).toEqual([]);
+  expect(result.privateJournal).toEqual([]); expect(result.privateEffects).toEqual([{ recipients: [result.secondTrainer], message: expect.objectContaining({ type: "battle_changed", opponentSubmitted: true }) }]);
   expect(result.firstWrites).toBe(1); expect(result.secondWrites).toBe(1); expect(result.retryWrites).toBe(0);
-  expect(result.conflict).toMatchObject({ ok: false }); expect(result.journal).toHaveLength(1); expect(result.effects).toHaveLength(1);
+  expect(result.conflict).toMatchObject({ ok: false }); expect(result.journal).toHaveLength(1); expect(result.effects).toHaveLength(2); // the first-choice signal, then the pair
   expect(result.journal[0]).toMatchObject({ [second]: { kind: "move", slot: 2 }, releasedAt: 1002 });
 });
 

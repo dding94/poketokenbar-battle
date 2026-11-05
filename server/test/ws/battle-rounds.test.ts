@@ -21,7 +21,7 @@ describe("lockstep relay", () => {
     expect(retry.body.journal).toHaveLength(mode === "manual" ? 1 : 2);
     const duplicate = await publish(); expect(duplicate.status).toBe(200); expect(duplicate.body).toEqual(retry.body);
   });
-  it("opens round1 and shows its opponent only that a first choice is in, never which one", async () => {
+  it("opens round1 and shows its opponent only that a first choice is in, never which one, over HTTP and the socket", async () => {
     const f = await running(); const id = f.view.battleId;
     expect(f.view.roundSeq).toBe(1); expect(f.view.deadline).toBe(f.view.startedAt + 30000);
     const before = (await getBattle(f.p2, id)).body; expect(before.opponentSubmitted).toBe(false);
@@ -29,8 +29,12 @@ describe("lockstep relay", () => {
     expect(one.body.opponentSubmitted).toBe(false);
     const seen = (await getBattle(f.p2, id)).body;
     expect(seen).toEqual({ ...before, opponentSubmitted: true }); expect(JSON.stringify(seen)).not.toContain("move 3");
-    await f.a.socket.sync(); await f.b.socket.sync();
+    // Over the socket too, the opponent learns only that it is in: one frame, existing type, no slot; the chooser gets none.
+    const signal = await f.b.socket.next(); await f.b.socket.sync(); await f.a.socket.sync();
+    expect(Object.keys(signal).sort()).toEqual(["v", "type", "battleId", "state", "revision", "roundSeq", "deadline", "opponentSubmitted"].sort());
+    expect(signal).toMatchObject({ type: "battle_changed", battleId: id, roundSeq: 1, opponentSubmitted: true, deadline: seen.deadline }); expect(JSON.stringify(signal)).not.toContain("move");
     const retry = await action(f.p1, id, "choices", { roundSeq: 1, choice: "move 3" }); expect(retry.body).toEqual(one.body);
+    await f.a.socket.sync(); await f.b.socket.sync(); // a retry sends nothing
     expectError(await action(f.p1, id, "choices", { roundSeq: 1, choice: "move 2" }), 409, "choice_conflict");
     const two = await action(f.p2, id, "choices", { roundSeq: 1, choice: "move 2" }); expect(two.status).toBe(200);
     expect(two.body.journal).toEqual([{ roundSeq: 1, p1: { kind: "move", slot: 3 }, p2: { kind: "move", slot: 2 }, releasedAt: expect.any(Number) }]);
