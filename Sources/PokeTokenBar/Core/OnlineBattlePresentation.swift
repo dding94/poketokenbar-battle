@@ -11,6 +11,11 @@ final class OnlineBattlePresentation {
     var notice: String?
     var isBusy = false
     var serverAddress = ""
+    /// Memory-only drafts survive popover disposal; never encode these in settings or saves.
+    var setupInput = OnlineBattleSetupInput()
+    var setupRecoveryExpanded = false
+    var setupPasteFailed = false
+    func clearSetupCodes() { setupInput.clearCodes(); setupPasteFailed = false }
     var account: OnlineBattleAccount?
     var members: [OnlineBattleMember] = []
     var battles: [OnlineBattleView] = []

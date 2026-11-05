@@ -678,6 +678,63 @@ final class OnlineBattleSessionTests: XCTestCase {
         XCTAssertEqual(after, requests)
     }
 
+    func testOnlineBattleSetupDraftSeedsSavedServerOnceAndKeepsFailedGrantUntilSaveSucceeds() async throws {
+        let credentials = SessionCredentials(); await credentials.setKey(nil)
+        let (session, http, _, _) = try await setup(credential: credentials)
+        XCTAssertEqual(session.presentation.setupInput.server, "https://battle.example.invalid")
+        session.presentation.setupInput = .init(server: "https://draft.example.invalid", invite: "ABCD-EFGH-JKMN", nickname: "나래", recovery: "recovery", reconnect: "reconnect")
+        await session.bootstrap()
+        XCTAssertEqual(session.presentation.setupInput.server, "https://draft.example.invalid")
+        let original = session.presentation.setupInput
+        await http.route("/v1/join", Data(#"{"error":{"code":"invalid_invite"}}"#.utf8), status: 404)
+        await session.join(inviteCode: original.invite, email: original.nickname)
+        XCTAssertEqual(session.presentation.setupInput, original)
+        let body = try JSONSerialization.data(withJSONObject: ["trainer": JSONSerialization.jsonObject(with: JSONEncoder().encode(account.trainer)), "group": JSONSerialization.jsonObject(with: JSONEncoder().encode(account.group)), "accessKey": "issued-key", "recoveryCode": "one-time-code"])
+        await http.route("/v1/join", body); await credentials.setFailure(true)
+        await session.join(inviteCode: original.invite, email: original.nickname)
+        XCTAssertEqual(session.presentation.setupInput, original)
+        await credentials.setFailure(false); await session.retryCredentialSave()
+        XCTAssertEqual(session.presentation.setupInput, .init(server: original.server))
+        XCTAssertEqual(session.presentation.recoveryCode, "one-time-code")
+        let joins = await http.count("/v1/join"); XCTAssertEqual(joins, 2)
+    }
+    func testOnlineBattleExistingKeyClearsDraftCodesOnlyAfterValidatedAccount() async throws {
+        for failure in ["transport", "group", "unauthorized", "none"] {
+            let (session, http, _, _) = try await setup()
+            session.presentation.setupInput = .init(server: "https://battle.example.invalid", invite: "invite", nickname: "나래", recovery: "recovery", reconnect: "reconnect")
+            if failure == "transport" { await http.route("/v1/me", Data(), status: 503) }
+            if failure == "unauthorized" { await http.route("/v1/me", Data(), status: 401) }
+            if failure == "group" {
+                let group = OnlineBattleGroup(groupId: "wrong", name: "Wrong", hostTrainerId: "other")
+                await http.route("/v1/group", try JSONEncoder().encode(OnlineBattleGroupMembers(group: group, members: [])))
+            }
+            await session.bootstrap()
+            XCTAssertEqual(session.presentation.setupInput.invite.isEmpty, failure == "none" || failure == "unauthorized")
+            XCTAssertEqual(session.presentation.setupInput.recovery.isEmpty, failure == "none" || failure == "unauthorized")
+            XCTAssertEqual(session.presentation.setupInput.reconnect.isEmpty, failure == "none" || failure == "unauthorized")
+            XCTAssertEqual(session.presentation.setupInput.nickname, "나래")
+        }
+        let credentials = SessionCredentials(); await credentials.setKey(nil)
+        let (session, http, _, _) = try await setup(credential: credentials)
+        await session.bootstrap()
+        session.presentation.setupInput.recovery = "retry-recovery"
+        await http.route("/v1/recover", Data(), status: 401)
+        await session.perform(.recover(code: "retry-recovery"))
+        XCTAssertEqual(session.presentation.setupInput.recovery, "retry-recovery")
+    }
+    func testOnlineBattleSetupIdentityBoundariesClearSecretsButInitialApplyKeepsInvitation() async throws {
+        let (session, _, credentials, _) = try await setup()
+        await credentials.setKey(nil)
+        session.presentation.setupInput = .init(server: "https://next.example.invalid", invite: "ABCD-EFGH-JKMN", nickname: "나래", recovery: "old-recovery", reconnect: "old-reconnect")
+        await session.configureServer("https://next.example.invalid")
+        XCTAssertEqual(session.presentation.setupInput.invite, "ABCD-EFGH-JKMN")
+        XCTAssertEqual(session.presentation.setupInput.nickname, "나래")
+        XCTAssertEqual(session.presentation.setupInput.recovery, "")
+        XCTAssertEqual(session.presentation.setupInput.reconnect, "")
+        session.presentation.setupInput.recovery = "recovery"; session.presentation.setupInput.reconnect = "reconnect"
+        await session.setEnabled(false)
+        XCTAssertEqual(session.presentation.setupInput, .init(server: "https://next.example.invalid", nickname: "나래"))
+    }
     func testBootstrapLoadsCredentialsOnceAndRefreshesAccount() async throws {
         let (session, http, credentials, _) = try await setup()
         await session.bootstrap(); await session.bootstrap(); await session.refresh()

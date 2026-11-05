@@ -1,11 +1,48 @@
+import AppKit
 import SwiftUI
 
 /// Setup prerequisites are shared by button availability and action dispatch.
-struct OnlineBattleSetupInput {
+struct OnlineBattleSetupInput: Equatable {
     enum Requirement: Equatable { case busy, serverMissing, serverChanged, inviteMissing, nicknameMissing, ready }
     var server = ""
     var invite = ""
     var nickname = ""
+    var recovery = ""
+    var reconnect = ""
+    /// Matches server/src/secrets.ts: twelve Crockford characters, including its aliases.
+    static func inviteToken(_ value: String) -> String? {
+        let compact = value.filter { !$0.isWhitespace && $0 != "-" }.uppercased()
+            .replacingOccurrences(of: "O", with: "0").replacingOccurrences(of: "I", with: "1").replacingOccurrences(of: "L", with: "1")
+        guard compact.count == 12, compact.allSatisfy({ "0123456789ABCDEFGHJKMNPQRSTVWXYZ".contains($0) }) else { return nil }
+        return compact
+    }
+    /// All-or-nothing import. Unknown or repeated fields are ambiguous and leave every draft intact.
+    mutating func pasteInvitation(_ text: String?) -> Bool {
+        guard let text, text.utf8.count <= 4096 else { return false }
+        var address: String?, code: String?
+        let lines = text.components(separatedBy: .newlines).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        guard lines.count == 2 else { return false }
+        for line in lines {
+            var value = line
+            var kind: String?
+            if let range = line.range(of: "^(.+?)[:：]\\s*", options: .regularExpression) {
+                let label = String(line[range]).dropLast().trimmingCharacters(in: .whitespacesAndNewlines)
+                let normalized = label.lowercased().filter { !$0.isWhitespace && $0 != ":" && $0 != "：" }
+                if ["서버주소", "서버", "server", "serveraddress"].contains(normalized) { kind = "server" }
+                if ["초대코드", "invite", "invitecode"].contains(normalized) { kind = "invite" }
+                if kind != nil { value = String(line[range.upperBound...]).trimmingCharacters(in: .whitespaces) }
+            }
+            if kind != "invite", let origin = try? OnlineBattleOrigin(value) {
+                guard address == nil else { return false }; address = origin.url.absoluteString
+            } else if kind != "server", let token = Self.inviteToken(value) {
+                guard code == nil else { return false }; code = token
+            } else { return false }
+        }
+        guard let address, let code else { return false }
+        server = address; invite = code
+        return true
+    }
+    mutating func clearCodes() { invite = ""; recovery = ""; reconnect = "" }
     var serverToApply: String? { (try? OnlineBattleOrigin(server.trimmingCharacters(in: .whitespacesAndNewlines)))?.url.absoluteString }
     func hasAppliedServer(_ applied: String) -> Bool {
         guard let draft = serverToApply, let current = try? OnlineBattleOrigin(applied) else { return false }
@@ -32,6 +69,7 @@ struct OnlineBattleScreen: View {
     let model: OnlineBattlePresentation
     let l: L
     var artwork = true
+    var readInvitationClipboard: () -> String? = { NSPasteboard.general.string(forType: .string) }
     var speciesNameProvider: any PokemonNameProviding = PokemonNameClient.shared
     var speciesNameStore: PokemonNameDisplayStore = .shared
     let onClose: () -> Void
@@ -98,7 +136,7 @@ struct OnlineBattleScreen: View {
                                 speciesNameProvider: speciesNameProvider, speciesNameStore: speciesNameStore)
         } else {
         switch model.phase {
-        case .setup: OnlineBattleSetupForm(model: model, l: l)
+        case .setup: OnlineBattleSetupForm(model: model, l: l, readInvitationClipboard: readInvitationClipboard)
         case .lobby: OnlineBattleLobby(model: model, l: l, artwork: artwork)
         case .room: OnlineBattleRoom(model: model, l: l, artwork: artwork, speciesNameProvider: speciesNameProvider, speciesNameStore: speciesNameStore)
         case .arena: OnlineBattleArena(model: model, l: l, artwork: artwork, speciesNameProvider: speciesNameProvider, speciesNameStore: speciesNameStore)
@@ -154,19 +192,27 @@ struct OnlineBattleScreen: View {
 
 @MainActor
 private struct OnlineBattleSetupForm: View {
-    let model: OnlineBattlePresentation
+    @Bindable var model: OnlineBattlePresentation
     let l: L
-    @State private var input = OnlineBattleSetupInput()
-    @State private var recovery = ""
-    @State private var reconnect = ""
+    let readInvitationClipboard: () -> String?
+    private var input: OnlineBattleSetupInput { model.setupInput }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(l.onlineSetup).font(.headline)
+            Button(l.onlinePasteInvitation) {
+                model.setupPasteFailed = !model.setupInput.pasteInvitation(readInvitationClipboard())
+            }
+            .disabled(model.isBusy)
+            .accessibilityIdentifier("online.pasteInvitation")
+            if model.setupPasteFailed {
+                Text(l.onlinePasteInvitationFailed).font(.caption).foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             VStack(alignment: .leading, spacing: 7) {
                 Text(l.onlineServerHint).font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-                TextField(l.onlineServer, text: $input.server).textFieldStyle(.roundedBorder)
+                TextField(l.onlineServer, text: $model.setupInput.server).textFieldStyle(.roundedBorder)
                     .accessibilityIdentifier("online.server")
                 Button(l.onlineSaveServer) {
                     if let address = input.serverToApply { model.send(.configureServer(address)) }
@@ -177,13 +223,15 @@ private struct OnlineBattleSetupForm: View {
                 }
             }.practiceCard()
             VStack(alignment: .leading, spacing: 7) {
-                TextField(l.onlineInvite, text: $input.invite).textFieldStyle(.roundedBorder)
-                TextField(l.onlineNickname, text: $input.nickname).textFieldStyle(.roundedBorder)
+                TextField(l.onlineInvite, text: $model.setupInput.invite).textFieldStyle(.roundedBorder)
+                    .accessibilityIdentifier("online.invite")
+                TextField(l.onlineNickname, text: $model.setupInput.nickname).textFieldStyle(.roundedBorder)
+                    .accessibilityIdentifier("online.nickname")
                 Text(l.onlineNicknameHint).font(.caption2).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 Button(l.onlineJoin) {
                     if let action = input.joinAction(appliedServer: model.serverAddress, isBusy: model.isBusy) {
-                        model.send(action); input.invite = ""
+                        model.send(action)
                     }
                 }
                 .buttonStyle(.borderedProminent)
@@ -191,18 +239,17 @@ private struct OnlineBattleSetupForm: View {
                 Text(l.onlineSetupRequirement(input.requirement(appliedServer: model.serverAddress, isBusy: model.isBusy)))
                     .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }.practiceCard()
-            DisclosureGroup(l.onlineRecovery) {
+            DisclosureGroup(l.onlineRecovery, isExpanded: $model.setupRecoveryExpanded) {
                 VStack(alignment: .leading, spacing: 7) {
-                    SecureField(l.onlineRecoveryCode, text: $recovery).textFieldStyle(.roundedBorder)
-                    Button(l.onlineRecover) { model.send(.recover(code: recovery)); recovery = "" }
-                        .disabled(model.isBusy || recovery.isEmpty || !input.hasAppliedServer(model.serverAddress))
+                    SecureField(l.onlineRecoveryCode, text: $model.setupInput.recovery).textFieldStyle(.roundedBorder)
+                    Button(l.onlineRecover) { model.send(.recover(code: input.recovery)) }
+                        .disabled(model.isBusy || input.recovery.isEmpty || !input.hasAppliedServer(model.serverAddress))
                     Divider()
-                    SecureField(l.onlineReconnectCode, text: $reconnect).textFieldStyle(.roundedBorder)
-                    Button(l.onlineReconnect) { model.send(.reconnect(code: reconnect)); reconnect = "" }
-                        .disabled(model.isBusy || reconnect.isEmpty || !input.hasAppliedServer(model.serverAddress))
+                    SecureField(l.onlineReconnectCode, text: $model.setupInput.reconnect).textFieldStyle(.roundedBorder)
+                    Button(l.onlineReconnect) { model.send(.reconnect(code: input.reconnect)) }
+                        .disabled(model.isBusy || input.reconnect.isEmpty || !input.hasAppliedServer(model.serverAddress))
                 }.padding(.top, 6)
             }.practiceCard()
         }
-        .onAppear { input.server = model.serverAddress }
     }
 }

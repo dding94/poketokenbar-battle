@@ -84,12 +84,14 @@ final class OnlineBattleSession {
         self.clock = clock; self.automaticTicks = automaticTicks
         self.enabled = enabled; self.accessAllowed = accessAllowed
         presentation.serverAddress = settings.serverURL ?? ""
+        presentation.setupInput.server = presentation.serverAddress
         presentation.onAction = { [weak self] action in Task { await self?.perform(action) } }
     }
     func setEnabled(_ value: Bool) async {
         guard value != enabled || (value && !bootstrapped) else { return }
         enabled = value
         if value { await bootstrap(); return }
+        presentation.clearSetupCodes()
         generation &+= 1
         refreshTask?.cancel(); refreshTask = nil; refreshAgain = false
         ticker?.cancel(); ticker = nil
@@ -141,6 +143,9 @@ final class OnlineBattleSession {
             api = nil; origin = nil; pendingGrant = nil; challengeIntent = nil
             authenticated = false; reconciled = false; actionInFlight = false
             refreshAgain = false; prepared = [:]; acknowledgedStarts = []; submittedReports = []; nextRecoveryRead = nil
+            if settings.serverURL != nil, settings.serverURL != next.serverURL {
+                presentation.setupInput.recovery = ""; presentation.setupInput.reconnect = ""
+            }
             settings = next; bootstrapped = false
             presentation.serverAddress = next.serverURL ?? ""
             presentation.account = nil; presentation.members = []; presentation.battles = []
@@ -375,6 +380,7 @@ final class OnlineBattleSession {
             try await credentials.save(grant.accessKey, scope: .init(profileID: settings.profileID, origin: origin))
             try current(epoch)
             pendingGrant = nil; presentation.canRetryCredentialSave = false
+            presentation.clearSetupCodes(); presentation.setupInput.nickname = ""
             presentation.account = grant.account; presentation.recoveryCode = grant.recoveryCode; presentation.notice = nil
             try await activate(grant.accessKey, epoch: epoch)
             await refresh()
@@ -412,6 +418,7 @@ final class OnlineBattleSession {
             if let old = presentation.account, old.trainer.trainerId != account.trainer.trainerId || old.group.groupId != account.group.groupId {
                 throw OnlineBattleFailure.unauthorized
             }
+            if presentation.account == nil { presentation.clearSetupCodes() }
             presentation.account = account; presentation.members = group.members
             historyViews = [:]
             for room in battles where !room.state.isActive && room.side(for: account.trainer.trainerId) != nil {
@@ -973,6 +980,7 @@ final class OnlineBattleSession {
     }
     private func revoke(epoch: UInt64) async {
         guard epoch == generation else { return }
+        if authenticated { presentation.clearSetupCodes() }
         authenticated = false; reconciled = false
         presentation.canStart = false; presentation.phase = .setup; presentation.account = nil
         resetBattleRuntime(); resetExtras(); clearHistory(); historyViews = [:]; presentation.battles = []; presentation.liveLogs = []

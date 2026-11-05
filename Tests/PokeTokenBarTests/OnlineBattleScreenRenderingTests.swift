@@ -57,11 +57,11 @@ final class OnlineBattleScreenRenderingTests: XCTestCase {
             .init(slot: 2, id: "quickattack", name: "Quick Attack", type: "Normal", pp: 30, maxpp: 30, disabled: false)])
     }
 
-    private func host(_ model: OnlineBattlePresentation) async -> NSView {
+    private func host(_ model: OnlineBattlePresentation, clipboard: @escaping () -> String? = { nil }) async -> NSView {
         let provider = OnlineBattleSyntheticNameProvider()
         let names = PokemonNameDisplayStore()
         for id in [25, 129] { _ = await names.load(.init(kind: .pokemonSpecies, name: String(id)), provider: provider) }
-        let host = NSHostingView(rootView: OnlineBattleScreen(model: model, l: L(.ko), artwork: false,
+        let host = NSHostingView(rootView: OnlineBattleScreen(model: model, l: L(.ko), artwork: false, readInvitationClipboard: clipboard,
                                                              speciesNameProvider: provider, speciesNameStore: names, onClose: {})
             .background(Color.white).environment(\.colorScheme, .light))
         host.frame = NSRect(x: 0, y: 0, width: 360, height: 610)
@@ -86,6 +86,67 @@ final class OnlineBattleScreenRenderingTests: XCTestCase {
             try data.write(to: directory.appendingPathComponent(name))
         }
         return data
+    }
+    private func editableFields(in view: NSView) -> [NSTextField] {
+        (view as? NSTextField).map { $0.isEditable ? [$0] : [] } ?? view.subviews.flatMap { editableFields(in: $0) }
+    }
+    private func enter(_ value: String, into field: NSTextField) {
+        field.stringValue = value
+        field.delegate?.controlTextDidChange?(Notification(name: NSControl.textDidChangeNotification, object: field))
+    }
+    func testOnlineBattleSetupDraftSurvivesActualHostingViewRecreation() async throws {
+        let model = OnlineBattlePresentation()
+        model.serverAddress = "https://saved.example.invalid"
+        model.setupRecoveryExpanded = true
+        var first: NSView? = await host(model)
+        _ = try await capture(try XCTUnwrap(first), named: "online-synthetic-setup-before-edit.png")
+        let fields = editableFields(in: try XCTUnwrap(first))
+        XCTAssertEqual(fields.count, 5)
+        guard fields.count == 5 else { return }
+        enter("https://draft.example.invalid", into: fields[0])
+        enter("ABCD-EFGH-JKMN", into: fields[1])
+        enter("나래", into: fields[2])
+        enter("synthetic-recovery", into: fields[3]); enter("synthetic-reconnect", into: fields[4])
+        _ = try await capture(try XCTUnwrap(first), named: "online-synthetic-setup-draft-before-close.png")
+        window?.contentView = nil; window?.close(); window = nil; first = nil
+        let recreated = await host(model)
+        _ = try await capture(recreated, named: "online-synthetic-setup-draft-after-reopen.png")
+        XCTAssertEqual(editableFields(in: recreated).map(\.stringValue),
+                       ["https://draft.example.invalid", "ABCD-EFGH-JKMN", "나래", "synthetic-recovery", "synthetic-reconnect"])
+    }
+    private func clickPasteButton(in host: NSView) throws {
+        let window = try XCTUnwrap(host.window)
+        // Synthetic native mouse events at the first setup action; no OCR or system input access.
+        let point = host.convert(NSPoint(x: 80, y: host.isFlipped ? 88 : host.bounds.height - 88), to: nil)
+        for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+            let event = try XCTUnwrap(NSEvent.mouseEvent(with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                                       windowNumber: window.windowNumber, context: nil, eventNumber: 1, clickCount: 1, pressure: 1))
+            window.sendEvent(event)
+        }
+    }
+    func testOnlineBattlePasteButtonReadsOnlyOnExplicitClickAndNeverAppliesOrJoins() async throws {
+        let model = OnlineBattlePresentation()
+        model.serverAddress = "https://saved.example.invalid"
+        model.setupInput = .init(server: model.serverAddress, invite: "old", nickname: "나래")
+        let original = model.setupInput
+        var reads = 0, actions = 0
+        var clipboard = "invalid"
+        model.onAction = { _ in actions += 1 }
+        let host = await host(model, clipboard: { reads += 1; return clipboard })
+        _ = try await capture(host, named: "online-synthetic-setup-paste-before.png")
+        XCTAssertEqual(reads, 0)
+        try clickPasteButton(in: host)
+        XCTAssertEqual(reads, 1); XCTAssertEqual(model.setupInput, original); XCTAssertTrue(model.setupPasteFailed)
+        clipboard = "서버 주소: https://next.example.invalid\n초대코드: ABCD-EFGH-JKMN"
+        try clickPasteButton(in: host)
+        _ = try await capture(host, named: "online-synthetic-setup-paste-after.png")
+        XCTAssertEqual(reads, 2); XCTAssertEqual(actions, 0)
+        XCTAssertEqual(model.serverAddress, "https://saved.example.invalid")
+        XCTAssertEqual(model.setupInput.server, "https://next.example.invalid")
+        XCTAssertEqual(model.setupInput.invite, "ABCDEFGHJKMN"); XCTAssertEqual(model.setupInput.nickname, "나래")
+        XCTAssertFalse(model.setupPasteFailed)
+        XCTAssertNil(model.setupInput.joinAction(appliedServer: model.serverAddress, isBusy: false))
+        XCTAssertEqual(editableFields(in: host).prefix(3).map(\.stringValue), ["https://next.example.invalid", "ABCDEFGHJKMN", "나래"])
     }
     func testSyntheticSetupLobbyArenaAndResultRenderInsidePopover() async throws {
         let model = Self.model()

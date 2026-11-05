@@ -7,7 +7,9 @@ extension L {
     var onlineSetup: String { online("동료와 정식전 시작하기", "Battle with your group") }
     var onlineServer: String { online("서버 주소", "Server address") }
     var onlineSaveServer: String { online("서버 주소 적용", "Apply server address") }
-    var onlineServerHint: String { online("① 방장이 보낸 https:// 서버 주소를 붙여넣고 아래 버튼을 누르세요.", "① Paste the HTTPS server address from your host, then apply it below.") }
+    var onlineServerHint: String { online("① 방장이 보낸 HTTPS 서버 주소는 한 번 적용하면 저장돼요.", "① Apply the HTTPS server address from your host once to save it.") }
+    var onlinePasteInvitation: String { online("초대 정보 붙여넣기", "Paste invitation details") }
+    var onlinePasteInvitationFailed: String { online("서버 주소 하나와 12자리 초대코드가 함께 있는 내용을 복사해 주세요. 입력한 내용은 유지돼요.", "Copy one HTTPS server address and one 12-character invite code together. Your entries are unchanged.") }
     var onlineInvite: String { online("초대코드", "Invite code") }
     var onlineNickname: String { online("닉네임", "Nickname") }
     var onlineNicknameHint: String { online("② 초대코드와 공백 없는 닉네임을 입력하세요. 이메일은 필요 없어요.", "② Enter your invite code and nickname without spaces. No email is required.") }
