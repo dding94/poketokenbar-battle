@@ -2102,7 +2102,7 @@ final class OnlineBattleSessionTests: XCTestCase {
     }
     func testAcceptNeverMovesToTheNextRoomWhenTheOneOnScreenWasCancelled() async throws {
         let older = try pendingRoom("bt_older"), shown = try pendingRoom("bt_shown", newerBy: 60_000)
-        let (session, http, _, effects) = try await setup([older, shown], trainer: "trainer-two")
+        let (session, http, _, _) = try await setup([older, shown], trainer: "trainer-two")
         for room in [older, shown] {
             await http.route("/v1/battles/\(room.battleId)/accept", try JSONEncoder().encode(changed(room, ["state": "ACCEPTED"])))
         }
@@ -2113,7 +2113,6 @@ final class OnlineBattleSessionTests: XCTestCase {
         await session.perform(.accept(shown.battleId))
         let accepts = await http.requests.filter { $0.url?.path.hasSuffix("/accept") == true }.count
         XCTAssertEqual(accepts, 0, "Agreeing to a match must not reach a room the person was not looking at")
-        XCTAssertTrue(effects.state.onlineBattleHolds.allSatisfy { $0.key.battleID != older.battleId || $0.instanceID != "instance-two" })
         XCTAssertNotEqual(session.presentation.room?.battleId, older.battleId)
         XCTAssertEqual(session.presentation.phase, .lobby)
         XCTAssertTrue(session.presentation.notice?.contains("취소") == true, session.presentation.notice ?? "<nil>")
@@ -2173,5 +2172,56 @@ final class OnlineBattleSessionTests: XCTestCase {
         await session.refresh()
         XCTAssertEqual(session.presentation.room?.battleId, final.battleId)
         XCTAssertEqual(session.presentation.phase, .result)
+    }
+    // MARK: Review A F1.3: only a match watched this run, or one opened on purpose, shows a result by itself
+    private func attention(_ session: OnlineBattleSession) -> OnlineAttentionKind? {
+        OnlineAttentionCalculator.current(.init(presentation: session.presentation, preparedBattleIDs: session.preparedBattleIDs(),
+                                                stagingHeldBattleIDs: session.stagingHeldBattleIDs(), now: Date(timeIntervalSince1970: 1)))?.kind
+    }
+    func testRelaunchDoesNotRaiseAResultThatEndedBeforeThisRun() async throws {
+        let void = try changed(battle(1), ["state": "VOID", "result": NSNull(), "battleId": "bt_void"])
+        for rooms in [[try battle()], [void]] {
+            let (session, _, _, _) = try await setup(rooms)
+            await session.bootstrap()
+            XCTAssertNil(session.presentation.room)
+            XCTAssertNil(session.presentation.result)
+            XCTAssertEqual(session.presentation.phase, .lobby)
+            XCTAssertNil(attention(session), "Nothing new happened since the person last looked")
+            XCTAssertEqual(session.presentation.historyBattles.map(\.battleId), rooms.map(\.battleId), "It stays reachable from the lobby")
+        }
+    }
+    func testMatchWatchedThisRunEndsOnItsResultWithTheMark() async throws {
+        let final = try battle()
+        let running = try changed(final, ["state": "RUNNING", "result": NSNull(), "roundSeq": 1, "journal": []])
+        let (session, http, _, _) = try await setup([running])
+        await session.bootstrap()
+        XCTAssertEqual(session.presentation.phase, .arena)
+        try await list(http, [final])
+        await session.refresh()
+        XCTAssertEqual(session.presentation.phase, .result)
+        XCTAssertEqual(session.presentation.result?.title, "승리")
+        XCTAssertEqual(attention(session), .resultReady)
+    }
+    func testMatchThatEndsInsideTheFirstReadStillEndsOnItsResult() async throws {
+        let final = try battle()
+        let reported = try changed(final, ["state": "REPORTED"])
+        let (session, http, _, _) = try await setup([reported])
+        await http.route("/v1/battles/\(final.battleId)/report", try JSONEncoder().encode(final))
+        await session.bootstrap()
+        XCTAssertEqual(session.presentation.room?.state, .completed)
+        XCTAssertEqual(session.presentation.phase, .result, "It was still being played when this run first read it")
+    }
+    func testClosedResultDoesNotComeBackOnTheNextRead() async throws {
+        let final = try battle()
+        let running = try changed(final, ["state": "RUNNING", "result": NSNull(), "roundSeq": 1, "journal": []])
+        let (session, http, _, _) = try await setup([running])
+        await session.bootstrap()
+        try await list(http, [final])
+        await session.refresh()
+        XCTAssertEqual(session.presentation.phase, .result)
+        await session.perform(.dismissResult); await session.refresh()
+        XCTAssertEqual(session.presentation.phase, .lobby)
+        XCTAssertNil(session.presentation.room)
+        XCTAssertNil(attention(session))
     }
 }

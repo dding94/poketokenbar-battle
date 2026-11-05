@@ -350,7 +350,8 @@ final class OnlineBattleAttentionTests: XCTestCase {
         XCTAssertNil(current(model, held: ["bt-1"]))
     }
 
-    func testDismissedResultDoesNotRaiseAgainWhenRedisplayed() {
+    /// Publish no longer falls back to a finished room; only an explicit reopen can show one again.
+    func testReopeningAFinishedRoomOnPurposeDoesNotRaiseItAgain() {
         let room = battle(.completed, confirmed: true)
         let model = presentation([])
         display(model, room, phase: .result, result: true)
@@ -362,7 +363,7 @@ final class OnlineBattleAttentionTests: XCTestCase {
         display(model, room, phase: .result, result: true)
         let shownAgain = OnlineAttentionCalculator.evaluate(input(model), seen: dismissed.seen)
         XCTAssertEqual(shownAgain.current?.kind, .resultReady)
-        XCTAssertEqual(shownAgain.raised, [], "Publish may fall back to the newest finished room")
+        XCTAssertEqual(shownAgain.raised, [], "The person opened it themselves, so it is not news")
     }
 
     // MARK: Copy
