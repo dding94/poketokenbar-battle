@@ -112,7 +112,7 @@ final class OnlineBattleOpponentLineTests: XCTestCase {
 
     func testTheFoeLabelTakesTheNicknameOrStaysPlain() {
         XCTAssertEqual(L(.ko).onlineFoeLabel(nickname: "연습친구"), "상대 · 연습친구")
-        XCTAssertEqual(L(.en).onlineFoeLabel(nickname: "Misty"), "Foe · Misty")
+        XCTAssertEqual(L(.en).onlineFoeLabel(nickname: "Haneul"), "Foe · Haneul")
         XCTAssertEqual(L(.ko).onlineFoeLabel(nickname: nil), L(.ko).practiceFoe)
         XCTAssertEqual(L(.en).onlineFoeLabel(nickname: ""), L(.en).practiceFoe)
     }

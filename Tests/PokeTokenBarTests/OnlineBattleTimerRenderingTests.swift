@@ -273,7 +273,7 @@ final class OnlineBattleTimerRenderingTests: XCTestCase {
             let tag = lang == .ko ? "ko" : "en"
             let fixture = try arena(splash: true); defer { fixture.close() }
             let model = fixture.model, foeID = try XCTUnwrap(model.room).p2.trainerId, me = try XCTUnwrap(model.room).p1.trainerId
-            model.members = [.init(trainerId: foeID, displayEmail: lang == .ko ? "연습친구" : "Misty", role: .member, status: .active, joinedAt: 0, online: true)]
+            model.members = [.init(trainerId: foeID, displayEmail: lang == .ko ? "연습친구" : "Haneul", role: .member, status: .active, joinedAt: 0, online: true)]
             model.battles = (0..<3).map { index in
                 let base = OnlineBattleScreenRenderingTests.room(state: .completed, id: "done-\(index)")
                 return OnlineBattleView(battleId: "done-\(index)", state: .completed, revision: 1, mode: .manual,

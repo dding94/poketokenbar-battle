@@ -204,7 +204,7 @@ final class OnlineBattleTurnClockTests: XCTestCase {
 
     func testTheSplashWordsNameTheOpponentInBothLanguagesAndFallBackToNothingWithoutAName() {
         XCTAssertEqual(L(.ko).onlineSplashLine("연습친구"), "연습친구님과 대전 시작!")
-        XCTAssertEqual(L(.en).onlineSplashLine("Misty"), "Battle with Misty")
+        XCTAssertEqual(L(.en).onlineSplashLine("Haneul"), "Battle with Haneul")
         XCTAssertNil(L(.ko).onlineSplashLine(nil)); XCTAssertNil(L(.en).onlineSplashLine(""))
         XCTAssertEqual(L(.ko).onlineSplashSkip, "건너뛰기"); XCTAssertEqual(L(.en).onlineSplashSkip, "Skip")
     }
