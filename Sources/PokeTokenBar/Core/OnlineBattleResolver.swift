@@ -26,8 +26,12 @@ final class OnlineBattleResolver {
     private(set) var request = BattleRequest(kind: "none", moves: [])
     private(set) var result: BattleResult?
     private(set) var logs: [String] = []
+    /// For the display only: `logs.count` after the opening and after each round, so
+    /// `roundLogEnds.count == journal.count + 1`. Segment 0 is the opening.
     private(set) var roundLogEnds: [Int] = []
+    /// The reveals of each `roundLogEnds` segment. Empty for a completed proof, which has nothing to stage.
     private(set) var roundReveals: [[BattleLogReveal]] = []
+    private let capturesReveals: Bool
     private(set) var journal: [OnlineBattlePair] = []
     var processedRoundSeq: Int { journal.count }
     private let initial: OnlineBattleView
@@ -40,18 +44,18 @@ final class OnlineBattleResolver {
     convenience init(battle: OnlineBattleView, localTrainerID: String, engine: BattleEngine) throws {
         guard battle.config?.engineHash == BattleEngineManifest.sha256,
               let entry = BattleEngineArchive.entry(for: BattleEngineManifest.sha256) else { throw Failure.invalidConfiguration }
-        try self.init(battle: battle, localTrainerID: localTrainerID, engine: engine, entry: entry)
+        try self.init(battle: battle, localTrainerID: localTrainerID, engine: engine, entry: entry, capturesReveals: true)
     }
 
     /// Completed-only verification for replay or normal reconciliation. Live matches keep the strict initializer.
     static func completedResolver(battle: OnlineBattleView, localTrainerID: String, engine: BattleEngine) throws -> OnlineBattleResolver {
         guard battle.state == .completed, let hash = battle.config?.engineHash,
               let entry = BattleEngineArchive.entry(for: hash) else { throw Failure.invalidConfiguration }
-        return try OnlineBattleResolver(battle: battle, localTrainerID: localTrainerID, engine: engine, entry: entry)
+        return try OnlineBattleResolver(battle: battle, localTrainerID: localTrainerID, engine: engine, entry: entry, capturesReveals: false)
     }
 
     private init(battle: OnlineBattleView, localTrainerID: String, engine: BattleEngine,
-                 entry: BattleEngineArchive.Entry) throws {
+                 entry: BattleEngineArchive.Entry, capturesReveals: Bool) throws {
         guard let localSide = battle.side(for: localTrainerID), battle.p1.trainerId != battle.p2.trainerId,
               !battle.battleId.isEmpty, let config = battle.config,
               [.ready, .running, .reported, .completed].contains(battle.state),
@@ -60,6 +64,7 @@ final class OnlineBattleResolver {
             throw Failure.invalidConfiguration
         }
         self.initial = battle; self.config = config; self.localSide = localSide; self.engine = engine
+        self.capturesReveals = capturesReveals
         struct Version: Decodable { let engine: String; let adapter: String; let rules: String }
         let version: Version = try BattleJSON.decode(engine.call(.version))
         guard version.engine == entry.engineVersion, version.adapter == entry.adapterVersion, version.rules == entry.rulesVersion else {
@@ -196,6 +201,11 @@ final class OnlineBattleResolver {
         result = try BattleJSON.decode(call(.result))
         let fresh: [String] = try BattleJSON.decode(call(.drainLog, side: localSide))
         logs += fresh
+        roundLogEnds.append(logs.count)
+        // Reveals use their own cursor and never touch the battle log, so the log hash cannot see this. It is
+        // display data: if it ever failed, the round must still count.
+        let reveals: [BattleLogReveal]? = capturesReveals ? (try? BattleJSON.decode(call(.drainEvents, side: localSide))) : nil
+        roundReveals.append(reveals ?? [])
     }
     private func call(_ method: BattleEngine.Method, side: OnlineBattleSide? = nil, extra: [String] = []) throws -> String {
         guard let engineID else { throw Failure.needsRefetch }
