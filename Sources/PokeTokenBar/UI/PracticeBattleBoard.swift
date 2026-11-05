@@ -438,7 +438,7 @@ struct PracticeMoveCard: View {
 
     var body: some View {
         // The marked card is not disabled (a disabled button greys its content): its choice is already in, so it does nothing.
-        Button(action: chosen ? {} : action) {
+        Button(action: { if !chosen { action() } }) {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 4) {
                     name.font(.callout.weight(.semibold)).lineLimit(1).minimumScaleFactor(0.8).layoutPriority(1)
