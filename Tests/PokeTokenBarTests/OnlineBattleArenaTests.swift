@@ -54,6 +54,33 @@ final class OnlineBattleArenaTests: XCTestCase {
         XCTAssertTrue(fixture.staging.isPlaying, "choosing leaves the beats alone")
     }
 
+    // MARK: T15 the picker while waiting
+
+    /// After my choice the grid stays and only the picked card is marked; the others stay locked and dim.
+    func testOnlyThePickedCardIsMarkedAfterMyChoice() throws {
+        let fixture = try OnlineBattleArenaFixture.arena(seat: .p1); defer { fixture.close() }
+        let arena = arenaView(fixture.model)
+        for slot in 1...2 { XCTAssertFalse(arena.moveChosen(slot), "nothing is marked before a choice") }
+        fixture.model.send(.chooseMove(2))
+        XCTAssertTrue(arena.moveChosen(2))
+        XCTAssertFalse(arena.moveChosen(1))
+        XCTAssertTrue(arena.movesLocked(1)); XCTAssertTrue(arena.movesLocked(2))
+        XCTAssertEqual(OnlineBattleArena.footer(mode: .manual, submitted: true, requestKind: "move", playing: false), .sent)
+    }
+
+    func testWaitLineSaysChoosingOfflineOrMaybeOfflineInBothLanguages() {
+        for lang in [AppLanguage.ko, .en] {
+            let l = L(lang)
+            let lines = [OnlineBattlePresentation.OpponentWait.choosing, .offline, .offlineMaybe].map { l.onlineOpponentWait($0) }
+            XCTAssertEqual(Set(lines).count, 3, "\(lang): three different lines")
+            XCTAssertTrue(lines.allSatisfy { !$0.isEmpty })
+        }
+        XCTAssertEqual(L(.ko).onlineOpponentWait(.choosing), "상대가 고르는 중…")
+        XCTAssertTrue(L(.ko).onlineOpponentWait(.offline).contains("시간 초과 시 자동 선택"))
+        XCTAssertTrue(L(.ko).onlineOpponentWait(.offlineMaybe).contains("끊겼을 수"), "a stale flag is hedged")
+        XCTAssertFalse(L(.en).onlineOpponentWait(.offlineMaybe).lowercased().contains("disconnected"), "a stale flag is hedged")
+    }
+
     // MARK: cards follow the frame and the staging
 
     func testSecondSeatCardsShowOwnAndFoeFromTheFrame() throws {

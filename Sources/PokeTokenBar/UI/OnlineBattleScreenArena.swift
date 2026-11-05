@@ -221,6 +221,8 @@ struct OnlineBattleArena: View {
     /// running and the choice may be made while the last turn is still on screen.
     func movesLocked(_ slot: Int) -> Bool { !model.canChooseMove(slot) }
 
+    func moveChosen(_ slot: Int) -> Bool { false }
+
     private func moveGrid(_ moves: [BattleMove]) -> some View {
         LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], spacing: 6) {
             ForEach(moves) { move in

@@ -492,6 +492,53 @@ final class OnlineBattleScreenRenderingTests: XCTestCase {
         // The popover's scroll area is 520pt and its group-back row (about 16pt) and one 12pt gap come first.
         XCTAssertLessThanOrEqual(heights[0].1, 520 - 16 - 12, "the move picker must stay inside the scroll area")
     }
+    /// T15: after my choice the grid stays, the picked card is drawn differently from the rest, and one line says
+    /// what the other side is doing, all inside the board's fixed height.
+    func testArenaShowsTheWaitLineAndTheMarkedCardAfterMyChoiceWithoutChangingHeight() async throws {
+        let fixture = try OnlineBattleArenaFixture.arena(seat: .p1)
+        defer { fixture.close() }
+        let model = fixture.model
+        func settleHost(_ host: NSView) async throws { try await Task.sleep(for: .milliseconds(150)); host.layoutSubtreeIfNeeded() }
+        let host = await arenaHost(model)
+        let restingHeight = host.fittingSize.height
+        let before = try PracticeScreenRenderingTests.capture2x(host).representation(using: .png, properties: [:])
+        model.send(.chooseMove(1)); try await settleHost(host)
+        let first = try PracticeScreenRenderingTests.capture2x(host).representation(using: .png, properties: [:])
+        model.choiceSubmitted = false; model.send(.chooseMove(2)); try await settleHost(host)
+        let second = try PracticeScreenRenderingTests.capture2x(host).representation(using: .png, properties: [:])
+        XCTAssertNotEqual(first, second, "the marked card moves with the choice")
+        XCTAssertNotEqual(before, first)
+        let text = try recognized(host)
+        XCTAssertTrue(text.contains("Thunderbolt"), "the grid stays after the choice: \(text)")
+        XCTAssertTrue(text.contains("Quick Attack"), text)
+        XCTAssertTrue(text.contains("choosing"), "the opponent line shows: \(text)")
+        XCTAssertEqual(host.fittingSize.height, restingHeight, accuracy: 0.5)
+        try assertNothingBelowTheBoard(host, "sent")
+
+        // Disconnected, and the maybe wording: the longest lines, with the tallest foe card and the beats playing.
+        let seen = try XCTUnwrap(model.arena), foe = seen.p2
+        model.arena = BattleView(turn: seen.turn, ended: false, p1: seen.p1,
+                                 p2: .init(speciesNum: foe.speciesNum, species: foe.species, level: foe.level, types: foe.types, hp: foe.hp,
+                                           maxhp: foe.maxhp, status: "par", moves: ["hyperbeam", "earthquake", "flamethrower", "thunderwave"],
+                                           ability: "intimidate"))
+        model.moveSlugs[.p2] = ["hyperbeam": "hyper-beam", "earthquake": "earthquake", "flamethrower": "flamethrower", "thunderwave": "thunder-wave"]
+        model.abilitySlugs[.p2] = ["intimidate": "intimidate"]
+        let foeID = model.room.map { $0.p2.trainerId } ?? ""
+        for (online, status, needle) in [(false, L.onlineConnectedStatus, "disconnected"), (false, "", "offline")] {
+            model.members = [.init(trainerId: foeID, displayEmail: "foe", role: .member, status: .active, joinedAt: 0, online: online)]
+            model.connectionStatus = status
+            try await settleHost(host)
+            let shown = try recognized(host)
+            XCTAssertTrue(shown.lowercased().contains(needle), "\(needle) line is readable: \(shown)")
+            XCTAssertEqual(host.fittingSize.height, restingHeight, accuracy: 0.5, needle)
+            try assertNothingBelowTheBoard(host, "sent \(needle)")
+        }
+        try fixture.play(rounds: 1)
+        try await settleHost(host)
+        XCTAssertEqual(host.fittingSize.height, restingHeight, accuracy: 0.5, "sent while the beats play")
+        try assertNothingBelowTheBoard(host, "sent while the beats play")
+    }
+
     private func host2(_ model: OnlineBattlePresentation) async -> NSView {
         window?.close()
         return await arenaHost(model)

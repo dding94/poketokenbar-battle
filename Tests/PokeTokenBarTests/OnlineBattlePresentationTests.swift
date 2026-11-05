@@ -232,3 +232,80 @@ extension OnlineBattlePresentationTests {
         model.isBusy = true; model.send(.setPopoverVisible(true)); XCTAssertTrue(visible)
     }
 }
+
+// MARK: T15 waiting on the opponent
+
+extension OnlineBattlePresentationTests {
+    private static let polling = "화면을 열 때 경기 정보를 확인해요"
+
+    /// A manual round in which my own choice is in and the foe's presence is `online`.
+    private func waiting(online: Bool = true, status: String = L.onlineConnectedStatus, submitted: Bool = true) -> OnlineBattlePresentation {
+        let model = OnlineBattleScreenRenderingTests.model(); OnlineBattleScreenRenderingTests.arena(model)
+        model.members = [.init(trainerId: "synthetic-foe", displayEmail: "연습친구", role: .host, status: .active, joinedAt: 0, online: online)]
+        model.connectionStatus = status
+        model.choiceSubmitted = submitted
+        return model
+    }
+
+    func testWaitingOnAnOnlineOpponentIsChoosingAndOnAnOfflineOneIsDisconnected() {
+        XCTAssertEqual(waiting(online: true).opponentWait, .choosing)
+        XCTAssertEqual(waiting(online: false).opponentWait, .offline)
+    }
+
+    /// While the socket is down presence is not refreshed, so an offline flag may be old: it is only a maybe.
+    func testAnOfflineFlagFromAStalePresenceIsNeverStatedAsFact() {
+        XCTAssertEqual(waiting(online: false, status: Self.polling).opponentWait, .offlineMaybe)
+        XCTAssertEqual(waiting(online: false, status: "연결 중").opponentWait, .offlineMaybe)
+        XCTAssertEqual(waiting(online: false, status: "").opponentWait, .offlineMaybe)
+        // An old "online" proves nothing either way, so it keeps the neutral line.
+        XCTAssertEqual(waiting(online: true, status: Self.polling).opponentWait, .choosing)
+    }
+
+    func testTheOpponentIsTheOtherSeatNotAlwaysThePlayerTwo() {
+        let model = waiting(online: true)
+        model.localSide = .p2   // the foe is now p1, "synthetic-me" in this fixture room
+        model.members = [.init(trainerId: "synthetic-me", displayEmail: "상대", role: .member, status: .active, joinedAt: 0, online: false),
+                         .init(trainerId: "synthetic-foe", displayEmail: "나", role: .host, status: .active, joinedAt: 0, online: true)]
+        XCTAssertEqual(model.opponentWait, .offline)
+    }
+
+    func testNothingToWaitForUnlessMyChoiceIsInOnAManualRound() {
+        XCTAssertNil(waiting(submitted: false).opponentWait, "still choosing myself")
+        let auto = waiting(); auto.room = OnlineBattleScreenRenderingTests.room(mode: .auto)
+        XCTAssertNil(auto.opponentWait)
+        let pending = waiting(); pending.room = OnlineBattleScreenRenderingTests.room(state: .pending)
+        XCTAssertNil(pending.opponentWait)
+        let lobby = waiting(); lobby.phase = .lobby
+        XCTAssertNil(lobby.opponentWait)
+        let unknown = waiting(); unknown.members = []
+        XCTAssertEqual(unknown.opponentWait, .choosing, "no presence record is not a disconnect")
+    }
+
+    func testTheChosenSlotComesFromMyClickThenFromTheServersOwnChoice() {
+        let model = OnlineBattleScreenRenderingTests.model(); OnlineBattleScreenRenderingTests.arena(model)
+        XCTAssertNil(model.chosenSlot)
+        model.send(.chooseMove(2))
+        XCTAssertEqual(model.chosenSlot, 2)
+        // The server's record wins once it arrives; a restored room shows it without any click here.
+        model.room = Self.room(roundSeq: 1, ownChoice: "move 1")
+        XCTAssertEqual(model.chosenSlot, 1)
+        model.choiceSubmitted = false
+        XCTAssertNil(model.chosenSlot, "nothing is chosen in a round whose choice is not in")
+    }
+
+    /// A click from an earlier round must not mark a card in the next one.
+    func testAClickFromAnEarlierRoundDoesNotMarkTheNextRound() {
+        let model = OnlineBattleScreenRenderingTests.model(); OnlineBattleScreenRenderingTests.arena(model)
+        model.send(.chooseMove(2))
+        model.room = Self.room(roundSeq: 2, ownChoice: nil)
+        model.choiceSubmitted = true   // e.g. the session restored a choice it could not name
+        XCTAssertNil(model.chosenSlot)
+    }
+
+    private static func room(roundSeq: Int, ownChoice: String?) -> OnlineBattleView {
+        let base = OnlineBattleScreenRenderingTests.room()
+        return .init(battleId: base.battleId, state: .running, revision: 1, mode: .manual, p1: base.p1, p2: base.p2,
+                     createdAt: base.createdAt, expiresAt: base.expiresAt, startedAt: 0, reportedAt: nil, confirmed: true,
+                     config: nil, roundSeq: roundSeq, deadline: nil, ownChoice: ownChoice, journal: [], result: nil, reason: nil, rematchOf: nil)
+    }
+}

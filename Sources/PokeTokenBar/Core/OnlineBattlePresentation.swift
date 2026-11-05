@@ -109,6 +109,10 @@ final class OnlineBattlePresentation {
     }
     var canConfirm: Bool { !showsHistory && !showsStandings && rematchSourceID == nil && !isBusy && room?.state == .accepted && localSide == .p1 && room?.confirmed == false }
     var canPrepare: Bool { !showsHistory && !showsStandings && rematchSourceID == nil && !isBusy && canStart && !localReady && room?.confirmed == true && [.accepted, .ready].contains(room?.state) }
+    /// What the other seat is doing while this app waits for it in a manual round.
+    enum OpponentWait: Equatable { case choosing, offline, offlineMaybe }
+    var opponentWait: OpponentWait? { nil }
+    var chosenSlot: Int? { nil }
     func canChooseMove(_ slot: Int) -> Bool {
         !showsHistory && !showsStandings && rematchSourceID == nil && phase == .arena && room?.state == .running && room?.mode == .manual && !isBusy && !choiceSubmitted &&
         request?.kind == "move" && request?.moves.contains { $0.slot == slot && !$0.disabled && $0.pp > 0 } == true
