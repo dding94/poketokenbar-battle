@@ -25,8 +25,9 @@ final class OnlineBattlePresentation {
     /// Memory-only drafts survive popover disposal; never encode these in settings or saves.
     var setupInput = OnlineBattleSetupInput()
     var setupRecoveryExpanded = false
-    var setupPasteFailed = false
-    func clearSetupCodes() { setupInput.clearCodes(); setupPasteFailed = false }
+    var setupAdvancedExpanded = false
+    var setupPasteFailure: OnlineBattleSetupInput.PasteFailure?
+    func clearSetupCodes() { setupInput.clearCodes(); setupPasteFailure = nil }
     var account: OnlineBattleAccount?
     var members: [OnlineBattleMember] = []
     var battles: [OnlineBattleView] = []
@@ -165,6 +166,7 @@ final class OnlineBattlePresentation {
         case .decline: guard !showsHistory, !showsStandings, rematchSourceID == nil, !isBusy, localSide == .p2, room?.state == .pending else { return }
         case .cancel: guard !showsHistory, !showsStandings, rematchSourceID == nil, !isBusy, [.pending, .accepted, .ready].contains(room?.state) else { return }
         case .retryCredentialSave: guard !isBusy, canRetryCredentialSave else { return }
+        case .applyingServer: return
         case .configureServer(let address): guard !isBusy, (try? OnlineBattleOrigin(address)) != nil else { return }
         case .join(let code, let email): guard !isBusy, !code.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         case .recover(let code), .reconnect(let code): guard !isBusy, !code.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
@@ -188,6 +190,7 @@ struct OnlineBattleUIResult {
 
 enum OnlineBattleUIAction {
     case configureServer(String)
+    indirect case applyingServer(String, OnlineBattleUIAction)
     case join(inviteCode: String, email: String)
     case recover(code: String)
     case reconnect(code: String)

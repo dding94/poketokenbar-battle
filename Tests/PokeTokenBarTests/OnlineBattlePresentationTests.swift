@@ -17,6 +17,31 @@ final class OnlineBattlePresentationTests: XCTestCase {
         XCTAssertTrue(sent, "The onboarding form must reach the session through its typed boundary")
     }
 
+    func testApplyingServerReachesTheSessionOnlyForAValidAddressAndASetupRequestOnAManualBuild() {
+        let model = OnlineBattlePresentation()
+        var sent = 0
+        model.onAction = { _ in sent += 1 }
+        let join = OnlineBattleUIAction.join(inviteCode: "CODE", email: "나래")
+        model.send(.applyingServer("https://battle.example", join))
+        model.send(.applyingServer("https://battle.example", .recover(code: "R")))
+        model.send(.applyingServer("https://battle.example", .reconnect(code: "C")))
+        XCTAssertEqual(sent, 3)
+        model.send(.applyingServer("http://battle.example", join))
+        model.send(.applyingServer("https://battle.example/path", join))
+        model.send(.applyingServer("https://battle.example", .refresh))
+        model.send(.applyingServer("https://battle.example", .join(inviteCode: " ", email: "나래")))
+        model.send(.applyingServer("https://battle.example", .applyingServer("https://other.example", join)))
+        XCTAssertEqual(sent, 3, "bad addresses, non-setup actions and empty inner fields must not reach the session")
+        model.isBusy = true
+        model.send(.applyingServer("https://battle.example", join))
+        XCTAssertEqual(sent, 3)
+        model.isBusy = false; model.serverIsEmbedded = true
+        model.send(.applyingServer("https://battle.example", join))
+        XCTAssertEqual(sent, 3, "an embedded build has no address to apply")
+        model.send(join)
+        XCTAssertEqual(sent, 4)
+    }
+
     func testUnavailableRosterCannotChallengeAndUnknownMoveCannotReachSession() {
         let model = OnlineBattlePresentation()
         var sent = 0

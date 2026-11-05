@@ -11,6 +11,9 @@ extension L {
     var onlineServerHint: String { online("① 방장이 보낸 HTTPS 서버 주소는 한 번 적용하면 저장돼요.", "① Apply the HTTPS server address from your host once to save it.") }
     var onlinePasteInvitation: String { online("초대 정보 붙여넣기", "Paste invitation details") }
     var onlinePasteInvitationFailed: String { online("서버 주소 하나와 12자리 초대코드가 함께 있는 내용을 복사해 주세요. 입력한 내용은 유지돼요.", "Copy one HTTPS server address and one 12-character invite code together. Your entries are unchanged.") }
+    var onlinePasteInvitationEmbedded: String { onlinePasteInvitation }
+    var onlineAdvanced: String { onlineServer }
+    func onlinePasteFailure(_ failure: OnlineBattleSetupInput.PasteFailure) -> String { "" }
     var onlineInvite: String { online("초대코드", "Invite code") }
     var onlineNickname: String { online("닉네임", "Nickname") }
     var onlineNicknameHint: String { online("② 초대코드와 공백 없는 닉네임을 입력하세요. 이메일은 필요 없어요.", "② Enter your invite code and nickname without spaces. No email is required.") }
@@ -22,6 +25,7 @@ extension L {
         case .serverChanged: online("위의 ‘서버 주소 적용’을 먼저 눌러 주세요.", "Apply the server address above first.")
         case .inviteMissing: online("방장에게 받은 초대코드를 입력하세요.", "Enter the invite code from your host.")
         case .nicknameMissing: online("함께 사용할 닉네임을 입력하세요.", "Enter your nickname.")
+        case .nicknameInvalid: ""
         case .ready: online("준비됐어요. ‘그룹 참여’를 눌러 주세요.", "Ready. Select Join group.")
         }
     }

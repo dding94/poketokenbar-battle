@@ -172,11 +172,11 @@ private struct OnlineBattleSetupForm: View {
         VStack(alignment: .leading, spacing: 12) {
             Text(l.onlineSetup).font(.headline)
             Button(l.onlinePasteInvitation) {
-                model.setupPasteFailed = !model.setupInput.pasteInvitation(readInvitationClipboard())
+                model.setupPasteFailure = model.setupInput.pasteInvitation(readInvitationClipboard(), embeddedServer: model.serverIsEmbedded ? model.serverAddress : nil)
             }
             .disabled(model.isBusy)
             .accessibilityIdentifier("online.pasteInvitation")
-            if model.setupPasteFailed {
+            if model.setupPasteFailure != nil {
                 Text(l.onlinePasteInvitationFailed).font(.caption).foregroundStyle(.orange)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -201,7 +201,7 @@ private struct OnlineBattleSetupForm: View {
                 Text(l.onlineNicknameHint).font(.caption2).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 Button(l.onlineJoin) {
-                    if let action = input.joinAction(appliedServer: model.serverAddress, isBusy: model.isBusy) {
+                    if let action = input.joinAction(appliedServer: model.serverAddress, isBusy: model.isBusy, serverIsEmbedded: model.serverIsEmbedded) {
                         model.send(action)
                     }
                 }

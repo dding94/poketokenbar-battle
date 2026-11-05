@@ -96,29 +96,62 @@ final class OnlineBattleScreenRenderingTests: XCTestCase {
         field.stringValue = value
         field.delegate?.controlTextDidChange?(Notification(name: NSControl.textDidChangeNotification, object: field))
     }
+    private func settle(_ host: NSView) async throws {
+        try await Task.sleep(for: .milliseconds(150))
+        host.layoutSubtreeIfNeeded()
+    }
     func testOnlineBattleSetupDraftSurvivesActualHostingViewRecreation() async throws {
         let model = OnlineBattlePresentation()
         model.serverAddress = "https://saved.example.invalid"
         model.setupRecoveryExpanded = true
+        model.setupAdvancedExpanded = true
         var first: NSView? = await host(model)
         _ = try await capture(try XCTUnwrap(first), named: "online-synthetic-setup-before-edit.png")
         let fields = editableFields(in: try XCTUnwrap(first))
         XCTAssertEqual(fields.count, 5)
         guard fields.count == 5 else { return }
-        enter("https://draft.example.invalid", into: fields[0])
+        // Nickname, invite code, the two recovery fields, then the advanced server address last.
+        enter("나래", into: fields[0])
         enter("ABCD-EFGH-JKMN", into: fields[1])
-        enter("나래", into: fields[2])
-        enter("synthetic-recovery", into: fields[3]); enter("synthetic-reconnect", into: fields[4])
+        enter("synthetic-recovery", into: fields[2]); enter("synthetic-reconnect", into: fields[3])
+        enter("https://draft.example.invalid", into: fields[4])
         _ = try await capture(try XCTUnwrap(first), named: "online-synthetic-setup-draft-before-close.png")
         window?.contentView = nil; window?.close(); window = nil; first = nil
         let recreated = await host(model)
         _ = try await capture(recreated, named: "online-synthetic-setup-draft-after-reopen.png")
         XCTAssertEqual(editableFields(in: recreated).map(\.stringValue),
-                       ["https://draft.example.invalid", "ABCD-EFGH-JKMN", "나래", "synthetic-recovery", "synthetic-reconnect"])
+                       ["나래", "ABCD-EFGH-JKMN", "synthetic-recovery", "synthetic-reconnect", "https://draft.example.invalid"])
+    }
+    func testEmbeddedSetupShowsOnlyNicknameAndInviteCodeWithNoServerControls() async throws {
+        let model = OnlineBattlePresentation()
+        model.serverAddress = "https://embedded.example.invalid"; model.serverIsEmbedded = true
+        model.setupInput.server = model.serverAddress
+        // A stale 'advanced open' flag from a manual build must not bring the server field back.
+        model.setupAdvancedExpanded = true
+        let host = await host(model)
+        _ = try await capture(host, named: "online-synthetic-setup-embedded.png")
+        XCTAssertEqual(editableFields(in: host).count, 2, "nickname and invite code only")
+        model.setupRecoveryExpanded = true
+        try await settle(host)
+        XCTAssertEqual(editableFields(in: host).count, 4, "recovery stays reachable below the join path")
+        model.setupInput.nickname = "나래"; model.setupInput.invite = "ABCD-EFGH-JKMN"
+        _ = try await capture(host, named: "online-synthetic-setup-embedded-ready.png")
+    }
+    func testManualSetupKeepsServerEntryCollapsedUnderAdvanced() async throws {
+        let model = OnlineBattlePresentation()
+        let host = await host(model)
+        _ = try await capture(host, named: "online-synthetic-setup-manual-collapsed.png")
+        XCTAssertEqual(editableFields(in: host).count, 2, "the server address stays hidden until Advanced is opened")
+        model.setupAdvancedExpanded = true
+        try await settle(host)
+        XCTAssertEqual(editableFields(in: host).count, 3)
+        XCTAssertEqual(editableFields(in: host).last?.stringValue, "")
+        _ = try await capture(host, named: "online-synthetic-setup-manual-advanced.png")
     }
     private func clickPasteButton(in host: NSView) throws {
         let window = try XCTUnwrap(host.window)
-        // Synthetic native mouse events at the first setup action; no OCR or system input access.
+        // SwiftUI content buttons are not NSButtons here, so use synthetic native mouse events at the first
+        // setup action (it sits right under the headline); no OCR or system input access.
         let point = host.convert(NSPoint(x: 80, y: host.isFlipped ? 88 : host.bounds.height - 88), to: nil)
         for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
             let event = try XCTUnwrap(NSEvent.mouseEvent(with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
@@ -194,8 +227,9 @@ final class OnlineBattleScreenRenderingTests: XCTestCase {
     }
 
     func testOnlineBattlePasteButtonReadsOnlyOnExplicitClickAndNeverAppliesOrJoins() async throws {
+    func testOnlineBattleEmbeddedPasteReadsOnlyOnExplicitClickAndTakesAOneLineCode() async throws {
         let model = OnlineBattlePresentation()
-        model.serverAddress = "https://saved.example.invalid"
+        model.serverAddress = "https://saved.example.invalid"; model.serverIsEmbedded = true
         model.setupInput = .init(server: model.serverAddress, invite: "old", nickname: "나래")
         let original = model.setupInput
         var reads = 0, actions = 0
@@ -203,19 +237,43 @@ final class OnlineBattleScreenRenderingTests: XCTestCase {
         model.onAction = { _ in actions += 1 }
         let host = await host(model, clipboard: { reads += 1; return clipboard })
         _ = try await capture(host, named: "online-synthetic-setup-paste-before.png")
-        XCTAssertEqual(reads, 0)
+        XCTAssertEqual(reads, 0, "the clipboard is never read without a click")
         try clickPasteButton(in: host)
-        XCTAssertEqual(reads, 1); XCTAssertEqual(model.setupInput, original); XCTAssertTrue(model.setupPasteFailed)
-        clipboard = "서버 주소: https://next.example.invalid\n초대코드: ABCD-EFGH-JKMN"
+        XCTAssertEqual(reads, 1); XCTAssertEqual(model.setupInput, original); XCTAssertEqual(model.setupPasteFailure, .noInviteCode)
+        try await settle(host)
+        _ = try await capture(host, named: "online-synthetic-setup-paste-failed.png")
+        clipboard = "  abcd-efgh-jkmn \n"
         try clickPasteButton(in: host)
         _ = try await capture(host, named: "online-synthetic-setup-paste-after.png")
         XCTAssertEqual(reads, 2); XCTAssertEqual(actions, 0)
-        XCTAssertEqual(model.serverAddress, "https://saved.example.invalid")
+        XCTAssertEqual(model.setupInput.invite, "ABCDEFGHJKMN"); XCTAssertEqual(model.setupInput.nickname, "나래")
+        XCTAssertEqual(model.setupInput.server, "https://saved.example.invalid")
+        XCTAssertNil(model.setupPasteFailure)
+        XCTAssertEqual(editableFields(in: host).prefix(2).map(\.stringValue), ["나래", "ABCDEFGHJKMN"])
+    }
+    func testOnlineBattleManualPasteTakesTwoLinesAndNeverAppliesOrJoins() async throws {
+        let model = OnlineBattlePresentation()
+        model.serverAddress = "https://saved.example.invalid"
+        model.setupInput = .init(server: model.serverAddress, invite: "old", nickname: "나래")
+        var reads = 0, actions = 0
+        var clipboard = "ABCD-EFGH-JKMN\nhttp://insecure.example.invalid"
+        model.onAction = { _ in actions += 1 }
+        let host = await host(model, clipboard: { reads += 1; return clipboard })
+        try await settle(host)
+        XCTAssertEqual(reads, 0)
+        try clickPasteButton(in: host)
+        XCTAssertEqual(model.setupPasteFailure, .invalidServer)
+        XCTAssertEqual(model.setupInput, .init(server: model.serverAddress, invite: "old", nickname: "나래"))
+        clipboard = "서버 주소: https://next.example.invalid\n초대코드: ABCD-EFGH-JKMN"
+        try clickPasteButton(in: host)
+        XCTAssertEqual(reads, 2); XCTAssertEqual(actions, 0)
+        XCTAssertEqual(model.serverAddress, "https://saved.example.invalid", "paste never applies the address")
         XCTAssertEqual(model.setupInput.server, "https://next.example.invalid")
         XCTAssertEqual(model.setupInput.invite, "ABCDEFGHJKMN"); XCTAssertEqual(model.setupInput.nickname, "나래")
-        XCTAssertFalse(model.setupPasteFailed)
-        XCTAssertNil(model.setupInput.joinAction(appliedServer: model.serverAddress, isBusy: false))
-        XCTAssertEqual(editableFields(in: host).prefix(3).map(\.stringValue), ["https://next.example.invalid", "ABCDEFGHJKMN", "나래"])
+        XCTAssertNil(model.setupPasteFailure)
+        guard case .applyingServer? = model.setupInput.joinAction(appliedServer: model.serverAddress, isBusy: false, serverIsEmbedded: false) else {
+            return XCTFail("join applies the pasted address itself")
+        }
     }
     func testSyntheticSetupLobbyArenaAndResultRenderInsidePopover() async throws {
         let model = Self.model()

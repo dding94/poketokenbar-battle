@@ -134,14 +134,14 @@ final class OnlineBattleSessionTests: XCTestCase {
             .init(id: value.instanceId, name: value.publicInfo.species, snapshot: .init(schemaVersion: 1, instanceID: value.instanceId, engineHash: BattleEngineManifest.sha256, rulesVersion: BattleSnapshot.rules, policyVersion: BattleSnapshot.policy, set: value.set, publicInfo: value.publicInfo), blockedReason: nil)
         }
     }
-    private func setup(_ battles: [OnlineBattleView] = [], credential: SessionCredentials = .init(), effects: SessionEffects = .init(), trainer: String = "trainer-one", rosterOverride: [PracticeCandidate]? = nil, connection: SessionConnection = .init(), observer: SessionObserver? = nil, access: SessionAccess? = nil, enabled: Bool = true, clock: OnlineBattleConnectionClock = .init(), automaticTicks: Bool = false) async throws -> (OnlineBattleSession, SessionHTTP, SessionCredentials, SessionEffects) {
+    private func setup(_ battles: [OnlineBattleView] = [], credential: SessionCredentials = .init(), effects: SessionEffects = .init(), trainer: String = "trainer-one", rosterOverride: [PracticeCandidate]? = nil, connection: SessionConnection = .init(), observer: SessionObserver? = nil, access: SessionAccess? = nil, enabled: Bool = true, clock: OnlineBattleConnectionClock = .init(), automaticTicks: Bool = false, embeddedServer: String? = nil) async throws -> (OnlineBattleSession, SessionHTTP, SessionCredentials, SessionEffects) {
         let http = SessionHTTP(), room = try battle()
         await connection.setTrainer(trainer)
         let localAccount = OnlineBattleAccount(trainer: .init(trainerId: trainer, displayEmail: account.trainer.displayEmail, role: .member, status: .active), group: account.group)
         await http.route("/v1/me", try JSONEncoder().encode(localAccount))
         await http.route("/v1/group", try JSONEncoder().encode(OnlineBattleGroupMembers(group: account.group, members: [])))
         await http.route("/v1/battles", try JSONEncoder().encode(OnlineBattlePage(battles: battles, before: nil)))
-        let session = OnlineBattleSession(settings: .init(profileID: UUID().uuidString, serverURL: "https://battle.example.invalid"), credentials: credential, transport: http, effects: effects, engineFactory: { try BattleEngine(url: self.engineURL) }, connectionFactory: { callback in observer?.callback = callback; return connection }, rosterProvider: { rosterOverride ?? self.roster(room) }, clock: clock, automaticTicks: automaticTicks, enabled: enabled, accessAllowed: { access?.allowed ?? true })
+        let session = OnlineBattleSession(settings: .init(profileID: UUID().uuidString, serverURL: "https://battle.example.invalid", embeddedServerURL: embeddedServer), credentials: credential, transport: http, effects: effects, engineFactory: { try BattleEngine(url: self.engineURL) }, connectionFactory: { callback in observer?.callback = callback; return connection }, rosterProvider: { rosterOverride ?? self.roster(room) }, clock: clock, automaticTicks: automaticTicks, enabled: enabled, accessAllowed: { access?.allowed ?? true })
         return (session, http, credential, effects)
     }
     func testStandingsOpenIsReadOnlyAndFailureStaysInsideOverlay() async throws {
@@ -762,6 +762,50 @@ final class OnlineBattleSessionTests: XCTestCase {
         session.presentation.setupInput.recovery = "recovery"; session.presentation.setupInput.reconnect = "reconnect"
         await session.setEnabled(false)
         XCTAssertEqual(session.presentation.setupInput, .init(server: "https://next.example.invalid", nickname: "나래"))
+    }
+    private func grantBody() throws -> Data {
+        try JSONSerialization.data(withJSONObject: ["trainer": JSONSerialization.jsonObject(with: JSONEncoder().encode(account.trainer)), "group": JSONSerialization.jsonObject(with: JSONEncoder().encode(account.group)), "accessKey": "issued-key", "recoveryCode": "one-time-code"])
+    }
+    func testApplyingServerSavesTheTypedAddressThenJoinsAgainstIt() async throws {
+        let credentials = SessionCredentials(); await credentials.setKey(nil)
+        let (session, http, _, _) = try await setup(credential: credentials)
+        await http.route("/v1/join", try grantBody())
+        await session.perform(.applyingServer("https://new.example.invalid", .join(inviteCode: "invite", email: "synthetic@example.invalid")))
+        XCTAssertEqual(session.presentation.serverAddress, "https://new.example.invalid")
+        XCTAssertEqual(session.presentation.account, account)
+        let hosts = await http.requests.filter { $0.url?.path == "/v1/join" }.compactMap { $0.url?.host }
+        XCTAssertEqual(hosts, ["new.example.invalid"], "the join must go to the address the user typed, not the previous one")
+    }
+    func testApplyingServerWorksForRecoveryToo() async throws {
+        let credentials = SessionCredentials(); await credentials.setKey(nil)
+        let (session, http, _, _) = try await setup(credential: credentials)
+        await http.route("/v1/recover", try grantBody())
+        await session.perform(.applyingServer("https://new.example.invalid", .recover(code: "recovery")))
+        XCTAssertEqual(session.presentation.serverAddress, "https://new.example.invalid")
+        XCTAssertEqual(session.presentation.account, account)
+        let hosts = await http.requests.filter { $0.url?.path == "/v1/recover" }.compactMap { $0.url?.host }
+        XCTAssertEqual(hosts, ["new.example.invalid"])
+    }
+    func testApplyingServerOnAnEmbeddedBuildChangesNothingAndNeverJoins() async throws {
+        let credentials = SessionCredentials(); await credentials.setKey(nil)
+        let (session, http, _, _) = try await setup(credential: credentials, embeddedServer: "https://embedded.example.invalid")
+        await http.route("/v1/join", try grantBody())
+        await session.perform(.applyingServer("https://other.example.invalid", .join(inviteCode: "invite", email: "synthetic@example.invalid")))
+        XCTAssertEqual(session.presentation.serverAddress, "https://embedded.example.invalid")
+        XCTAssertNil(session.presentation.account)
+        let joins = await http.count("/v1/join"); XCTAssertEqual(joins, 0)
+    }
+    func testEmbeddedBuildJoinsAndRecoversAgainstItsFixedAddressWithoutAnyApplyStep() async throws {
+        for path in ["/v1/join", "/v1/recover"] {
+            let credentials = SessionCredentials(); await credentials.setKey(nil)
+            let (session, http, _, _) = try await setup(credential: credentials, embeddedServer: "https://embedded.example.invalid")
+            await http.route(path, try grantBody())
+            await session.bootstrap()
+            await session.perform(path == "/v1/join" ? .join(inviteCode: "invite", email: "synthetic@example.invalid") : .recover(code: "recovery"))
+            XCTAssertEqual(session.presentation.account, account, path)
+            let hosts = await http.requests.filter { $0.url?.path == path }.compactMap { $0.url?.host }
+            XCTAssertEqual(hosts, ["embedded.example.invalid"], path)
+        }
     }
     func testBootstrapLoadsCredentialsOnceAndRefreshesAccount() async throws {
         let (session, http, credentials, _) = try await setup()

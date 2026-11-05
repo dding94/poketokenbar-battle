@@ -702,6 +702,7 @@ final class OnlineBattleSession {
         case .dismissResult, .backToLobby: resetExtras(); clearHistory(); prefersLobby = true; navigationRevision &+= 1; selectedBattleID = nil; publish(); return
         case .openBattle(let id): prefersLobby = false; navigationRevision &+= 1; selectedBattleID = id; publish(); return
         case .configureServer(let value): await configureServer(value); return
+        case .applyingServer: return
         case .showHistory:
             guard onlineAllowed, authenticated, presentation.account != nil else { return }
             guard !presentation.showsStandings, presentation.rematchSourceID == nil else { return }
