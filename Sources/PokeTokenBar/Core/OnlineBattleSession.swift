@@ -889,6 +889,7 @@ final class OnlineBattleSession {
         case .acknowledgeRecoveryCode: presentation.recoveryCode = nil; return
         case .dismissResult, .backToLobby: resetExtras(); clearHistory(); prefersLobby = true; navigationRevision &+= 1; selectedBattleID = nil; pinnedBattleID = nil; publish(); return
         case .openBattle(let id): selectBattle(id); return
+        case .host: return
         // A lobby row cannot be pressed behind an overlay; an event can. The rematch draft's picks live outside its page.
         case .followAttention(let id): resetExtras(); clearHistory(); selectBattle(id); return
         case .configureServer(let value): await configureServer(value); return

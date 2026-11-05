@@ -35,7 +35,23 @@ final class OnlineBattlePresentation {
     var setupAdvancedExpanded = false
     var setupPasteFailure: OnlineBattleSetupInput.PasteFailure?
     func clearSetupCodes() { setupInput.clearCodes(); setupPasteFailure = nil }
-    var account: OnlineBattleAccount?
+    var account: OnlineBattleAccount? {
+        didSet {
+            // A different account, or one that stopped being the host, takes the panel and any unsaved code with it.
+            if account?.trainer.trainerId != oldValue?.trainer.trainerId || !isHost { host.close() }
+        }
+    }
+    /// The host panel (T10): invite codes, members, reconnect codes. Only a host ever shows it.
+    var host = OnlineBattleHostState()
+    var isHost: Bool { account?.trainer.role == .host && account?.trainer.status == .active }
+    var showsHostPanel: Bool { host.visible && isHost }
+    /// A copyable code is on screen: it is gone if the popover closes before it is copied, so the popover stays open.
+    var hostSecretShowing: Bool { showsHostPanel && host.secret != nil }
+    var canOpenHostPanel: Bool { false }
+    /// Who the host can act on: every active member but the host.
+    var hostMembers: [OnlineBattleMember] {
+        members.filter { $0.status == .active && $0.trainerId != account?.trainer.trainerId }
+    }
     var members: [OnlineBattleMember] = []
     var battles: [OnlineBattleView] = []
     /// Archive navigation is independent of the live room and arena.
@@ -233,6 +249,7 @@ final class OnlineBattlePresentation {
             recoveryCode = nil
         case .openBattle(let id): guard !showsHistory, !showsStandings, rematchSourceID == nil, !isBusy, battles.contains(where: { $0.battleId == id && $0.state.isActive }) else { return }
         case .refresh, .dismissResult: guard !isBusy else { return }
+        case .host: return
         }
         onAction(action)
     }
@@ -266,4 +283,6 @@ enum OnlineBattleUIAction {
     case followAttention(String)
     /// Closes an ended-request banner without opening anything. Pure presentation.
     case dismissEnded(String)
+    /// Host-only group care: invites, members, reconnect codes. Everything else about the host panel is in the state.
+    case host(OnlineBattleHostAction)
 }

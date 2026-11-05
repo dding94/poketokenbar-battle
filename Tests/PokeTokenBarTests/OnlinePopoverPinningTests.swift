@@ -163,4 +163,62 @@ final class OnlinePopoverPinningTests: XCTestCase {
         XCTAssertEqual(L(.ko).onlinePinned, "고정됨")
         XCTAssertEqual(L(.en).onlinePinned, "Pinned")
     }
+
+    // MARK: a host code that has to be copied
+
+    private func hostModel(phase: Phase = .lobby) -> OnlineBattlePresentation {
+        let model = model(phase)
+        model.account = .init(trainer: .init(trainerId: "me", displayEmail: "나래", role: .host, status: .active),
+                              group: .init(groupId: "g", name: "동료들", hostTrainerId: "me"))
+        model.members = [.init(trainerId: "foe", displayEmail: "한별", role: .member, status: .active, joinedAt: 0, online: true)]
+        model.host.visible = true
+        return model
+    }
+    private var issued: OnlineBattleHostSecret { .init(kind: .invite(maxUses: 30), code: "ABCDEFGHJKMN", expiresAt: 1_793_683_500_000) }
+
+    /// The invite code and the member's reconnect code are shown once and copied into another app: the first complaint.
+    func testAnInviteOrReconnectCodeOnScreenPinsUntilItIsCopied() {
+        for kind in [OnlineBattleHostSecret.Kind.invite(maxUses: 30), .reconnect(trainerId: "foe")] {
+            let host = hostModel()
+            XCTAssertFalse(OnlinePopoverPinning.isPinned(host, onlineScreenShowing: true), "the open panel alone stays transient")
+            host.host.secret = .init(kind: kind, code: "ABCDEFGHJKMN", expiresAt: 1)
+            XCTAssertTrue(OnlinePopoverPinning.isPinned(host, onlineScreenShowing: true), "\(kind)")
+            XCTAssertFalse(OnlinePopoverPinning.isPinned(host, onlineScreenShowing: false), "off the online screen nothing pins")
+            host.send(.host(.copied))
+            XCTAssertFalse(OnlinePopoverPinning.isPinned(host, onlineScreenShowing: true), "copying frees the popover again")
+        }
+    }
+
+    func testHidingOrLosingTheCodeUnpinsAndAClosedPanelNeverPins() {
+        let hidden = hostModel(); hidden.host.secret = issued
+        hidden.send(.host(.dismissSecret))
+        XCTAssertFalse(OnlinePopoverPinning.isPinned(hidden, onlineScreenShowing: true))
+        let closed = hostModel(); closed.host.secret = issued; closed.host.visible = false
+        XCTAssertFalse(OnlinePopoverPinning.isPinned(closed, onlineScreenShowing: true), "a code nobody can see pins nothing")
+        let member = hostModel(); member.host.secret = issued
+        member.account = .init(trainer: .init(trainerId: "me", displayEmail: "나래", role: .member, status: .active),
+                               group: .init(groupId: "g", name: "동료들", hostTrainerId: "other"))
+        XCTAssertFalse(OnlinePopoverPinning.isPinned(member, onlineScreenShowing: true))
+    }
+
+    /// The app delegate tracks exactly what this function reads, so a code arriving or leaving has to wake the pin up.
+    func testACodeArrivingAndLeavingWakesThePinThroughTheObservedRead() {
+        let host = hostModel()
+        let arrived = ObservedFlag()
+        withObservationTracking { _ = OnlinePopoverPinning.isPinned(host, onlineScreenShowing: true) } onChange: { arrived.value = true }
+        host.host.secret = issued
+        XCTAssertTrue(arrived.value)
+        let left = ObservedFlag()
+        withObservationTracking { _ = OnlinePopoverPinning.isPinned(host, onlineScreenShowing: true) } onChange: { left.value = true }
+        host.send(.host(.copied))
+        XCTAssertTrue(left.value)
+    }
+
+    /// Closing the popover with the X before copying must not strand the code on a screen nobody reopens.
+    func testReopeningWithAnUncopiedCodeLandsOnTheScreenThatShowsIt() {
+        let host = hostModel(); host.host.secret = issued
+        XCTAssertEqual(OnlinePopoverPinning.openRoute(OnlineAttentionSource(presentation: host).input()), .init(battleId: nil))
+        host.send(.host(.copied))
+        XCTAssertNil(OnlinePopoverPinning.openRoute(OnlineAttentionSource(presentation: host).input()))
+    }
 }

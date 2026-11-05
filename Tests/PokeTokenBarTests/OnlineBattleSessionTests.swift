@@ -173,6 +173,206 @@ final class OnlineBattleSessionTests: XCTestCase {
         XCTAssertFalse(session.presentation.showsStandings)
     }
 
+    // MARK: T10 host panel
+
+    private func hostAccount(_ role: OnlineBattleTrainer.Role = .host) -> OnlineBattleAccount {
+        .init(trainer: .init(trainerId: "trainer-one", displayEmail: "synthetic@example.invalid", role: role, status: .active), group: account.group)
+    }
+    private func inviteJSON(_ id: String, maxUses: Int = 30, uses: Int = 0, revoked: Bool = false, expiresInDays: Double = 7, createdAt: Double = 1_793_683_500_000) -> String {
+        let expires = Date().timeIntervalSince1970 * 1000 + expiresInDays * 86_400_000
+        return #"{"inviteId":"\#(id)","createdAt":\#(createdAt),"expiresAt":\#(expires),"maxUses":\#(maxUses),"uses":\#(uses),"revoked":\#(revoked),"revokedAt":null}"#
+    }
+    private func hostSession(role: OnlineBattleTrainer.Role = .host, members: [OnlineBattleMember] = [],
+                             invites: [String] = []) async throws -> (OnlineBattleSession, SessionHTTP) {
+        let (session, http, _, _) = try await setup()
+        await http.route("/v1/me", try JSONEncoder().encode(hostAccount(role)))
+        await http.route("/v1/group", try JSONEncoder().encode(OnlineBattleGroupMembers(group: account.group, members: members)))
+        await http.route("/v1/invites", Data(#"{"invites":[\#(invites.joined(separator: ","))]}"#.utf8))
+        await session.bootstrap()
+        await session.perform(.setPopoverVisible(true))
+        return (session, http)
+    }
+    private func issuedInvite(_ code: String = "ABCDEFGHJKMN") -> Data {
+        Data(#"{"invite":\#(inviteJSON("inv_a")),"inviteCode":"\#(code)"}"#.utf8)
+    }
+    private func peer(_ id: String = "trainer-two", name: String = "동료") -> OnlineBattleMember {
+        .init(trainerId: id, displayEmail: name, role: .member, status: .active, joinedAt: 0, online: true)
+    }
+    private func bodyJSON(_ http: SessionHTTP, _ path: String) async throws -> [String: Any] {
+        let bodies = await http.bodies(path)
+        return try XCTUnwrap(JSONSerialization.jsonObject(with: XCTUnwrap(bodies.last)) as? [String: Any])
+    }
+
+    func testOnlyTheHostCanOpenTheHostPanelOrCreateInvites() async throws {
+        let (session, http) = try await hostSession(role: .member)
+        await session.perform(.host(.open))
+        await session.perform(.host(.createInvite(.group)))
+        await session.perform(.host(.issueReconnect("trainer-two")))
+        let calls = await http.count("/v1/invites")
+        XCTAssertEqual(calls, 0, "a member never reaches an invite route")
+        XCTAssertFalse(session.presentation.showsHostPanel)
+        XCTAssertNil(session.presentation.host.secret)
+        let (host, hostHTTP) = try await hostSession()
+        await host.perform(.host(.open))
+        XCTAssertTrue(host.presentation.showsHostPanel)
+        let reads = await hostHTTP.count("/v1/invites")
+        XCTAssertEqual(reads, 1, "opening reads the invite list once")
+    }
+
+    func testCreateInviteSendsSevenDaysAndThirtyUsesByDefaultAndOneUseOnRequest() async throws {
+        let (session, http) = try await hostSession()
+        await session.perform(.host(.open))
+        await http.route("/v1/invites", issuedInvite())
+        await session.perform(.host(.createInvite(.group)))
+        var body = try await bodyJSON(http, "/v1/invites")
+        XCTAssertEqual(body["ttlSeconds"] as? Int, 604_800)
+        XCTAssertEqual(body["maxUses"] as? Int, 30)
+        XCTAssertEqual(session.presentation.host.secret?.code, "ABCDEFGHJKMN")
+        XCTAssertEqual(session.presentation.host.secret?.kind, .invite(maxUses: 30))
+        await session.perform(.host(.createInvite(.single)))
+        body = try await bodyJSON(http, "/v1/invites")
+        XCTAssertEqual(body["maxUses"] as? Int, 1)
+        XCTAssertEqual(body["ttlSeconds"] as? Int, 604_800)
+    }
+
+    func testAnIssuedCodeNeverReachesDescriptionsNoticesOrTheLog() async throws {
+        let (session, http) = try await hostSession(members: [peer()])
+        await session.perform(.host(.open))
+        await http.route("/v1/invites", issuedInvite())
+        await session.perform(.host(.createInvite(.group)))
+        await http.route("/v1/reconnect-codes", Data(#"{"trainerId":"trainer-two","reconnectCode":"RECONNECTCODE16","expiresAt":9999999999999}"#.utf8))
+        await session.perform(.host(.issueReconnect("trainer-two")))
+        let secret = try XCTUnwrap(session.presentation.host.secret)
+        XCTAssertEqual(secret.code, "RECONNECTCODE16")
+        for text in ["\(secret)", String(reflecting: secret), String(describing: session.presentation.host), String(reflecting: session.presentation.host)] {
+            XCTAssertFalse(text.contains("RECONNECTCODE16"), text)
+            XCTAssertFalse(text.contains("ABCDEFGHJKMN"), text)
+        }
+        XCTAssertNil(session.presentation.notice)
+        XCTAssertFalse((session.presentation.host.notice ?? "").contains("RECONNECTCODE16"))
+        XCTAssertFalse(session.presentation.connectionStatus.contains("RECONNECTCODE16"))
+    }
+
+    func testOpeningListsOnlyInvitesThatCanStillBeUsed() async throws {
+        let (session, _) = try await hostSession(invites: [
+            inviteJSON("inv_live", createdAt: 3), inviteJSON("inv_revoked", revoked: true, createdAt: 4),
+            inviteJSON("inv_expired", expiresInDays: -1, createdAt: 5), inviteJSON("inv_full", maxUses: 2, uses: 2, createdAt: 6),
+            inviteJSON("inv_newer", createdAt: 7)])
+        await session.perform(.host(.open))
+        XCTAssertEqual(session.presentation.host.activeInvites().map(\.inviteId), ["inv_newer", "inv_live"])
+        XCTAssertFalse(session.presentation.host.invitesFailed)
+    }
+
+    func testRevokingAnInviteSendsItsIdAndDropsItFromTheActiveList() async throws {
+        let (session, http) = try await hostSession(invites: [inviteJSON("inv_live")])
+        await session.perform(.host(.open))
+        XCTAssertEqual(session.presentation.host.activeInvites().count, 1)
+        await http.route("/v1/invites/revoke", Data(#"{"invite":\#(inviteJSON("inv_live", revoked: true))}"#.utf8))
+        await session.perform(.host(.revokeInvite("inv_live")))
+        let body = try await bodyJSON(http, "/v1/invites/revoke")
+        XCTAssertEqual(body["inviteId"] as? String, "inv_live")
+        XCTAssertTrue(session.presentation.host.activeInvites().isEmpty)
+        XCTAssertEqual(session.presentation.host.notice, L(.ko).onlineHostRevoked)
+    }
+
+    func testRemovingAMemberNeedsTheSameMemberConfirmedFirstAndReportsTheRevokedInvites() async throws {
+        let (session, http) = try await hostSession(members: [peer("trainer-two", name: "한별"), peer("trainer-three", name: "다온")])
+        await session.perform(.host(.open))
+        await http.route("/v1/members/remove", Data(#"{"ok":true,"revokedInvites":2}"#.utf8))
+        await session.perform(.host(.confirmRemove("trainer-two")))
+        var removals = await http.count("/v1/members/remove")
+        XCTAssertEqual(removals, 0, "no confirmation was asked")
+        session.presentation.send(.host(.askRemove("trainer-two")))
+        XCTAssertEqual(session.presentation.host.pendingRemoval, "trainer-two")
+        await session.perform(.host(.confirmRemove("trainer-three")))
+        removals = await http.count("/v1/members/remove")
+        XCTAssertEqual(removals, 0, "a confirmation for someone else is not this member's")
+        let groupReads = await http.count("/v1/group")
+        await session.perform(.host(.confirmRemove("trainer-two")))
+        removals = await http.count("/v1/members/remove")
+        XCTAssertEqual(removals, 1)
+        let body = try await bodyJSON(http, "/v1/members/remove")
+        XCTAssertEqual(body["trainerId"] as? String, "trainer-two")
+        XCTAssertNil(session.presentation.host.pendingRemoval)
+        XCTAssertEqual(session.presentation.host.notice, L(.ko).onlineHostRemoved(name: "한별", revokedInvites: 2))
+        XCTAssertTrue(try XCTUnwrap(session.presentation.host.notice).contains("2"))
+        let after = await http.count("/v1/group")
+        XCTAssertGreaterThan(after, groupReads, "the member list is read again")
+    }
+
+    func testAReconnectCodeIsIssuedForAMemberAndNeverForTheHostItself() async throws {
+        let (session, http) = try await hostSession(members: [peer()])
+        await session.perform(.host(.open))
+        await http.route("/v1/reconnect-codes", Data(#"{"trainerId":"trainer-two","reconnectCode":"RECONNECTCODE16","expiresAt":9999999999999}"#.utf8))
+        await session.perform(.host(.issueReconnect("trainer-one")))
+        var issued = await http.count("/v1/reconnect-codes")
+        XCTAssertEqual(issued, 0, "the host cannot target itself")
+        await session.perform(.host(.issueReconnect("trainer-two")))
+        issued = await http.count("/v1/reconnect-codes")
+        XCTAssertEqual(issued, 1)
+        let body = try await bodyJSON(http, "/v1/reconnect-codes")
+        XCTAssertEqual(body["trainerId"] as? String, "trainer-two")
+        XCTAssertEqual(session.presentation.host.secret?.kind, .reconnect(trainerId: "trainer-two"))
+    }
+
+    func testAServerRefusalIsExplainedInThePanelAndLeavesNoCode() async throws {
+        let (session, http) = try await hostSession()
+        await session.perform(.host(.open))
+        await http.route("/v1/invites", Data(#"{"error":{"code":"forbidden"}}"#.utf8), status: 403)
+        await session.perform(.host(.createInvite(.group)))
+        let refusal = try XCTUnwrap(L(.ko).onlineHostServerError(.init(code: .forbidden, retryAfter: nil)))
+        XCTAssertEqual(session.presentation.host.notice, refusal)
+        XCTAssertNil(session.presentation.host.secret)
+        XCTAssertFalse(session.presentation.host.busy)
+    }
+
+    func testLosingTheHostRoleClosesThePanelAndForgetsTheUnsavedCode() async throws {
+        let (session, http) = try await hostSession()
+        await session.perform(.host(.open))
+        await http.route("/v1/invites", issuedInvite())
+        await session.perform(.host(.createInvite(.group)))
+        XCTAssertTrue(session.presentation.hostSecretShowing)
+        await http.route("/v1/me", try JSONEncoder().encode(hostAccount(.member)))
+        await session.refresh()
+        XCTAssertFalse(session.presentation.showsHostPanel)
+        XCTAssertNil(session.presentation.host.secret)
+    }
+
+    func testACodeThatArrivesAfterThePanelClosedIsDropped() async throws {
+        let (session, http) = try await hostSession()
+        await session.perform(.host(.open))
+        await http.route("/v1/invites", issuedInvite())
+        await http.suspendNext("POST /v1/invites")
+        let before = await http.count("/v1/invites")
+        let creating = Task { await session.perform(.host(.createInvite(.group))) }
+        // The request is recorded and held in one step, so a new count means the POST is held. Bounded: a missing call fails, not hangs.
+        var held = false
+        for _ in 0..<300 where !held {
+            held = await http.count("/v1/invites") > before
+            if !held { try await Task.sleep(for: .milliseconds(10)) }
+        }
+        XCTAssertTrue(held, "the create call never reached the server")
+        session.presentation.send(.host(.close))
+        await http.resume(.init(status: 200, body: issuedInvite()))
+        await creating.value
+        XCTAssertNil(session.presentation.host.secret, "nobody is looking: the code is not kept")
+        XCTAssertFalse(session.presentation.hostSecretShowing)
+        XCTAssertFalse(session.presentation.host.busy)
+    }
+
+    func testLeavingForTheGroupListOrARoomClosesThePanel() async throws {
+        let (session, http) = try await hostSession()
+        await session.perform(.host(.open))
+        await http.route("/v1/invites", issuedInvite())
+        await session.perform(.host(.createInvite(.group)))
+        await session.perform(.backToLobby)
+        XCTAssertFalse(session.presentation.showsHostPanel)
+        XCTAssertNil(session.presentation.host.secret)
+        await session.perform(.host(.open))
+        await session.perform(.followAttention("bt_any"))
+        XCTAssertFalse(session.presentation.showsHostPanel, "an event takes the person to its room")
+    }
+
     func testRematchPreparationLocksOpponentAndModeWithoutSubmitting() async throws {
         let room = try battle()
         let (session, http, _, effects) = try await setup([room])

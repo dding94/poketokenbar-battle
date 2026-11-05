@@ -8,6 +8,11 @@ struct OnlineBattleScreen: View {
     let l: L
     var artwork = true
     var readInvitationClipboard: () -> String? = { NSPasteboard.general.string(forType: .string) }
+    /// Writes a host code to the pasteboard; false when the pasteboard refused it, so the code stays on screen.
+    var writeClipboard: (String) -> Bool = { text in
+        NSPasteboard.general.clearContents()
+        return NSPasteboard.general.setString(text, forType: .string)
+    }
     var speciesNameProvider: any PokemonNameProviding = PokemonNameClient.shared
     var speciesNameStore: PokemonNameDisplayStore = .shared
     var onClosePopover: () -> Void = {}
@@ -15,6 +20,8 @@ struct OnlineBattleScreen: View {
 
     var showsGroupBack: Bool { !model.showsHistory && !model.showsStandings && model.rematchSourceID == nil && [.room, .arena, .verifying].contains(model.phase) }
     func returnToGroup() { model.send(.backToLobby) }
+    /// The header entry to the host panel: a host in the lobby only.
+    var showsHostEntry: Bool { false }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
