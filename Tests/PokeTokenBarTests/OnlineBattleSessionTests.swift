@@ -43,6 +43,7 @@ private actor SessionHTTP: OnlineBattleHTTPTransport {
         await withCheckedContinuation { blockedWaiter = $0 }
     }
     func resume(_ response: OnlineBattleHTTPResponse) { suspended?.resume(returning: response); suspended = nil }
+    func isBlocked() -> Bool { suspended != nil }
     func queue(_ path: String, _ values: [OnlineBattleHTTPResponse]) { queues[path] = values }
     func bodies(_ path: String) -> [Data] { requests.filter { $0.url?.path == path }.compactMap(\.httpBody) }
     func route(_ path: String, _ data: Data, status: Int = 200) { routes[path] = .init(status: status, body: data) }
@@ -3800,7 +3801,10 @@ extension OnlineBattleSessionTests {
         XCTAssertEqual(model.chosenSlot, slots[1], "the last press wins")
         await http.suspendNext(choices)
         let opening = Task { try await self.notify(observer, connection, room: final, fields: self.openNotice(next)) }
-        await http.waitUntilBlocked()
+        // Bounded: if the kept move never goes out, this fails on its assertions instead of waiting forever.
+        var blocked = false
+        for _ in 0..<2000 where !blocked { await Task.yield(); blocked = await http.isBlocked() }
+        XCTAssertTrue(blocked, "the round opened, so the kept move goes out")
         XCTAssertTrue(model.choiceSubmitted, "while it is on its way the round reads as chosen, so no my-turn mark rises")
         XCTAssertEqual(model.chosenSlot, slots[1])
         XCTAssertFalse(model.canChooseMove(slots[0]), "once sent it cannot be swapped")
