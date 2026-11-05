@@ -19,7 +19,7 @@ read_when:
 | D8 | 고정 서버는 새 운영 Worker `ptb-battle-league`다. 주소를 바꾸면 접속키가 끊기므로 가입자가 거의 없는 지금 옮긴다 | T26, T08 |
 | D2 | 가입은 초대코드 + 앱 안 방장 패널이다. 신청·승인 방식은 이번 범위가 아니다 | T10 |
 | D3 | 메뉴바 표식 + macOS 알림 + 입력·대기·배틀 구간의 팝오버 자동 고정 | T03, T04, T05 |
-| D5 | 앱 표시 이름은 TokenArena다. 내부 식별자는 유지한다 | T22, T23 |
+| D5 | 앱 표시 이름은 TokenDuel이다. 내부 식별자는 유지한다. TokenArena는 같은 분야의 제품(GitHub, npm)이 이미 써서 처음 결정을 바꿨다 | T22, T23 |
 | D4 | 수락·최종 확인·전투 준비 3단계를 유지하고 안내부터 강화한다. 자동 진행은 보류한다 | T06, T20 |
 | D6 | 기술 연출은 3초 안팎으로 짧게, 건너뛸 수 있게, 연출 중에도 선택을 허용한다. 서버 시계는 바꾸지 않는다 | T13, T14, T18 |
 | D7 | 상대가 선택을 마쳤다는 사실만 표시한다. 내용은 공개하지 않는다 | T16 |
@@ -99,7 +99,7 @@ MIT가 주지 않는 것: 이름은 라이선스와 별개의 상표 문제입�
 작업 에이전트에게 주는 지시문:
 
 ```text
-너는 TokenArena(저장소 poketokenbar-battle) PR 14의 작업 에이전트다. 작업: {작업 ID}.
+너는 TokenDuel(저장소 poketokenbar-battle) PR 14의 작업 에이전트다. 작업: {작업 ID}.
 이 worktree에서 `git reset --hard {통합 브랜치 끝 커밋}`으로 시작한다.
 docs/reference/pr14-online-ux-plan.md의 §1, §4와 {작업 ID} 항목, AGENTS.md를 읽고 수용 기준을 모두 충족해.
 RED 테스트를 먼저 커밋하고, 결함 주입으로 테스트가 잡는지 확인해. 푸시하지 마.
@@ -675,18 +675,18 @@ T02는 푸시 이벤트가 아니라 views 상태 비교로 정의한다. 재실
 
 먼저 쓸 테스트: 렌더링 테스트에서 기술 버튼 접근성 라벨이 비어 있지 않고 기술 이름을 포함한다고 단언한다. 현재는 accessibilityIdentifier만 있어 실패한다.
 
-### T22 — 앱 이름을 TokenArena로 변경 (내부 식별자 유지, .app 폴더 포함)
+### T22 — 앱 이름을 TokenDuel로 변경 (내부 식별자 유지, .app 폴더 포함)
 
 - 우선순위 P1 · 크기 M · 모델 sonnet medium
 - 피드백: 5
 - 선행: T08
-- 목표: 사용자에게 보이는 이름을 TokenArena로 바꾼다. 번들 ID, 실행 파일 이름, 상태 폴더, Keychain, 로그인 에이전트 라벨, Worker 이름, 저장소 이름은 그대로 둔다.
+- 목표: 사용자에게 보이는 이름을 TokenDuel로 바꾼다. 번들 ID, 실행 파일 이름, 상태 폴더, Keychain, 로그인 에이전트 라벨, Worker 이름, 저장소 이름은 그대로 둔다.
 - 파일: `scripts/build-app.sh`, `Sources/PokeTokenBar/Core/AppIdentity.swift`, `Sources/PokeTokenBar/Core/LoginItem.swift`, `Sources/PokeTokenBar/Core/UpdateChecker.swift`, `Sources/PokeTokenBar/UI/SettingsView.swift`, `scripts/e2e.sh`, `scripts/release-metadata.py`, `scripts/release-validate.py`, `scripts/test-build-app-slices.sh`, `scripts/test-fork-identity-guard.sh`, `scripts/tests/test_release_workflow.py`, `README.md`, `README.ko.md`, `README.ja.md`, `LICENSE`, `Tests/PokeTokenBarTests/AppIdentityTests.swift`
 
 수용 기준:
 
-- 먼저 App Store, GitHub, Homebrew에서 TokenArena를 검색해 같은 이름의 제품이 없는지 기록한다. 2026-11-05 웹 검색에서는 정확히 같은 제품을 찾지 못했지만 상표 데이터베이스(USPTO, KIPRIS)는 확인하지 못했다
-- build-app.sh의 APP_NAME이 .app 폴더, CFBundleName, CFBundleDisplayName, LaunchAgent 경로(99행), 설치 경로를 함께 정한다. /Applications/TokenArena.app으로 설치되고 Spotlight와 Dock에 새 이름이 보인다
+- 2026-11-05에 GitHub 저장소 검색, npm, Homebrew, App Store 검색에서 TokenDuel과 같은 이름을 찾지 못한 것을 기록한다. 상표 데이터베이스(USPTO, KIPRIS)는 확인하지 못했다
+- build-app.sh의 APP_NAME이 .app 폴더, CFBundleName, CFBundleDisplayName, LaunchAgent 경로(99행), 설치 경로를 함께 정한다. /Applications/TokenDuel.app으로 설치되고 Spotlight와 Dock에 새 이름이 보인다
 - bundleID, executableName, stateDirectoryName, loginAgentLabel, releaseRepo, caskName, Keychain service, Worker 이름은 바뀌지 않는다는 점을 AppIdentityTests가 단언한다
 - 옛 폴더(/Applications/PokeTokenBar Battle.app)에서 옮겨 온 설치본의 로그인 항목이 새 경로로 다시 등록된다. 등록 경로가 다르면 앱 시작 때 고친다
 - UpdateChecker의 업그레이드 스크립트는 옛 bundlePath를 다시 연다(233행). 폴더 이름이 바뀌는 첫 업데이트에서 재실행이 어떻게 되는지 확인하고, 실패한다면 릴리스 노트와 설치 안내에 수동 실행 안내를 넣는다
@@ -695,7 +695,7 @@ T02는 푸시 이벤트가 아니라 views 상태 비교로 정의한다. 재실
 - README 상단에 비공식 팬 프로젝트이며 The Pokémon Company, Nintendo, 원본 PokeTokenBar와 무관하다는 고지가 있다
 - UI 카피는 트레이너, 몬스터볼 같은 상표 인상을 키우는 어휘를 새로 늘리지 않는다
 
-먼저 쓸 테스트: AppIdentityTests에서 표시 이름이 TokenArena이고 bundleID, stateDirectoryName, loginAgentLabel은 기존 값 그대로라고 단언한다. test-build-app-slices.sh로 새 폴더 이름의 번들이 만들어지는지 확인한다.
+먼저 쓸 테스트: AppIdentityTests에서 표시 이름이 TokenDuel이고 bundleID, stateDirectoryName, loginAgentLabel은 기존 값 그대로라고 단언한다. test-build-app-slices.sh로 새 폴더 이름의 번들이 만들어지는지 확인한다.
 
 ### T23 — 앱 아이콘 교체와 README 스크린샷의 포켓몬 스프라이트 정리
 
@@ -765,6 +765,6 @@ T02는 푸시 이벤트가 아니라 views 상태 비교로 정의한다. 재실
 - Apple 공증(유료 Developer 가입)은 결정 항목으로 올리지 않았다. 이번에는 설치 안내 강화(T24)까지만 포함한다.
 - 효과음과 햅틱은 도입하지 않는 것으로 두었다(앱 전체에 0건이고 사무실 사용 전제이며 Nintendo 에셋을 쓸 수 없어 자체 제작이 필요하다). 필요하면 옵트인 기능으로 별도 요청이 필요하다.
 - 한국어 외 영어 문구(L.online)와 README.ja.md의 번역 품질, 앱 이름 변경에 따른 Homebrew tap과 업데이트 체커 마이그레이션은 이번 범위 밖이다(저장소·cask 이름은 유지).
-- TokenArena는 웹 검색만 했다. 상표 데이터베이스(USPTO, KIPRIS)와 App Store는 T22에서 확인한다.
+- TokenDuel은 GitHub, npm, Homebrew, App Store만 확인했다. 상표 데이터베이스(USPTO, KIPRIS)는 확인하지 못했다. 일반 웹 검색은 이름 확인에 부족했다(TokenArena의 충돌을 놓쳤다).
 - 유료 Apple 공증 여부는 월 0원 원칙과 별개의 결정이라 이번 범위에 넣지 않았다. 동료 배포가 막히면 그때 사용자에게 묻는다.
 - 앱 이름을 바꾼 뒤의 Homebrew cask 토큰과 GitHub 저장소 이름 변경은 이번 범위가 아니다.
