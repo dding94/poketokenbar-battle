@@ -70,7 +70,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
     /// The first line's suffix: the practice badge and the fainted mark, in that order; nil when neither.
     nonisolated static func menuBadge(practice: String?, fainted: Bool, online: String? = nil) -> String? {
-        let parts = [practice, fainted ? faintedMark : nil].compactMap { $0 }
+        let parts = [practice, fainted ? faintedMark : nil, online].compactMap { $0 }
         return parts.isEmpty ? nil : parts.joined(separator: " ")
     }
 
@@ -81,6 +81,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         if let base, !base.isEmpty { lines.append(base) }
         if badge != nil { lines.append(resultReady ? l.practiceStatusResult : l.practiceStatusRunning) }
         if let faintedName { lines.append(l.menuFaintedLine(faintedName)) }
+        if let onlineLine { lines.append(onlineLine) }
         // Nothing to add keeps the base as it was, an empty one included.
         return lines.isEmpty ? base : lines.joined(separator: "\n")
     }

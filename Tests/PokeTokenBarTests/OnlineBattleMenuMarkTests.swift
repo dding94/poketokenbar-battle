@@ -70,7 +70,7 @@ final class OnlineBattleMenuMarkTests: XCTestCase {
         XCTAssertEqual(ko.onlineMenuMark(input([turn(seconds: 10)]))?.tone, .urgent, "Exactly ten seconds counts as ten or less")
         XCTAssertEqual(ko.onlineMenuMark(input([turn(seconds: 3)]))?.tone, .urgent)
         XCTAssertEqual(ko.onlineMenuMark(input([turn(seconds: 3)]))?.text, "●", "Only the color changes, not the mark")
-        XCTAssertNil(ko.onlineMenuMark(input([turn(seconds: -1)])), "A passed deadline leaves nothing to answer")
+        XCTAssertEqual(ko.onlineMenuMark(input([turn(seconds: -1)]))?.tone, .ongoing, "A passed deadline asks nothing, yet the room still runs")
     }
 
     func testOnlyMyTurnCanBeUrgent() {

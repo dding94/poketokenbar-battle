@@ -77,13 +77,66 @@ extension L {
 
 /// What the menu bar shows at the end of its first line for online play.
 struct OnlineMenuMark: Equatable, Sendable {
+    /// `urgent` is a myTurn with ten seconds or less left: the same mark in another color, with no notification.
     enum Tone: Equatable, Sendable { case attention, urgent, ongoing }
+    static let attentionDot = "\u{25CF}"
+    static let ongoingDot = "\u{25CB}"
+    static let urgentSeconds: TimeInterval = 10
     let text: String
     let tone: Tone
     let tooltip: String
 }
 
+extension OnlineAttentionInput {
+    /// Rooms the local trainer is playing right now, whether or not anything is asked of them.
+    /// A relaunch with the popover closed has no other way to show that a match is still going on.
+    var hasOngoingRoom: Bool {
+        guard let me = localTrainerID else { return false }
+        return battles.contains { ($0.state == .running || $0.state == .reported) && $0.side(for: me) != nil }
+    }
+}
+
 extension L {
-    func onlineMenuMark(_ input: OnlineAttentionInput) -> OnlineMenuMark? { nil }
-    func onlineHomeSubtitle(_ input: OnlineAttentionInput, connectionStatus: String) -> String { "" }
+    func onlineMenuMark(_ input: OnlineAttentionInput) -> OnlineMenuMark? {
+        let active = OnlineAttentionCalculator.active(input)
+        guard let current = active.first else {
+            guard input.hasOngoingRoom else { return nil }
+            return .init(text: OnlineMenuMark.ongoingDot, tone: .ongoing,
+                         tooltip: online("진행 중인 온라인 대전이 있어요", "An online battle is in progress"))
+        }
+        let urgent = active.contains { attention in
+            guard attention.kind == .myTurn, let deadline = attention.deadline else { return false }
+            return deadline.timeIntervalSince(input.now) <= OnlineMenuMark.urgentSeconds
+        }
+        let others = active.count - 1
+        let more = others == 0 ? "" : online(" (외 \(others)건)", " (+\(others) more)")
+        return .init(text: active.count == 1 ? OnlineMenuMark.attentionDot : OnlineMenuMark.attentionDot + "\(active.count)",
+                     tone: urgent ? .urgent : .attention,
+                     tooltip: onlineAttentionCopy(current, now: input.now).tooltip + more)
+    }
+
+    /// One line under "Online battle" on the home screen.
+    /// `connectionStatus` is the presentation's connection line; only its connected and reconnecting wording is read here.
+    func onlineHomeSubtitle(_ input: OnlineAttentionInput, connectionStatus: String) -> String {
+        guard input.localTrainerID != nil else {
+            return online("동료와 겨루기 · 아직 가입 안 함", "Battle your group · Not joined yet")
+        }
+        if Self.onlineReconnectingStatuses.contains(connectionStatus) { return online("다시 연결하는 중", "Reconnecting") }
+        let active = OnlineAttentionCalculator.active(input)
+        if let current = active.first {
+            guard current.kind == .incomingChallenge || current.kind == .rematchRequested else {
+                return onlineAttentionCopy(current, now: input.now).subtitle
+            }
+            let received = active.filter { $0.kind == .incomingChallenge || $0.kind == .rematchRequested }.count
+            return online("받은 신청 \(received)건", received == 1 ? "1 request received" : "\(received) requests received")
+        }
+        if input.hasOngoingRoom { return online("진행 중인 대전이 있어요", "A battle is in progress") }
+        return connectionStatus == Self.onlineConnectedStatus
+            ? online("동료와 겨루기 · 접속 중", "Battle your group · Online")
+            : online("동료와 겨루기", "Battle your group")
+    }
+
+    /// The wording OnlineBattleSession puts on `connectionStatus` for the connected and the not-yet-connected states.
+    static let onlineConnectedStatus = "접속 중"
+    static let onlineReconnectingStatuses: Set<String> = ["연결 중", "다시 연결할 때까지 기다리고 있어요"]
 }
