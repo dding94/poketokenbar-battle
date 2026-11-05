@@ -61,15 +61,17 @@ enum OnlineBattleArenaFixture {
         return try JSONDecoder().decode(OnlineBattleView.self, from: JSONSerialization.data(withJSONObject: json))
     }
 
-    /// `custom` replaces the golden battle with one built for the test (`OnlineBattleHintFixture`).
+    /// `custom` replaces the golden battle with one built for the test (`OnlineBattleHintFixture`). The opening splash
+    /// is marked as already shown unless `splash` asks for it, so renders and pixel checks start from the plain board.
     static func arena(seat: OnlineBattleSide = .p1, name: String = "manual", mode: OnlineBattleMode? = nil,
-                      ownChoice: Bool = false, custom: OnlineBattleView? = nil) throws -> Arena {
+                      ownChoice: Bool = false, splash: Bool = false, custom: OnlineBattleView? = nil) throws -> Arena {
         let battle = try custom ?? golden(name)
         let trainer = seat == .p1 ? "trainer-one" : "trainer-two"
         let resolver = try OnlineBattleResolver(battle: battle, localTrainerID: trainer, engine: BattleEngine(url: engineURL))
         let clock = Clock()
         let staging = OnlineBattleStaging(resolver: resolver, clock: { clock.now })
         staging.ingest(resolver, mode: mode ?? battle.mode, visible: true, secondsLeft: 30)
+        staging.playback.introShown = !splash
         let model = OnlineBattleScreenRenderingTests.model()
         let room = try liveRoom(of: battle, seat: seat, deadline: (Date().timeIntervalSince1970 + 30) * 1000, ownChoice: ownChoice)
         model.phase = .arena; model.room = room; model.localSide = seat
