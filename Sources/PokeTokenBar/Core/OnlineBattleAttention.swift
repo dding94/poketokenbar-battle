@@ -110,9 +110,123 @@ struct OnlineAttentionEvaluation: Equatable, Sendable {
 }
 
 enum OnlineAttentionCalculator {
-    static func active(_ input: OnlineAttentionInput) -> [OnlineAttention] { [] }
+    static func active(_ input: OnlineAttentionInput) -> [OnlineAttention] {
+        guard let me = input.localTrainerID else { return [] }
+        let live = input.battles
+            .sorted { ($0.createdAt, $0.battleId) < ($1.createdAt, $1.battleId) }
+            .compactMap { actionable($0, me: me, input: input) }
+        let outcome = displayedOutcome(input, me: me).map { [$0] } ?? []
+        return (live + outcome).enumerated()
+            .sorted { (priority($0.element.kind), $0.offset) < (priority($1.element.kind), $1.offset) }
+            .map(\.element)
+    }
+
     static func current(_ input: OnlineAttentionInput) -> OnlineAttention? { active(input).first }
+
     static func evaluate(_ input: OnlineAttentionInput, seen: OnlineAttentionSeenRecord) -> OnlineAttentionEvaluation {
-        .init(active: [], raised: [], notices: [], resolved: [], seen: seen)
+        let active = active(input)
+        let raised = active.filter { !seen.contains($0.key) }
+        let listed = Set(input.battles.map(\.battleId))
+        let activeKeys = Set(active.map(\.key))
+        // A battle missing from the list proves nothing: a relaunch publishes before hello refills it.
+        // A finished match cannot return to an earlier stage, so its keys outlive being dismissed.
+        let resolved = input.localTrainerID == nil ? [] : seen.entries.map(\.key).filter {
+            listed.contains($0.battleId) && !activeKeys.contains($0) && !isOutcome($0)
+        }
+        return .init(active: active, raised: raised, notices: raised.compactMap(OnlineAttentionNotice.init), resolved: resolved,
+                     seen: seen.updated(active: active, removing: Set(resolved)))
+    }
+
+    /// Requests and turns come from every live view, so a room that is not selected still reaches the person.
+    private static func actionable(_ room: OnlineBattleView, me: String, input: OnlineAttentionInput) -> OnlineAttention? {
+        guard let side = room.side(for: me), let kind = actionableKind(room, side: side, input: input) else { return nil }
+        return attention(kind, room: room, side: side, input: input,
+                         deadline: kind == .myTurn ? room.deadline.map(date) : nil)
+    }
+
+    private static func actionableKind(_ room: OnlineBattleView, side: OnlineBattleSide, input: OnlineAttentionInput) -> OnlineAttentionKind? {
+        let unexpired = date(room.expiresAt) > input.now
+        let unprepared = !input.preparedBattleIDs.contains(room.battleId)
+        switch room.state {
+        case .pending:
+            guard side == .p2, unexpired else { return nil }
+            return room.rematchOf == nil ? .incomingChallenge : .rematchRequested
+        case .accepted:
+            guard unexpired else { return nil }
+            if room.confirmed { return unprepared ? .finalConfirmed : nil }
+            return side == .p1 ? .challengeAccepted : nil
+        case .ready:
+            // Readiness is bound to a connection, so a relaunched app has to press it again.
+            return unexpired && unprepared ? .finalConfirmed : nil
+        case .running:
+            guard room.mode == .manual, room.ownChoice == nil, let deadline = room.deadline, date(deadline) > input.now else { return nil }
+            let optimisticallyChosen = input.choiceSubmitted && input.displayedRoom?.battleId == room.battleId
+            return optimisticallyChosen ? nil : .myTurn
+        case .reported, .completed, .declined, .cancelled, .expired, .void:
+            return nil
+        }
+    }
+
+    /// Only the room publish() put on screen may speak about the outcome. The battle list also carries
+    /// archive summaries, and a settled room can still be playing its last beats behind the gate.
+    private static func displayedOutcome(_ input: OnlineAttentionInput, me: String) -> OnlineAttention? {
+        guard let room = input.displayedRoom, let side = room.side(for: me),
+              !input.stagingHeldBattleIDs.contains(room.battleId) else { return nil }
+        let kind: OnlineAttentionKind
+        switch (input.phase, room.state) {
+        case (.verifying, .reported): kind = .matchEnded
+        case (.result, .completed), (.result, .void): kind = input.hasResult ? .resultReady : .matchEnded
+        default: return nil
+        }
+        return attention(kind, room: room, side: side, input: input, deadline: nil)
+    }
+
+    private static func attention(_ kind: OnlineAttentionKind, room: OnlineBattleView, side: OnlineBattleSide,
+                                  input: OnlineAttentionInput, deadline: Date?) -> OnlineAttention {
+        let opponent = side == .p1 ? room.p2.trainerId : room.p1.trainerId
+        return .init(kind: kind, battleId: room.battleId, revision: room.revision, roundSeq: room.roundSeq,
+                     opponentName: input.nicknames[opponent], deadline: deadline)
+    }
+
+    private static func isOutcome(_ key: OnlineAttentionKey) -> Bool {
+        key.stage == OnlineAttentionKind.matchEnded.rawValue || key.stage == OnlineAttentionKind.resultReady.rawValue
+    }
+
+    private static func date(_ milliseconds: Double) -> Date { Date(timeIntervalSince1970: milliseconds / 1000) }
+
+    private static func priority(_ kind: OnlineAttentionKind) -> Int {
+        switch kind {
+        case .myTurn: 0
+        case .challengeAccepted: 1
+        case .incomingChallenge: 2
+        case .finalConfirmed: 3
+        case .rematchRequested: 4
+        case .resultReady: 5
+        case .matchEnded: 6
+        }
+    }
+}
+
+private extension OnlineAttentionSeenRecord {
+    /// Records every active occurrence, then evicts the oldest entries that no longer apply.
+    func updated(active: [OnlineAttention], removing resolved: Set<OnlineAttentionKey>) -> OnlineAttentionSeenRecord {
+        var entries = self.entries.filter { !resolved.contains($0.key) }
+        for attention in active {
+            if let index = entries.firstIndex(where: { $0.key == attention.key }) {
+                entries[index].revision = attention.revision
+            } else {
+                entries.append(.init(key: attention.key, revision: attention.revision))
+            }
+        }
+        let activeKeys = Set(active.map(\.key))
+        var excess = entries.count - Self.capacity
+        entries.removeAll { entry in
+            guard excess > 0, !activeKeys.contains(entry.key) else { return false }
+            excess -= 1
+            return true
+        }
+        var record = self
+        record.entries = entries
+        return record
     }
 }

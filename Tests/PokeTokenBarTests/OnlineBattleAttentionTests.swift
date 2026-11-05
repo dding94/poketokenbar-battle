@@ -238,12 +238,20 @@ final class OnlineBattleAttentionTests: XCTestCase {
         let empty = OnlineAttentionCalculator.evaluate(input(presentation([])), seen: first.seen)
         XCTAssertEqual(empty.seen, first.seen)
         XCTAssertEqual(empty.resolved, [])
-        let signedOut = presentation([]); signedOut.account = nil
+        let signedOut = presentation([battle(.declined, mine: .p2)]); signedOut.account = nil
         let noAccount = OnlineAttentionCalculator.evaluate(input(signedOut), seen: first.seen)
         XCTAssertEqual(noAccount.seen, first.seen)
         XCTAssertEqual(noAccount.resolved, [])
         let back = OnlineAttentionCalculator.evaluate(input(presentation([battle(.pending, mine: .p2)])), seen: noAccount.seen)
         XCTAssertEqual(back.raised, [])
+    }
+
+    func testWakeReconciliationJumpsToTheNewStageThroughTheSamePath() {
+        // Asleep through accept and confirm: the next refresh is one state comparison, not replayed pushes.
+        let before = OnlineAttentionCalculator.evaluate(input(presentation([battle(.pending, mine: .p2)])), seen: .init())
+        let after = OnlineAttentionCalculator.evaluate(input(presentation([battle(.accepted, mine: .p2, revision: 2, confirmed: true)])), seen: before.seen)
+        XCTAssertEqual(after.notices.map(\.kind), [.finalConfirmed])
+        XCTAssertEqual(after.resolved.map(\.stage), ["incomingChallenge"])
     }
 
     func testSeenRecordIsBoundedAndKeepsWhatIsStillActive() {
