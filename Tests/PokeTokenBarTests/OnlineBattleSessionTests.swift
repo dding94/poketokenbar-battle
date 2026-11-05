@@ -2323,6 +2323,8 @@ final class OnlineBattleSessionTests: XCTestCase {
         XCTAssertEqual(session.presentation.notice, copy.onlineErrorRoomChanged, "It was not a connection problem")
         XCTAssertEqual(session.presentation.room?.state, .accepted, "The screen shows what actually happened")
         XCTAssertEqual(session.presentation.phase, .room)
+        await session.refresh()
+        XCTAssertEqual(session.presentation.notice, copy.onlineErrorRoomChanged, "A background read must not wipe it unread")
         // The refused cancel must not silence the opponent's own ending later on.
         try await list(http, [try changed(accepted, ["state": "CANCELLED"])])
         await session.refresh()

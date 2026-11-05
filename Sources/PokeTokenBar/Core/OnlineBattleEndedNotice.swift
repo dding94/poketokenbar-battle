@@ -42,4 +42,6 @@ extension OnlineBattlePresentation {
 
     /// This app ended the room itself (cancel or decline): it must not be announced back to the person who pressed it.
     func suppressEndedNotice(for battleID: String) { endedNoticeIDs.insert(battleID) }
+    /// The server refused that cancel or decline, so the room did not end by this app's hand.
+    func allowEndedNotice(for battleID: String) { endedNoticeIDs.remove(battleID) }
 }

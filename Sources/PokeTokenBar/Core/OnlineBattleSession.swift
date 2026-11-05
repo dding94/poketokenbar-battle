@@ -514,6 +514,8 @@ final class OnlineBattleSession {
         guard room.revision >= old.revision else { return false }
         if !old.state.isActive { return !room.state.isActive && room.state == old.state }
         guard room.revision == old.revision else { return true }
+        // Confirm keeps the revision, so a read started before it can only be told apart by the flag.
+        if old.confirmed, !room.confirmed { return false }
         let rank: [OnlineBattleState: Int] = [.pending: 0, .accepted: 1, .ready: 2, .running: 3, .reported: 4]
         if let before = rank[old.state], let after = rank[room.state], after < before { return false }
         guard room.roundSeq >= old.roundSeq, room.journal.count >= old.journal.count else { return false }
@@ -998,11 +1000,18 @@ final class OnlineBattleSession {
     private func cancelChangedRematch(_ room: OnlineBattleView, account: OnlineBattleAccount,
                                       api: OnlineBattleAPI, epoch: UInt64) async throws {
         guard [.pending, .accepted, .ready].contains(room.state) else { throw OnlineBattleFailure.invalidRequest }
-        presentation.suppressEndedNotice(for: room.battleId)
-        let cancelled = try await api.cancel(id: room.battleId, revision: room.revision); try current(epoch)
-        try await process(cancelled, account: account, api: api, epoch: epoch)
+        try await withdrawConsent(room, account: account, api: api, epoch: epoch)
         challengeIntent = nil
         try rebuildRoster()
+    }
+    /// This app ends the room itself because the entry it agreed with changed. A failed cancel ended nothing, so later endings stay news.
+    private func withdrawConsent(_ room: OnlineBattleView, account: OnlineBattleAccount, api: OnlineBattleAPI, epoch: UInt64) async throws {
+        presentation.suppressEndedNotice(for: room.battleId)
+        let cancelled: OnlineBattleView
+        do { cancelled = try await api.cancel(id: room.battleId, revision: room.revision) }
+        catch { presentation.allowEndedNotice(for: room.battleId); throw error }
+        try current(epoch)
+        try await process(cancelled, account: account, api: api, epoch: epoch)
     }
 
     private func prepareRematch(_ id: String) {
@@ -1069,6 +1078,12 @@ final class OnlineBattleSession {
         default: nil
         }
     }
+    private func isEndingAction(_ action: OnlineBattleUIAction) -> Bool {
+        switch action {
+        case .decline, .cancel: true
+        default: false
+        }
+    }
     private func battleAction(_ action: OnlineBattleUIAction, epoch: UInt64) async throws {
         let navigation = navigationRevision
         let isRematch: Bool
@@ -1110,9 +1125,7 @@ final class OnlineBattleSession {
             try current(epoch)
             // A local evolution, heal, or practice entry during the request invalidates consent.
             guard (try? selectedSnapshot(allow: receiptKey(result, account: account), id: snapshot.instanceId)) == snapshot else {
-                presentation.suppressEndedNotice(for: result.battleId)
-                let cancelled = try await api.cancel(id: result.battleId, revision: result.revision); try current(epoch)
-                try await process(cancelled, account: account, api: api, epoch: epoch)
+                try await withdrawConsent(result, account: account, api: api, epoch: epoch)
                 throw OnlineBattleFailure.entryChanged
             }
             challengeIntent = nil
@@ -1124,71 +1137,72 @@ final class OnlineBattleSession {
             guard let room = presentation.room, roomActionTarget(action).map({ $0 == room.battleId }) ?? true else {
                 throw OnlineBattleFailure.invalidRequest
             }
-            switch action {
-            case .accept:
-                if room.side(for: account.trainer.trainerId) == .p2 {
-                    if room.state == .cancelled { throw OnlineBattleFailure.peerCancelled }
-                    if room.state == .expired { throw OnlineBattleFailure.peerExpired }
-                }
-                guard room.state == .pending, room.side(for: account.trainer.trainerId) == .p2 else { throw OnlineBattleFailure.invalidRequest }
-                let snapshot = try selectedSnapshot(allow: receiptKey(room, account: account))
-                do { result = try await api.accept(id: room.battleId, revision: room.revision, snapshot: snapshot) }
-                catch let rejected as OnlineBattleServerError where rejected.code == .invalidState || rejected.code == .staleRevision {
-                    // The peer may have cancelled between our read and the accept. Re-read to say so.
-                    try current(epoch); await refresh(); try current(epoch)
-                    if let latest = views[room.battleId] {
-                        if latest.state == .cancelled { throw OnlineBattleFailure.peerCancelled }
-                        if latest.state == .expired { throw OnlineBattleFailure.peerExpired }
+            // A press that ends the room is not news when its ending arrives, whichever way that comes first.
+            let endsRoom = isEndingAction(action)
+            if endsRoom { presentation.suppressEndedNotice(for: room.battleId) }
+            do {
+                switch action {
+                case .accept:
+                    if room.side(for: account.trainer.trainerId) == .p2 {
+                        if room.state == .cancelled { throw OnlineBattleFailure.peerCancelled }
+                        if room.state == .expired { throw OnlineBattleFailure.peerExpired }
                     }
-                    throw rejected
-                }
-                try current(epoch)
-                guard (try? selectedSnapshot(allow: receiptKey(result, account: account), id: snapshot.instanceId)) == snapshot else {
-                    presentation.suppressEndedNotice(for: result.battleId)
-                    let cancelled = try await api.cancel(id: result.battleId, revision: result.revision); try current(epoch)
-                    try await process(cancelled, account: account, api: api, epoch: epoch)
-                    throw OnlineBattleFailure.entryChanged
-                }
-            case .confirm:
-                guard room.state == .accepted, room.side(for: account.trainer.trainerId) == .p1 else { throw OnlineBattleFailure.invalidRequest }
-                try validateConsent(room, account: account)
-                result = try await api.confirm(id: room.battleId, revision: room.revision)
-            case .decline:
-                guard room.state == .pending, room.side(for: account.trainer.trainerId) == .p2 else { throw OnlineBattleFailure.invalidRequest }
-                presentation.suppressEndedNotice(for: room.battleId)
-                result = try await api.decline(id: room.battleId, revision: room.revision)
-            case .cancel:
-                guard [.pending, .accepted, .ready].contains(room.state) else { throw OnlineBattleFailure.invalidRequest }
-                presentation.suppressEndedNotice(for: room.battleId)
-                result = try await api.cancel(id: room.battleId, revision: room.revision)
-            case .prepareBattle:
-                guard let connection else { throw OnlineBattleFailure.connectionUnavailable }
-                let connected = await connection.snapshot(); try current(epoch)
-                guard connected.state == .connected, let connectionID = connected.connectionId,
-                      connected.trainerId == account.trainer.trainerId, connected.groupId == account.group.groupId else { throw OnlineBattleFailure.connectionUnavailable }
-                noteConnection(connected)
-                let press = ReadyPress(revision: room.revision, connectionID: connectionID)
-                if room.state == .accepted, room.confirmed {
+                    guard room.state == .pending, room.side(for: account.trainer.trainerId) == .p2 else { throw OnlineBattleFailure.invalidRequest }
+                    let snapshot = try selectedSnapshot(allow: receiptKey(room, account: account))
+                    result = try await api.accept(id: room.battleId, revision: room.revision, snapshot: snapshot)
+                    try current(epoch)
+                    guard (try? selectedSnapshot(allow: receiptKey(result, account: account), id: snapshot.instanceId)) == snapshot else {
+                        try await withdrawConsent(result, account: account, api: api, epoch: epoch)
+                        throw OnlineBattleFailure.entryChanged
+                    }
+                case .confirm:
+                    guard room.state == .accepted, room.side(for: account.trainer.trainerId) == .p1 else { throw OnlineBattleFailure.invalidRequest }
                     try validateConsent(room, account: account)
-                    prepared[room.battleId] = press
-                    do {
-                        result = try await api.ready(id: room.battleId, revision: room.revision, connectionId: connectionID, engineHash: BattleEngineManifest.sha256, rulesVersion: BattleSnapshot.rules, policyVersion: BattleSnapshot.policy)
-                    } catch {
-                        // A refused ready call must not read as "I am ready" on the room screen.
-                        if prepared[room.battleId] == press { prepared[room.battleId] = nil }
-                        throw error
-                    }
-                } else if room.state == .ready {
-                    // The frozen inputs stay valid through later local growth. process validates both sets.
-                    prepared[room.battleId] = press
-                    result = room
-                } else { throw OnlineBattleFailure.invalidRequest }
-            case .chooseMove(let slot):
-                guard room.state == .running, room.mode == .manual, room.ownChoice == nil,
-                      let request = resolvers[room.battleId]?.request, request.kind == "move",
-                      request.moves.contains(where: { $0.slot == slot && !$0.disabled && $0.pp > 0 }) else { throw OnlineBattleFailure.invalidRequest }
-                result = try await api.choose(id: room.battleId, roundSeq: room.roundSeq, slot: slot)
-            default: throw OnlineBattleFailure.invalidRequest
+                    result = try await api.confirm(id: room.battleId, revision: room.revision)
+                case .decline:
+                    guard room.state == .pending, room.side(for: account.trainer.trainerId) == .p2 else { throw OnlineBattleFailure.invalidRequest }
+                    result = try await api.decline(id: room.battleId, revision: room.revision)
+                case .cancel:
+                    guard [.pending, .accepted, .ready].contains(room.state) else { throw OnlineBattleFailure.invalidRequest }
+                    result = try await api.cancel(id: room.battleId, revision: room.revision)
+                case .prepareBattle:
+                    guard let connection else { throw OnlineBattleFailure.connectionUnavailable }
+                    let connected = await connection.snapshot(); try current(epoch)
+                    guard connected.state == .connected, let connectionID = connected.connectionId,
+                          connected.trainerId == account.trainer.trainerId, connected.groupId == account.group.groupId else { throw OnlineBattleFailure.connectionUnavailable }
+                    noteConnection(connected)
+                    let press = ReadyPress(revision: room.revision, connectionID: connectionID)
+                    if room.state == .accepted, room.confirmed {
+                        try validateConsent(room, account: account)
+                        prepared[room.battleId] = press
+                        do {
+                            result = try await api.ready(id: room.battleId, revision: room.revision, connectionId: connectionID, engineHash: BattleEngineManifest.sha256, rulesVersion: BattleSnapshot.rules, policyVersion: BattleSnapshot.policy)
+                        } catch {
+                            // A refused ready call must not read as "I am ready" on the room screen.
+                            if prepared[room.battleId] == press { prepared[room.battleId] = nil }
+                            throw error
+                        }
+                    } else if room.state == .ready {
+                        // The frozen inputs stay valid through later local growth. process validates both sets.
+                        prepared[room.battleId] = press
+                        result = room
+                    } else { throw OnlineBattleFailure.invalidRequest }
+                case .chooseMove(let slot):
+                    guard room.state == .running, room.mode == .manual, room.ownChoice == nil,
+                          let request = resolvers[room.battleId]?.request, request.kind == "move",
+                          request.moves.contains(where: { $0.slot == slot && !$0.disabled && $0.pp > 0 }) else { throw OnlineBattleFailure.invalidRequest }
+                    result = try await api.choose(id: room.battleId, roundSeq: room.roundSeq, slot: slot)
+                default: throw OnlineBattleFailure.invalidRequest
+                }
+            } catch {
+                if endsRoom { presentation.allowEndedNotice(for: room.battleId) }
+                guard let rejected = error as? OnlineBattleServerError, rejected.code == .invalidState || rejected.code == .staleRevision else { throw error }
+                // The room moved before the press arrived. Read it, so the person hears what actually happened.
+                try current(epoch); await refresh(); try current(epoch)
+                guard reconciled else { throw OnlineBattleFailure.connectionUnavailable }
+                // A read during the press had its ending suppressed, and that read cannot announce it again.
+                if let latest = views[room.battleId] { presentation.announceEnded(latest, previous: room.state, l: localization()) }
+                throw OnlineBattleFailure.invalidRequest
             }
             try current(epoch)
         }
@@ -1244,7 +1258,11 @@ final class OnlineBattleSession {
         } else if error as? OnlineBattleFailure == .entryChanged {
             presentation.notice = l.onlineErrorEntryChanged
         } else if error as? OnlineBattleFailure == .invalidRequest {
-            presentation.notice = l.onlineErrorRoomChanged
+            // The re-read inside the action may already have named the ending.
+            if !presentation.noticeSurvivesRefresh {
+                // It explains a press that did nothing, so the next background read must not wipe it unread.
+                presentation.notice = l.onlineErrorRoomChanged; presentation.stickyNotice = l.onlineErrorRoomChanged
+            }
         } else if error as? OnlineBattleFailure == .connectionUnavailable {
             // The failed read already said why, more exactly. A revoked account has its own status line.
             if authenticated, presentation.notice == nil { presentation.notice = l.onlineErrorGeneric }

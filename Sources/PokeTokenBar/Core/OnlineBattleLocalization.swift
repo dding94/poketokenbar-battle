@@ -155,7 +155,7 @@ extension L {
     var onlineErrorKeySaveFailed: String { online("접속키를 안전하게 저장하지 못했어요. 저장을 다시 시도해 주세요.", "Could not save your access key safely. Try saving again.") }
     var onlineErrorKeySaveDisabled: String { online("접속키 저장이 꺼져 있어요. 설정을 확인해 주세요.", "Access key storage is turned off. Check your settings.") }
     var onlineErrorEntryChanged: String { online("출전 정보가 바뀌었어요. 최신 정보를 확인하고 다시 동의해 주세요.", "Your entry changed. Review the latest details and agree again.") }
-    var onlineErrorRoomChanged: String { online("그 사이 방 상태가 바뀌어 보내지 않았어요. 최신 상태를 확인하고 다시 시도해 주세요.", "The room changed in the meantime, so nothing was sent. Check the latest state and try again.") }
+    var onlineErrorRoomChanged: String { online("그 사이 방 상태가 바뀌어 처리되지 않았어요. 최신 상태를 확인하고 다시 시도해 주세요.", "The room changed in the meantime, so this did not go through. Check the latest state and try again.") }
     var onlineErrorResultUnverified: String { online("전투 결과를 확인하지 못해 체력과 경험치를 반영하지 않았어요.", "The battle result could not be verified, so health and XP were not applied.") }
     var onlineErrorPeerCancelled: String { online("상대가 신청을 취소했어요. 목록에서 다른 동료에게 다시 신청해 보세요.", "Your opponent cancelled the challenge. Pick someone from the list to challenge again.") }
     var onlineErrorPeerExpired: String { online("신청 시간이 지났어요. 상대에게 다시 신청해 달라고 부탁해 보세요.", "The challenge timed out. Ask your opponent to send it again.") }
