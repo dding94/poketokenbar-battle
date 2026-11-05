@@ -294,16 +294,19 @@ final class OnlineBattleStagingEngineTests: XCTestCase {
 
     func testALocalTimeoutMarksTheLocalBeat() throws {
         let battle = try fixture("timeout")
-        let index = try XCTUnwrap(battle.journal.firstIndex { $0.p1 == .timeout || $0.p2 == .timeout })
+        // A round where only one seat ran out of time tells the two viewers apart.
+        let index = try XCTUnwrap(battle.journal.firstIndex { ($0.p1 == .timeout) != ($0.p2 == .timeout) })
         let pair = battle.journal[index]
         for viewer in [OnlineBattleSide.p1, .p2] {
             let owner = try resolver(battle, viewer), clock = Clock()
             defer { owner.close() }
             let staging = OnlineBattleStaging(resolver: owner, clock: { clock.now })
+            try owner.consume(journal: Array(battle.journal.prefix(index)))
+            staging.ingest(owner, mode: .manual, visible: false, secondsLeft: nil)
+            let before = staging.playback.history.count
             try owner.consume(journal: Array(battle.journal.prefix(index + 1)))
-            staging.ingest(owner, mode: .auto, visible: true, secondsLeft: nil)
-            staging.skipToEnd()
-            let marked = staging.playback.history.filter { $0.callouts.contains(.timedOut) }
+            staging.ingest(owner, mode: .manual, visible: false, secondsLeft: nil)
+            let marked = staging.playback.history.dropFirst(before).filter { $0.callouts.contains(.timedOut) }
             XCTAssertEqual(!marked.isEmpty, (viewer == .p1 ? pair.p1 : pair.p2) == .timeout, "\(viewer)")
             XCTAssertTrue(marked.allSatisfy { $0.actor == .player }, "\(viewer)")
         }
@@ -639,6 +642,9 @@ final class OnlineBattleStagingSessionTests: XCTestCase {
         await h.session.perform(.dismissResult)
         XCTAssertNil(h.model.stage)
         XCTAssertEqual(h.model.phase, .lobby)
+        await h.session.perform(.openBattle(final.battleId))
+        XCTAssertEqual(h.model.phase, .result)
+        XCTAssertNil(h.model.stage, "dismissing released the finished battle's stage")
     }
 
     /// A completion ahead of the resolver is not consumed, so verification keeps its own path. The beats on
