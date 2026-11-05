@@ -7,10 +7,10 @@ import XCTest
 final class OnlineBattleEndedNoticeTests: XCTestCase {
     private typealias Fixture = OnlineBattleScreenRenderingTests
 
-    static func room(_ state: OnlineBattleState, confirmed: Bool = false, expiresAt: Double = 1_793_769_900_000) -> OnlineBattleView {
+    static func room(_ state: OnlineBattleState, confirmed: Bool = false, expiresAt: Double = 1_793_769_900_000, createdAt: Double? = nil) -> OnlineBattleView {
         let base = Fixture.room(state: state, confirmed: confirmed)
         return .init(battleId: base.battleId, state: base.state, revision: base.revision, mode: base.mode, p1: base.p1, p2: base.p2,
-                     createdAt: base.createdAt, expiresAt: expiresAt, startedAt: base.startedAt, reportedAt: base.reportedAt,
+                     createdAt: createdAt ?? base.createdAt, expiresAt: expiresAt, startedAt: base.startedAt, reportedAt: base.reportedAt,
                      confirmed: base.confirmed, config: base.config, roundSeq: base.roundSeq, deadline: base.deadline,
                      ownChoice: base.ownChoice, journal: base.journal, result: base.result, reason: base.reason, rematchOf: base.rematchOf)
     }

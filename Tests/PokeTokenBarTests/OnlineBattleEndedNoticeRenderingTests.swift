@@ -34,8 +34,10 @@ final class OnlineBattleEndedNoticeRenderingTests: XCTestCase {
     }
 
     private static let longNickname = "아주아주아주아주긴닉네임을가진동료입니다"
-    private func room(_ state: OnlineBattleState, confirmed: Bool = false, hoursLeft: Double = 23.7) -> OnlineBattleView {
-        OnlineBattleEndedNoticeTests.room(state, confirmed: confirmed, expiresAt: (Date().timeIntervalSince1970 + hoursLeft * 3600) * 1000)
+    private func room(_ state: OnlineBattleState, confirmed: Bool = false) -> OnlineBattleView {
+        // Sent 20 minutes ago; the server's window is 24 hours from creation.
+        let created = (Date().timeIntervalSince1970 - 20 * 60) * 1000
+        return OnlineBattleEndedNoticeTests.room(state, confirmed: confirmed, expiresAt: created + 24 * 3600 * 1000, createdAt: created)
     }
     private func model(_ side: OnlineBattleSide, _ state: OnlineBattleState, confirmed: Bool = false, name: String? = nil) -> OnlineBattlePresentation {
         let model = Fixture.model(); model.phase = .room; model.localSide = side; model.canStart = true
