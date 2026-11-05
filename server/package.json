@@ -7,7 +7,7 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
+    "test": "vitest run && node --test \"scripts/*.test.mjs\"",
     "measure:battles": "vitest run --project ws test/ws/battle-cost.test.ts --reporter=verbose",
     "measure:packed-load": "vitest run --config vitest.measure.config.ts measure/packed-load.test.ts --reporter=verbose",
     "measure:retention": "vitest run --config vitest.measure.config.ts measure/retention.test.ts --reporter=verbose"

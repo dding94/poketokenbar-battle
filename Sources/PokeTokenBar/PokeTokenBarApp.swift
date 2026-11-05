@@ -292,6 +292,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
                 saveSettings: { try $0.save(to: directory) }, enabled: !store.disableKeychainAccess,
                 accessAllowed: { !KeychainAccessGate.isDisabled },
                 localization: { [companion = companion!] in companion.l })
+            session.onSetupCodeUsed = { OnlineBattleClipboard.forget($0) }
             online = session; onlinePresentation = session.presentation
             onlineAttention = OnlineAttentionSource(presentation: session.presentation,
                                                     preparedBattleIDs: { [weak session] in session?.preparedBattleIDs() ?? [] },

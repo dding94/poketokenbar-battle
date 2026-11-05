@@ -42,6 +42,8 @@ final class OnlineBattlePresentation {
     var serverAddress = ""
     /// True when the build fixed the server address (T08); the setup form then shows no address entry.
     var serverIsEmbedded = false
+    /// The build's server is not the one this Mac used before, so the join form says why it is asking again.
+    var serverMoved = false
     /// Memory-only drafts survive popover disposal; never encode these in settings or saves.
     var setupInput = OnlineBattleSetupInput()
     var setupRecoveryExpanded = false

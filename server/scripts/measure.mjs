@@ -57,6 +57,8 @@ function apiFor(baseUrl) {
     try {
       const res = await fetch(`${baseUrl}${path}`, {
         method,
+        // A redirect would resend the secret or key to wherever it points. The Worker never answers with one.
+        redirect: "error",
         headers,
         body: body === undefined ? undefined : JSON.stringify(body),
         signal: signal ? AbortSignal.any([timeout, signal]) : timeout,

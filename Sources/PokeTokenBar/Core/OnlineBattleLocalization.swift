@@ -45,7 +45,7 @@ extension L {
     var onlineRecover: String { online("복구코드로 연결", "Use recovery code") }
     var onlineReconnect: String { online("재연결 코드 사용", "Use reconnect code") }
     var onlineRecoveryTitle: String { online("복구코드를 보관하세요", "Keep your recovery code") }
-    var onlineRecoveryHint: String { online("이 화면에서만 보여요. 키를 잃으면 이 코드로 계정을 다시 연결할 수 있어요.", "Shown only here. Keep this code to reconnect if you lose your key.") }
+    var onlineRecoveryHint: String { online("이 화면에서만 보여요. 이전 코드는 이제 쓸 수 없어요. 키를 잃으면 이 코드로 계정을 다시 연결할 수 있어요.", "Shown only here. Any previous code no longer works. Keep this code to reconnect if you lose your key.") }
     var onlineRecoverySaved: String { online("코드를 보관했어요", "I saved this code") }
     var onlineRetrySave: String { online("접속키 저장 다시 시도", "Retry saving key") }
     var onlineRefresh: String { online("새로고침", "Refresh") }
@@ -176,6 +176,11 @@ extension L {
         case .inviteExpired: online("초대코드 유효 시간이 지났어요. 방장에게 새 초대코드를 요청해 주세요.", "This invite code has expired. Ask the host for a new one.")
         case .inviteUsedUp: online("이 초대코드는 사용 횟수를 모두 썼어요. 방장에게 새 초대코드를 요청해 주세요.", "This invite code has no uses left. Ask the host for a new one.")
         case .displayEmailTaken: online("같은 닉네임을 쓰는 동료가 이미 있어요. 다른 닉네임으로 다시 참여해 주세요.", "Someone in the group already uses that nickname. Join again with a different one.")
+        case .invalidCode: online("이 코드를 찾을 수 없어요. 복구코드는 쓸 때마다 새 코드로 바뀌니 가장 최근에 받은 코드를 넣어 주세요. 없으면 방장에게 재연결 코드를 요청해 주세요.", "That code was not found. A recovery code changes each time it is used, so enter the most recent one. If you do not have it, ask the host for a reconnect code.")
+        case .codeUsed: online("이미 사용한 재연결 코드예요. 방장에게 새 코드를 요청해 주세요.", "This reconnect code was already used. Ask the host for a new one.")
+        case .codeExpired: online("재연결 코드 유효 시간이 지났어요. 방장에게 새 코드를 요청해 주세요.", "This reconnect code has expired. Ask the host for a new one.")
+        case .accountLeft: online("그룹에서 나간 계정이라 다시 연결할 수 없어요. 방장에게 새 초대코드를 받아 다시 참여해 주세요.", "This account has left the group and cannot reconnect. Ask the host for a new invite code and join again.")
+        case .instanceBusy: online("이 포켓몬은 이미 다른 경기에 나가 있어요. 그 경기가 끝나면 다시 시도하거나 다른 포켓몬을 골라 주세요.", "This Pokémon is already in another battle. Try again when that battle ends, or pick another Pokémon.")
         case .tooManyAttempts:
             error.retryAfter.map { seconds in online("시도가 너무 많았어요. \(seconds)초 뒤에 다시 시도해 주세요.", "Too many attempts. Try again in \(seconds) seconds.") }
                 ?? online("시도가 너무 많았어요. 잠시 뒤에 다시 시도해 주세요.", "Too many attempts. Try again in a moment.")

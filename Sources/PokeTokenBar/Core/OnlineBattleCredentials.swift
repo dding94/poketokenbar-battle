@@ -19,6 +19,11 @@ struct OnlineBattleSettings: Codable, Equatable, Sendable {
     var serverURL: String? { embeddedServerURL ?? storedServerURL }
     /// True when the build fixed the server; the setup UI should hide manual address entry.
     var serverIsEmbedded: Bool { embeddedServerURL != nil }
+    /// True when the build fixed a server other than the one typed earlier: the account saved for that one stays behind.
+    var serverMovedFromStored: Bool {
+        guard let embeddedServerURL, let storedServerURL else { return false }
+        return Self.normalizedOrigin(storedServerURL) != embeddedServerURL
+    }
 
     private static func normalizedOrigin(_ value: String) -> String? { (try? OnlineBattleOrigin(value))?.url.absoluteString }
     static func load(from stateDirectory: URL, embeddedServerURL: String? = nil) throws -> Self {

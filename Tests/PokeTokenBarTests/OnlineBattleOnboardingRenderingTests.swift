@@ -132,10 +132,10 @@ final class OnlineBattleOnboardingRenderingTests: XCTestCase {
         try await Task.sleep(for: .milliseconds(150)); view.layoutSubtreeIfNeeded()
         let checked = try await capture(view, named: "t11-01-recovery-checked.png")
         // SwiftUI draws these buttons without an NSButton here, so the keep button's state is read from its words:
-        // black while it can be pressed, grey while it cannot. Rows below the checkbox hold only that button.
-        let shut = darkPixels(unchecked, fromRow: 436), open = darkPixels(checked, fromRow: 436)
-        XCTAssertLessThan(shut, 50, "the keep button's words are grey before the check")
-        XCTAssertGreaterThan(open, 200, "the keep button's words turn black once the check is made")
+        // black while it can be pressed, grey while it cannot. Nothing else on the card turns black with the check,
+        // so the difference holds wherever the wording above moves the button.
+        let shut = darkPixels(unchecked, fromRow: 0), open = darkPixels(checked, fromRow: 0)
+        XCTAssertGreaterThan(open - shut, 200, "the keep button's words turn black once the check is made")
         XCTAssertFalse(try recognized(view).contains("Copy it or write it down first"), "the reason goes away with the check")
         model.send(.acknowledgeRecoveryCode)
         XCTAssertNil(model.recoveryCode)

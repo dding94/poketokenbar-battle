@@ -6,8 +6,9 @@ import {
   formatSuccess,
   parseArgs,
 } from "../scripts/bootstrap-group-lib.mjs";
+import { parseDisplayEmail, parseGroupName } from "../src/http";
 
-const SECRET = "fake-operator-secret-for-tests";
+const SECRET = "fake-operator-secret-for-bootstrap-tests";
 const ACCESS_KEY = "ptb_fakeaccesskey0123456789";
 const RECOVERY = "FAKE-RECOV-CODE-0001";
 const ENV = { OPERATOR_SECRET: SECRET };
@@ -55,6 +56,34 @@ describe("bootstrap-group parseArgs", () => {
     expect(() => parseArgs(["https://example.invalid", "A", "H"], {})).toThrow(/OPERATOR_SECRET/);
     expect(() => parseArgs(["https://example.invalid", "A", "H"], { OPERATOR_SECRET: "" })).toThrow(/OPERATOR_SECRET/);
   });
+
+  it("refuses a secret shorter than any the server would ever accept", () => {
+    expect(() => parseArgs(["https://example.invalid", "A", "H"], { OPERATOR_SECRET: "x".repeat(31) })).toThrow(/32/);
+    expect(parseArgs(["https://example.invalid", "A", "H"], { OPERATOR_SECRET: "x".repeat(32) }).nickname).toBe("H");
+  });
+
+  it("accepts exactly the nicknames and group names the server accepts", () => {
+    const nicknames = ["H", "나래", "a.b@c", "x".repeat(254), "x".repeat(255), "has space", "tab\tin", " padded ", "", "   ", "a‍b", "a⠀b", "ｆｕｌｌ"];
+    for (const nickname of nicknames) {
+      const server = (() => { try { parseDisplayEmail(nickname); return true; } catch { return false; } })();
+      const script = (() => { try { parseArgs(["https://example.invalid", "A", nickname], ENV); return true; } catch { return false; } })();
+      expect(script, JSON.stringify(nickname)).toBe(server);
+    }
+    const groups = ["A", "우리 팀", "x".repeat(40), "x".repeat(41), "", "  ", "a\u0007b", "a‍b"];
+    for (const group of groups) {
+      const server = (() => { try { parseGroupName(group); return true; } catch { return false; } })();
+      const script = (() => { try { parseArgs(["https://example.invalid", group, "H"], ENV); return true; } catch { return false; } })();
+      expect(script, JSON.stringify(group)).toBe(server);
+    }
+  });
+
+  it("names the nickname rule and never repeats the value", () => {
+    const value = "secret looking nickname";
+    let message = "";
+    try { parseArgs(["https://example.invalid", "A", value], ENV); } catch (error) { message = String(error); }
+    expect(message).toMatch(/spaces/);
+    expect(message).not.toContain(value);
+  });
 });
 
 describe("bootstrap-group request", () => {
@@ -64,6 +93,7 @@ describe("bootstrap-group request", () => {
     expect(url).toBe("https://example.invalid/v1/groups");
     expect(url).not.toContain(SECRET);
     expect(init.method).toBe("POST");
+    expect(init.redirect).toBe("error");
     expect(JSON.parse(String(init.body))).toEqual({
       operatorSecret: SECRET,
       groupName: "Arena",
@@ -94,6 +124,15 @@ describe("bootstrap-group output", () => {
     const text = formatFailure(500, `<html>${SECRET}</html>`);
     expect(text).toMatch(/500/);
     expect(text).not.toContain(SECRET);
+  });
+
+  it("says what to do about each refusal an operator can run into", () => {
+    expect(formatFailure(403, { error: { code: "operator_denied" } })).toMatch(/does not match/);
+    expect(formatFailure(503, { error: { code: "operator_disabled" } })).toMatch(/32/);
+    expect(formatFailure(400, { error: { code: "bad_request" } })).toMatch(/nickname/);
+    expect(formatFailure(429, { error: { code: "too_many_attempts" } })).toMatch(/wait/);
+    expect(formatFailure(500, { error: { code: "internal" } })).toBe("server error: internal");
+    expect(formatFailure(404, "<html>")).toMatch(/base URL/);
   });
 });
 

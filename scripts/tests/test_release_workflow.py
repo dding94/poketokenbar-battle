@@ -1,8 +1,10 @@
 """Release boundary regressions. Commands run only in disposable fixture repositories."""
 import hashlib
+import importlib.util
 import json
 import os
 import plistlib
+import re
 import shutil
 import subprocess
 import tempfile
@@ -10,6 +12,15 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def native_runner_names():
+    """The tests scripts/run-native-acceptance.sh requires, read from the script itself."""
+    script=(ROOT/'scripts/run-native-acceptance.sh').read_text()
+    block=re.search(r"expected = \[(.*?)\]",script,re.S)
+    return re.findall(r"'(test\w+)'",block[1])
+
+
 LEAF = hashlib.sha1(b'public certificate fixture').hexdigest().upper()
 NOTES = '''## New
 None.
@@ -121,10 +132,9 @@ class ReleaseWorkflowTests(unittest.TestCase):
              'run_id':12345,'run_attempt':1,'head_sha':'1'*40,
              'steps':[{'name':step,'status':'completed','conclusion':'success'} for step in steps]}
             for index,(name,steps) in enumerate(required.items())]}
-        self.ci_log='\n'.join("Test Case '-[PokeTokenBarTests.OnlineBattleNativeAcceptanceTests "+name+"]' passed (1.0 seconds)." for name in (
-            'testNativeManualAndAutomaticReportsPrivacyReplayAndRematch',
-            'testSessionsRecoverCommittedResponseLossAndApplyDurablyOnce',
-            'testSessionsReleaseVoidWithoutHealthXPWalletOrUsageEffects'))+'\nNATIVE_ACCEPTANCE required=3 passed=3 skipped=0 (single Mac, local Worker)\n'
+        # What the runner in this repository prints, so this fixture cannot pass with an old count.
+        native=native_runner_names()
+        self.ci_log='\n'.join("Test Case '-[PokeTokenBarTests.OnlineBattleNativeAcceptanceTests "+name+"]' passed (1.0 seconds)." for name in native)+f'\nNATIVE_ACCEPTANCE required={len(native)} passed={len(native)} skipped=0 (single Mac, local Worker)\n'
         self.write_ci_fixture()
         self.env['PTB_CI_RUN_ID']='12345'
 
@@ -392,7 +402,7 @@ bash scripts/package-battle-engines.sh "build/PokeTokenBattle.app/Contents/Resou
                 elif mutation=='partial-jobs': jobs['jobs']=jobs['jobs'][:-1];jobs['total_count']-=1
                 elif mutation=='skipped-job': jobs['jobs'][2]['conclusion']='skipped'
                 elif mutation=='skipped-step': jobs['jobs'][2]['steps'][-1]['conclusion']='skipped'
-                elif mutation=='native-skip': log=log.replace('passed=3 skipped=0','passed=2 skipped=1')
+                elif mutation=='native-skip': log=re.sub(r'passed=(\d+) skipped=0',lambda found:f'passed={int(found[1])-1} skipped=1',log)
                 elif mutation=='native-missing': log=log.replace('testSessionsRecoverCommittedResponseLossAndApplyDurablyOnce','otherTest')
                 elif mutation=='attempt': jobs['jobs'][2]['run_attempt']=2
                 elif mutation=='job-run': jobs['jobs'][2]['run_id']=54321
@@ -406,6 +416,26 @@ bash scripts/package-battle-engines.sh "build/PokeTokenBattle.app/Contents/Resou
                 self.assertNotIn('build:',self.calls())
                 self.assertNotIn('security ',self.calls())
                 self.assertNotIn('local-test-gate',self.calls())
+
+    def test_native_gate_names_the_tests_the_runner_requires_and_the_test_file_has(self):
+        spec=importlib.util.spec_from_file_location('release_ci',ROOT/'scripts/release-ci.py')
+        gate=importlib.util.module_from_spec(spec);spec.loader.exec_module(gate)
+        runner=native_runner_names()
+        declared=re.findall(r'func (test\w+)\(',(ROOT/'Tests/PokeTokenBarTests/OnlineBattleNativeAcceptanceTests.swift').read_text())
+        self.assertEqual(sorted(gate.NATIVE_TESTS),sorted(runner),'release-ci.py and run-native-acceptance.sh disagree')
+        self.assertEqual(sorted(runner),sorted(declared),'run-native-acceptance.sh and the Swift test file disagree')
+
+    def test_ci_gate_refuses_a_native_count_other_than_the_runners(self):
+        self.fake_build()
+        count=len(native_runner_names())
+        for wrong in (count-1,count+1):
+            with self.subTest(wrong=wrong):
+                (self.repo/'calls').unlink(missing_ok=True)
+                log=self.ci_log.replace(f'required={count} passed={count}',f'required={wrong} passed={wrong}')
+                (self.repo/'ci-log.json').write_text(log)
+                result=self.run_release('--prepare-build','3.0.0')
+                self.assertNotEqual(result.returncode,0,result.stdout+result.stderr)
+                self.assertIn('native acceptance',result.stderr)
 
     def test_ci_gate_rejects_dirty_source_or_api_unavailability(self):
         self.fake_build()

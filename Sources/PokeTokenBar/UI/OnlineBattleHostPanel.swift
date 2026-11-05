@@ -7,10 +7,7 @@ import SwiftUI
 struct OnlineBattleHostPanel: View {
     let model: OnlineBattlePresentation
     let l: L
-    var writeClipboard: (String) -> Bool = { text in
-        NSPasteboard.general.clearContents()
-        return NSPasteboard.general.setString(text, forType: .string)
-    }
+    var writeClipboard: (String) -> Bool = { OnlineBattleClipboard.write($0) }
 
     /// Puts the shown code on the clipboard; only then does the screen forget it.
     func copySecret() {

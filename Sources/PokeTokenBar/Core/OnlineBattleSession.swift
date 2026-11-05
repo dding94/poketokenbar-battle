@@ -73,6 +73,12 @@ final class OnlineBattleSession {
     private var battleReads = Set<String>()
     private var battleReadAgain = Set<String>()
     private var battleRecovery: [String: TimeInterval] = [:]
+    private var recoveryBackoff = OnlineBattleRetryBackoff()
+    private var battleBackoff: [String: OnlineBattleRetryBackoff] = [:]
+    /// Battles whose read failed the same way any later read of those bytes would. Only news or a person reads them again.
+    private var parkedBattles = Set<String>()
+    /// Rooms set aside because this save lacks their pokemon. Said once each, so a closed banner stays closed across later reads.
+    private var otherSaveBattlesAnnounced = Set<String>()
     private var api: OnlineBattleAPI?
     private var origin: OnlineBattleOrigin?
     private var connection: (any OnlineBattleConnecting)?
@@ -80,6 +86,7 @@ final class OnlineBattleSession {
     private var authenticated = false
     private var generation: UInt64 = 0
     private var pendingGrant: OnlineBattleGrant?
+    private var pendingGrantCode: String?
     private var standingsTask: Task<Void, Never>?
     private var standingsAgain = false
     private var standingsRevision: UInt64 = 0
@@ -112,6 +119,8 @@ final class OnlineBattleSession {
         let snapshot: OnlineBattleSnapshot
     }
     private var challengeIntent: ChallengeIntent?
+    /// A code that just did its job. The app forgets it from the clipboard; tests listen here instead.
+    var onSetupCodeUsed: @MainActor (String) -> Void = { _ in }
 
     init(settings: OnlineBattleSettings, credentials: any OnlineBattleCredentialStoring,
          transport: any OnlineBattleHTTPTransport = OnlineBattleURLSessionTransport(), effects: any OnlineBattleEffects,
@@ -128,6 +137,7 @@ final class OnlineBattleSession {
         self.enabled = enabled; self.accessAllowed = accessAllowed; self.localization = localization
         presentation.serverAddress = settings.serverURL ?? ""
         presentation.serverIsEmbedded = settings.serverIsEmbedded
+        presentation.serverMoved = settings.serverMovedFromStored
         presentation.setupInput.server = presentation.serverAddress
         presentation.onAction = { [weak self] action in Task { await self?.perform(action) } }
     }
@@ -141,7 +151,7 @@ final class OnlineBattleSession {
         ticker?.cancel(); ticker = nil
         let old = connection, oldAPI = api; connection = nil
         authenticated = false; reconciled = false; bootstrapped = false; actionInFlight = false
-        pendingGrant = nil; challengeIntent = nil; prepared = [:]; liveConnectionID = nil; acknowledgedStarts = []; submittedReports = []
+        pendingGrant = nil; pendingGrantCode = nil; challengeIntent = nil; prepared = [:]; liveConnectionID = nil; acknowledgedStarts = []; submittedReports = []
         for resolver in resolvers.values { resolver.close() }; resolvers = [:]; views = [:]; historyViews = [:]; dropStagings()
         selectedBattleID = nil; pinnedBattleID = nil; resultByBattleID = [:]; prefersLobby = false; checkedDeadlines = [:]; nextRecoveryRead = nil
         presentation.account = nil; presentation.members = []; presentation.battles = []
@@ -162,9 +172,20 @@ final class OnlineBattleSession {
     /// The Mac woke or got its network back. Without an account there is no socket to bring back.
     func reconnectHint(_ reason: OnlineBattleReconnectReason) async {
         guard onlineAllowed, authenticated else { return }
+        retryNow()
         await connection?.reconnectHint(reason)
     }
+    /// No build of this app can reach another server again once one is fixed, and a hold there would otherwise
+    /// block the pokemon for good. Done without an account: joining the new server is not the price of an egg.
+    /// A failed write leaves the hold for the next launch and must not take online down with it.
+    private func releaseHoldsOfOtherServers() {
+        guard let fixed = settings.embeddedServerURL, let origin = try? OnlineBattleOrigin(fixed) else { return }
+        for hold in effects.companionState()?.state.onlineBattleHolds ?? [] where hold.key.scope.originHash != origin.hash {
+            try? effects.releaseOnlineBattle(key: hold.key)
+        }
+    }
     func bootstrap() async {
+        releaseHoldsOfOtherServers()
         guard onlineAllowed else { presentation.connectionStatus = .accessOff; return }
         guard !bootstrapped else { return }
         bootstrapped = true
@@ -195,7 +216,7 @@ final class OnlineBattleSession {
             for resolver in resolvers.values { resolver.close() }
             dropStagings()
             resolvers = [:]; views = [:]; historyViews = [:]; selectedBattleID = nil; pinnedBattleID = nil; resultByBattleID = [:]; prefersLobby = false; checkedDeadlines = [:]
-            api = nil; origin = nil; pendingGrant = nil; challengeIntent = nil
+            api = nil; origin = nil; pendingGrant = nil; pendingGrantCode = nil; challengeIntent = nil
             authenticated = false; reconciled = false; actionInFlight = false
             refreshAgain = false; prepared = [:]; liveConnectionID = nil; acknowledgedStarts = []; submittedReports = []; nextRecoveryRead = nil
             if settings.serverURL != nil, settings.serverURL != next.serverURL {
@@ -361,12 +382,12 @@ final class OnlineBattleSession {
             do {
                 let room = try await api.battle(id: id); try current(epoch)
                 try await process(room, account: account, api: api, epoch: epoch)
-                try current(epoch); battleRecovery[id] = nil; try rebuildRoster(); publish()
+                try current(epoch); battleRecovery[id] = nil; parkedBattles.remove(id); try rebuildRoster(); publish()
             } catch {
                 guard epoch == generation else { return }
-                await handle(error, epoch: epoch)
-                // Battle recovery stays scoped even when the general error path arms a full read.
-                nextRecoveryRead = nil; battleRecovery[id] = clock.now() + 5
+                // Battle recovery stays scoped: this failure arms a read of this battle, not a full read.
+                await handle(error, epoch: epoch, armsFullRead: false)
+                armBattleRecovery(id, after: error)
                 return
             }
         } while battleReadAgain.contains(id) && epoch == generation
@@ -395,14 +416,36 @@ final class OnlineBattleSession {
         fallback[work.battleID] = nil; fallbackTasks[work.battleID] = nil
         do { try await process(room, account: account, api: api, epoch: work.generation, fallbackWork: work) }
         catch {
-            await handle(error, epoch: work.generation)
-            if work.generation == generation { nextRecoveryRead = nil; battleRecovery[work.battleID] = clock.now() + 5 }
+            await handle(error, epoch: work.generation, armsFullRead: false)
+            if work.generation == generation { armBattleRecovery(work.battleID, after: error) }
         }
     }
-    func join(inviteCode: String, email: String) async {
-        await obtainGrant { try await $0.join(inviteCode: inviteCode, displayEmail: email) }
+    /// What this error says about reading again. Verifying the same bytes fails the same way, however often they are read.
+    private static func anotherReadCouldHelp(_ error: Error) -> Bool {
+        !(error is OnlineBattleResolver.Failure || error is OnlineBattleEffectError
+            || error is OnlineBattleReplay.Failure || error is BattleEngine.Failure)
     }
-    private func obtainGrant(_ request: (OnlineBattleAPI) async throws -> OnlineBattleGrant) async {
+    private func armBattleRecovery(_ id: String, after error: Error) {
+        guard Self.anotherReadCouldHelp(error) else { battleRecovery[id] = nil; parkedBattles.insert(id); return }
+        battleRecovery[id] = clock.now() + battleBackoff[id, default: .init()].nextDelay()
+    }
+    /// The waits start over.
+    private func restartRetries() {
+        recoveryBackoff = .init(); battleBackoff = [:]; parkedBattles = []
+    }
+    /// A person looked or the network came back. Whatever was waiting its turn goes now.
+    private func retryNow() {
+        restartRetries()
+        guard authenticated else { return }
+        let now = clock.now()
+        // A failed read that had nothing left to wait for (no match to rescue, or nothing a retry could change) asks once more too.
+        if nextRecoveryRead != nil || !reconciled { nextRecoveryRead = now }
+        battleRecovery = battleRecovery.mapValues { _ in now }
+    }
+    func join(inviteCode: String, email: String) async {
+        await obtainGrant(usedCode: inviteCode) { try await $0.join(inviteCode: inviteCode, displayEmail: email) }
+    }
+    private func obtainGrant(usedCode: String, _ request: (OnlineBattleAPI) async throws -> OnlineBattleGrant) async {
         guard onlineAllowed, let api, let origin, pendingGrant == nil else { return }
         var epoch = generation
         do {
@@ -426,7 +469,7 @@ final class OnlineBattleSession {
             presentation.room = nil; presentation.arena = nil; presentation.request = nil
             presentation.result = nil; presentation.recoveryCode = nil; presentation.canStart = false
             presentation.phase = .setup; presentation.restoringAccount = false
-            pendingGrant = grant; presentation.canRetryCredentialSave = true
+            pendingGrant = grant; pendingGrantCode = usedCode; presentation.canRetryCredentialSave = true
             await api.setAccessKey(nil)
             await old?.stop(); try current(epoch)
             await retryCredentialSave()
@@ -439,7 +482,9 @@ final class OnlineBattleSession {
         do {
             try await credentials.save(grant.accessKey, scope: .init(profileID: settings.profileID, origin: origin))
             try current(epoch)
-            pendingGrant = nil; presentation.canRetryCredentialSave = false
+            // Only now is the code spent: until the key is safe, the person may still need what they copied.
+            if let pendingGrantCode { onSetupCodeUsed(pendingGrantCode) }
+            pendingGrant = nil; pendingGrantCode = nil; presentation.canRetryCredentialSave = false
             presentation.clearSetupCodes(); presentation.setupInput.nickname = ""
             presentation.account = grant.account; presentation.recoveryCode = grant.recoveryCode; presentation.notice = nil
             try await activate(grant.accessKey, epoch: epoch)
@@ -458,10 +503,12 @@ final class OnlineBattleSession {
                 self.refreshAgain = false
                 await self.readAll(api: api, epoch: epoch)
             } while self.refreshAgain && self.generation == epoch && self.onlineAllowed && self.authenticated
+            // In the same turn as the last check, so a signal either runs the loop again or starts a new read.
+            // Clearing it after `await task.value` left a turn where a signal found a task that would not read again.
+            if self.generation == epoch { self.refreshTask = nil }
         }
         refreshTask = task
         await task.value
-        if epoch == generation { refreshTask = nil }
     }
     private func readAll(api: OnlineBattleAPI, epoch: UInt64) async {
         do {
@@ -471,6 +518,13 @@ final class OnlineBattleSession {
             guard group.group.groupId == account.group.groupId else { throw OnlineBattleFailure.invalidResponse }
             var battles = try await api.listBattles(); try current(epoch)
             let scope = try scope(account)
+            // This read proved who this is on this server. A hold of any other trainer or group here belongs to a key
+            // that has been replaced. Another server's hold stays: a manual build keeps that key and can go back,
+            // where the room is listed again, settles once by its receipt, and the pokemon was not entered twice.
+            for hold in effects.companionState()?.state.onlineBattleHolds ?? []
+            where hold.key.scope.originHash == scope.originHash && hold.key.scope != scope {
+                try effects.releaseOnlineBattle(key: hold.key)
+            }
             let ids = Set(battles.map(\.battleId))
             for hold in effects.companionState()?.state.onlineBattleHolds ?? [] where hold.key.scope == scope && !ids.contains(hold.key.battleID) {
                 let room = try await api.battle(id: hold.key.battleID); try current(epoch); battles.append(room)
@@ -493,6 +547,7 @@ final class OnlineBattleSession {
                 try await process(room, account: account, api: api, epoch: epoch)
             }
             try current(epoch); reconciled = true
+            recoveryBackoff = .init(); nextRecoveryRead = nil; parkedBattles = []
             try rebuildRoster(); _ = try await reconcileRematchIntent(account: account, api: api, epoch: epoch); publish()
             if let connection { let snapshot = await connection.snapshot(); try current(epoch); noteConnection(snapshot) }
         } catch {
@@ -539,6 +594,9 @@ final class OnlineBattleSession {
             if let previousView, previousView.opponentSubmitted == true, previousView.roundSeq == room.roundSeq,
                previousView.journal.count == room.journal.count { room.opponentSubmitted = true }
             views[room.battleId] = room
+            // A read that worked says nothing about a failing advance; only a room that moved does.
+            if let previousView, previousView.state != room.state || previousView.roundSeq != room.roundSeq
+                || previousView.journal.count != room.journal.count { battleBackoff[room.battleId] = nil }
             if let pending = fallback[room.battleId], room.state != .running || room.roundSeq > pending.work.seq {
                 cancelFallback(room.battleId)
             }
@@ -557,8 +615,10 @@ final class OnlineBattleSession {
                 try settle(room, account: account); resolvers.removeValue(forKey: room.battleId)?.close(); publish(); return
             }
             if let own = side == .p1 ? room.p1.snapshot : room.p2.snapshot {
-                guard presentation.roster.contains(where: { $0.id == own.instanceId }) else { throw OnlineBattleFailure.invalidResponse }
-                try effects.holdOnlineBattle(key: key, instanceID: own.instanceId)
+                guard presentation.roster.contains(where: { $0.id == own.instanceId }) else { setAside(room.battleId); return }
+                do { try effects.holdOnlineBattle(key: key, instanceID: own.instanceId) }
+                // This save knows the pokemon, but fainted or in another room: the same room from another save's past.
+                catch OnlineBattleEffectError.faintedIndividual, OnlineBattleEffectError.individualHeld { setAside(room.battleId); return }
             }
             if room.state == .accepted, room.confirmed, let resent = try await resendReady(room, account: account, api: api, epoch: epoch) {
                 room = resent; continue
@@ -661,6 +721,17 @@ final class OnlineBattleSession {
             return nil
         }
     }
+    /// A room entered with a pokemon this save cannot field cannot be played or held here. Only this room stops:
+    /// no view means no arena, no deadline reads and no recovery loop. The next read looks at it again.
+    private func setAside(_ id: String) {
+        views[id] = nil
+        resolvers.removeValue(forKey: id)?.close()
+        stagings[id] = nil
+        cancelFallback(id); battleRecovery[id] = nil
+        guard otherSaveBattlesAnnounced.insert(id).inserted else { return }
+        let text = localization().onlineOtherSaveBattle
+        presentation.notice = text; presentation.stickyNotice = text
+    }
     private func settle(_ battle: OnlineBattleView, account: OnlineBattleAccount) throws {
         let key = try receiptKey(battle, account: account)
         if let state = effects.companionState()?.state,
@@ -673,12 +744,21 @@ final class OnlineBattleSession {
             showResult(receipt, outcome: outcome)
             return
         }
+        // Fought with a pokemon this save does not have: a record, not an effect. No receipt is written, so a save that
+        // brings the pokemon later still settles it, and one that brings the receipt with it does not settle it twice.
+        let own = battle.side(for: account.trainer.trainerId) == .p1 ? battle.p1.snapshot : battle.p2.snapshot
+        if let own, !presentation.roster.contains(where: { $0.id == own.instanceId }) {
+            try effects.releaseOnlineBattle(key: key)
+            let l = localization()
+            resultByBattleID[battle.battleId] = .init(title: l.onlineOtherSaveResultTitle, detail: l.onlineOtherSaveResultDetail,
+                                                      xpAwarded: 0, hpApplied: false, isVoid: false)
+            return
+        }
         guard let hash = battle.config?.engineHash else { throw OnlineBattleFailure.invalidResponse }
         let resolver = try OnlineBattleResolver.completedResolver(battle: battle, localTrainerID: account.trainer.trainerId,
                                                                   engine: completedEngine(hash: hash))
         defer { resolver.close() }
         let proof = try resolver.verifyCompleted(battle)
-        guard presentation.roster.contains(where: { $0.id == proof.localInstanceID }) else { throw OnlineBattleFailure.invalidResponse }
         let outcome: OnlineBattleOutcome = proof.winner == .draw ? .draw : proof.winner.rawValue == proof.localSide.rawValue ? .win : .loss
         let receipt = try effects.applyVerifiedOnlineBattleEffect(.init(key: receiptKey(battle, account: account), resultHash: proof.resultHash,
             localInstanceID: proof.localInstanceID, remainingHPShare: proof.remainingHPShare, outcome: outcome))
@@ -783,6 +863,7 @@ final class OnlineBattleSession {
     private func stageIsVisible(_ id: String, displayed: String?) -> Bool {
         popoverOpen && onlineScreenVisible && id == displayed && presentation.stageSpeed != .instant
             && !presentation.showsHistory && !presentation.showsStandings && presentation.rematchSourceID == nil
+            && !presentation.showsHostPanel
     }
     /// A stage nobody can see has nothing to play, so reopening never shows old beats and a held phase lets go.
     private func syncStages() {
@@ -842,7 +923,7 @@ final class OnlineBattleSession {
         switch action {
         case .setPopoverVisible(let open):
             popoverOpen = open
-            if open { requestStandingsRefresh() } else { invalidateStandingsRead() }
+            if open { requestStandingsRefresh(); retryNow() } else { invalidateStandingsRead() }
             // The popover's views are released on close with no guaranteed onDisappear; the screen's onAppear sets it again.
             if !open { onlineScreenVisible = false }
             refreshStageVisibility()
@@ -886,7 +967,8 @@ final class OnlineBattleSession {
         case .openBattle(let id): selectBattle(id); return
         case .host(let hostAction): await performHost(hostAction); return
         // A lobby row cannot be pressed behind an overlay; an event can. The rematch draft's picks live outside its page.
-        case .followAttention(let id): resetExtras(); clearHistory(); selectBattle(id); return
+        // A host code on screen is the only copy, so it stays on top until it is copied or hidden; the room waits behind it.
+        case .followAttention(let id): resetExtras(keepingHostCode: true); clearHistory(); selectBattle(id); return
         case .configureServer(let value): await configureServer(value); return
         case .applyingServer(let address, let inner):
             // Save the typed address first, then run the setup request against it. If it cannot be saved
@@ -911,13 +993,14 @@ final class OnlineBattleSession {
         default: break
         }
         guard onlineAllowed, !actionInFlight else { return }
+        restartRetries()
         actionInFlight = true; presentation.isBusy = true; presentation.notice = nil
         let epoch = generation
         defer { if epoch == generation { actionInFlight = false; presentation.isBusy = false } }
         switch action {
         case .join(let code, let email): await join(inviteCode: code, email: email)
-        case .recover(let code): await obtainGrant { try await $0.recover(recoveryCode: code) }
-        case .reconnect(let code): await obtainGrant { try await $0.reconnect(reconnectCode: code) }
+        case .recover(let code): await obtainGrant(usedCode: code) { try await $0.recover(recoveryCode: code) }
+        case .reconnect(let code): await obtainGrant(usedCode: code) { try await $0.reconnect(reconnectCode: code) }
         case .retryCredentialSave: await retryCredentialSave()
         case .refresh: await refresh()
         default:
@@ -951,12 +1034,14 @@ final class OnlineBattleSession {
     private func resetBattleRuntime() {
         fallbackTasks.values.forEach { $0.cancel() }; fallbackTasks = [:]; fallback = [:]
         advancing = []; reporting = []; battleReads = []; battleReadAgain = []; battleRecovery = [:]
+        otherSaveBattlesAnnounced = []
+        restartRetries()
     }
-    private func resetExtras() {
+    private func resetExtras(keepingHostCode: Bool = false) {
         invalidateStandingsRead()
         presentation.showsStandings = false; presentation.standings = nil; presentation.standingsError = nil
         presentation.rematchSourceID = nil; rematchFromHistory = false
-        presentation.host.close()
+        if !(keepingHostCode && presentation.hostSecretShowing) { presentation.host.close() }
     }
     private func requestStandingsRefresh() {
         guard standingsVisible else { return }
@@ -1212,13 +1297,14 @@ final class OnlineBattleSession {
                 }
             } catch {
                 if endsRoom { presentation.allowEndedNotice(for: room.battleId) }
-                guard let rejected = error as? OnlineBattleServerError, rejected.code == .invalidState || rejected.code == .staleRevision else { throw error }
+                guard let rejected = error as? OnlineBattleServerError,
+                      [.invalidState, .staleRevision, .staleRound].contains(rejected.code) else { throw error }
                 // The room moved before the press arrived. Read it, so the person hears what actually happened.
                 try current(epoch); await refresh(); try current(epoch)
                 guard reconciled else { throw OnlineBattleFailure.connectionUnavailable }
                 // A read during the press had its ending suppressed, and that read cannot announce it again.
                 if let latest = views[room.battleId] { presentation.announceEnded(latest, previous: room.state, l: localization()) }
-                throw OnlineBattleFailure.invalidRequest
+                throw rejected.code == .staleRound ? OnlineBattleFailure.roundPassed : OnlineBattleFailure.invalidRequest
             }
             try current(epoch)
         }
@@ -1232,8 +1318,10 @@ final class OnlineBattleSession {
         for pending in Array(fallback.values) where now >= pending.due { await resumeFallback(pending.work) }
         let recovery = battleRecovery.filter { now >= $0.value }.map(\.key)
         for id in recovery { await readBattle(id, epoch: generation) }
+        // A battle whose last read failed waits for its own retry: this beat is for healthy matches only.
         let due = views.values.filter { room in
-            room.state == .running && !recovery.contains(room.battleId) && room.deadline.map { now * 1000 >= $0 } == true && now >= (checkedDeadlines[room.battleId] ?? 0)
+            room.state == .running && !recovery.contains(room.battleId) && battleRecovery[room.battleId] == nil && !parkedBattles.contains(room.battleId)
+                && room.deadline.map { now * 1000 >= $0 } == true && now >= (checkedDeadlines[room.battleId] ?? 0)
         }
         for room in due {
             checkedDeadlines[room.battleId] = now + 5
@@ -1252,10 +1340,11 @@ final class OnlineBattleSession {
         ticker?.cancel(); ticker = nil
         await api?.setAccessKey(nil)
     }
-    private func handle(_ error: Error, epoch: UInt64) async {
+    private func handle(_ error: Error, epoch: UInt64, armsFullRead: Bool = true) async {
         guard onlineAllowed, epoch == generation, !(error is CancellationError), error as? OnlineBattleFailure != .staleGeneration else { return }
-        if authenticated, views.values.contains(where: { $0.state == .running || $0.state == .reported }) {
-            nextRecoveryRead = clock.now() + 5
+        if armsFullRead, authenticated, Self.anotherReadCouldHelp(error),
+           views.values.contains(where: { $0.state == .running || $0.state == .reported }) {
+            nextRecoveryRead = clock.now() + recoveryBackoff.nextDelay()
         }
         if error as? OnlineBattleFailure == .unauthorized {
             if let connection { let snapshot = await connection.snapshot(); guard epoch == generation else { return }; await connection.authenticationFailed(generation: snapshot.generation) }
@@ -1279,6 +1368,9 @@ final class OnlineBattleSession {
                 // It explains a press that did nothing, so the next background read must not wipe it unread.
                 presentation.notice = l.onlineErrorRoomChanged; presentation.stickyNotice = l.onlineErrorRoomChanged
             }
+        } else if error as? OnlineBattleFailure == .roundPassed {
+            // It also explains a press that did nothing, and it never was the connection.
+            presentation.notice = l.onlineErrorRoundPassed; presentation.stickyNotice = l.onlineErrorRoundPassed
         } else if error as? OnlineBattleFailure == .connectionUnavailable {
             // The failed read already said why, more exactly. A revoked account has its own status line.
             if authenticated, presentation.notice == nil { presentation.notice = l.onlineErrorGeneric }

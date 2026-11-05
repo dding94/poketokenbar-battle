@@ -694,4 +694,34 @@ final class OnlineBattleScreenRenderingTests: XCTestCase {
         let autoHost = await self.host(auto.model)
         _ = try await capture(autoHost, named: "arena-4-auto.png")
     }
+
+    /// Review B's wording on the real screens. It has to wrap inside the popover, not clip.
+    func testReviewBWordingStaysInsideThePopover() async throws {
+        let l = L(.ko)
+        let setup = OnlineBattlePresentation()
+        setup.serverAddress = "https://embedded.example.invalid"; setup.serverIsEmbedded = true
+        setup.setupInput.server = setup.serverAddress
+        let setupHost = await host(setup)
+        let plain = try await capture(setupHost, named: "f3-setup-plain.png")
+        setup.serverMoved = true
+        let moved = try await capture(setupHost, named: "f3-setup-server-moved.png")
+        XCTAssertNotEqual(plain, moved, "the moved line reaches the form")
+        setup.serverMoved = false
+        setup.connectionStatus = .connection(.revoked)
+        setup.notice = l.onlineServerError(.init(code: .invalidCode, retryAfter: nil))
+        _ = try await capture(setupHost, named: "f3-setup-revoked-invalid-code.png")
+
+        let recovery = Self.model(); recovery.recoveryCode = "SYNTHETIC-RECOVERY-0001"
+        _ = try await capture(await host(recovery), named: "f3-recovery-hint.png")
+
+        let lobby = Self.model(); lobby.phase = .lobby; lobby.notice = l.onlineOtherSaveBattle
+        _ = try await capture(await host(lobby), named: "f3-lobby-other-save-battle.png")
+
+        let arena = Self.model(); Self.arena(arena); arena.notice = l.onlineErrorRoundPassed
+        _ = try await capture(await host(arena), named: "f3-arena-round-passed.png")
+
+        let record = Self.model(); record.phase = .result; record.room = Self.room(state: .completed)
+        record.result = .init(title: l.onlineOtherSaveResultTitle, detail: l.onlineOtherSaveResultDetail, xpAwarded: 0, hpApplied: false, isVoid: false)
+        _ = try await capture(await host(record), named: "f3-result-other-save-record.png")
+    }
 }

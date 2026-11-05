@@ -1,4 +1,3 @@
-import AppKit
 import SwiftUI
 
 /// The recovery code, shown once. It leaves the screen two ways: copied (the clipboard has it, so the screen forgets it,
@@ -7,10 +6,7 @@ import SwiftUI
 struct OnlineBattleRecoveryCodeCard: View {
     let model: OnlineBattlePresentation
     let l: L
-    var writeClipboard: (String) -> Bool = { text in
-        NSPasteboard.general.clearContents()
-        return NSPasteboard.general.setString(text, forType: .string)
-    }
+    var writeClipboard: (String) -> Bool = { OnlineBattleClipboard.write($0) }
 
     /// Puts the shown code on the clipboard; only then does the screen forget it. A refused write keeps it on screen.
     func copyCode() {

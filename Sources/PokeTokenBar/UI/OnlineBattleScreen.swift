@@ -9,10 +9,7 @@ struct OnlineBattleScreen: View {
     var artwork = true
     var readInvitationClipboard: () -> String? = { NSPasteboard.general.string(forType: .string) }
     /// Writes a host code to the pasteboard; false when the pasteboard refused it, so the code stays on screen.
-    var writeClipboard: (String) -> Bool = { text in
-        NSPasteboard.general.clearContents()
-        return NSPasteboard.general.setString(text, forType: .string)
-    }
+    var writeClipboard: (String) -> Bool = { OnlineBattleClipboard.write($0) }
     var speciesNameProvider: any PokemonNameProviding = PokemonNameClient.shared
     var speciesNameStore: PokemonNameDisplayStore = .shared
     var onClosePopover: () -> Void = {}
@@ -209,6 +206,12 @@ private struct OnlineBattleSetupForm: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(l.onlineSetup).font(.headline)
+            if model.serverMoved {
+                Label(l.onlineServerMoved, systemImage: "arrow.triangle.2.circlepath")
+                    .font(.caption).foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("online.serverMoved")
+            }
             // Only a click reads the clipboard; nothing here ever reads it on its own.
             Button(model.serverIsEmbedded ? l.onlinePasteInvitationEmbedded : l.onlinePasteInvitation) {
                 model.setupPasteFailure = model.setupInput.pasteInvitation(

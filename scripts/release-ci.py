@@ -30,6 +30,8 @@ REQUIRED = {
 NATIVE_TESTS = (
     'testNativeManualAndAutomaticReportsPrivacyReplayAndRematch',
     'testSessionsRecoverCommittedResponseLossAndApplyDurablyOnce',
+    'testSessionsStillStartWhenOneSideReconnectsAfterPressingReady',
+    'testAWakeHintBringsBackASessionThatGaveUpAndItsReadyStillCounts',
     'testSessionsReleaseVoidWithoutHealthXPWalletOrUsageEffects',
 )
 
@@ -108,8 +110,9 @@ def verify(run_id):
     rest_id = by_name['build-test (rest)'].get('id')
     require(type(rest_id) is int and rest_id > 0, 'Missing rest job log identity')
     log = api(f'actions/jobs/{rest_id}/logs')
-    require('NATIVE_ACCEPTANCE required=3 passed=3 skipped=0' in log,
-            'CI native acceptance requires three actual passes and zero native skips')
+    count = len(NATIVE_TESTS)
+    require(f'NATIVE_ACCEPTANCE required={count} passed={count} skipped=0' in log,
+            f'CI native acceptance requires {count} actual passes and zero native skips')
     for test in NATIVE_TESTS:
         label = re.escape("Test Case '-[PokeTokenBarTests.OnlineBattleNativeAcceptanceTests " + test + "]'")
         require(re.search(label + r' passed\b', log), f'Native acceptance pass missing: {test}')
@@ -119,7 +122,7 @@ def verify(run_id):
     require(all(latest.get(key) == run.get(key) for key in
                 ('id', 'head_sha', 'run_attempt', 'status', 'conclusion')), 'CI run changed while reading evidence')
     require(clean_head() == head, 'Source HEAD changed while reading CI evidence')
-    print(f'Verified CI run {run_id}, attempt {attempt}, HEAD {head}: eight required jobs and three native acceptance passes. Existing opt-in skips remain unverified.')
+    print(f'Verified CI run {run_id}, attempt {attempt}, HEAD {head}: eight required jobs and {count} native acceptance passes. Existing opt-in skips remain unverified.')
 
 
 if __name__ == '__main__':

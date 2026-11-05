@@ -202,7 +202,8 @@ extension L {
         case .connection(.retryWaiting): online("다시 연결할 때까지 기다리고 있어요", "Waiting to reconnect")
         case .connection(.polling): online("다시 연결하는 중", "Reconnecting")
         case .connection(.replaced): online("다른 기기에서 연결했어요. 다시 열면 연결해요", "Connected from another device. Reopen this window to connect here")
-        case .connection(.revoked): online("접속키가 만료되었어요. 복구코드로 다시 연결해 주세요", "Your access key has expired. Reconnect with your recovery code")
+        // Also what a member who was removed sees: their recovery code answers account_left, so it names the invite too.
+        case .connection(.revoked): online("접속키를 더 이상 쓸 수 없어요. 복구코드로 다시 연결하거나, 내보내졌다면 새 초대코드로 다시 참여해 주세요", "Your access key no longer works. Reconnect with your recovery code or, if you were removed, join again with a new invite code")
         case .connection(.protocolError): online("서버와 앱 버전을 확인해 주세요", "Check the app and server versions")
         }
     }

@@ -113,7 +113,10 @@ private final class SessionEffects: OnlineBattleEffects {
     func setInBattle(_ instanceID: String?) {}
     func companionState() -> (state: CompanionState, activeName: String?)? { (state, nil) }
     func isHeldForBattle(instanceID: String) -> Bool { state.onlineBattleHolds.contains { $0.instanceID == instanceID } }
+    /// What the real store refuses with when this save's pokemon cannot enter the room.
+    var holdFailure: OnlineBattleEffectError?
     func holdOnlineBattle(key: OnlineBattleReceiptKey, instanceID: String) throws {
+        if let holdFailure { throw holdFailure }
         if !state.onlineBattleHolds.contains(where: { $0.key == key }) { state.onlineBattleHolds.append(.init(key: key, instanceID: instanceID)) }
     }
     func releaseOnlineBattle(key: OnlineBattleReceiptKey) { state.onlineBattleHolds.removeAll { $0.key == key } }
@@ -1496,8 +1499,8 @@ final class OnlineBattleSessionTests: XCTestCase {
         let final = try battle()
         let (session, _, _, effects) = try await setup([final], rosterOverride: [])
         await session.bootstrap()
-        XCTAssertEqual(effects.applications, 0); XCTAssertTrue(effects.state.battleHealth.isEmpty)
-        XCTAssertNotNil(session.presentation.notice)
+        XCTAssertEqual(effects.applications, 0); XCTAssertEqual(effects.effectCalls, 0); XCTAssertTrue(effects.state.battleHealth.isEmpty)
+        XCTAssertNil(session.presentation.notice, "a record of another save does not stop the read")
     }
 
     func testOnlineHoldPreventsPracticeEntryButReleaseAllowsIt() throws {
@@ -2936,3 +2939,703 @@ final class OnlineBattleSessionTests: XCTestCase {
         }
     }
 }
+
+// MARK: - Review B, F3 item 1: holds this app can no longer settle
+
+extension OnlineBattleSessionTests {
+    private static let savedServer = "https://battle.example.invalid"
+    private func hold(origin: String = OnlineBattleSessionTests.savedServer, group: String = "group", trainer: String = "trainer-one",
+                      battleID: String = "bt_old_room", instance: String = "instance-one") throws -> OnlineBattleHold {
+        .init(key: .init(scope: .init(originHash: try OnlineBattleOrigin(origin).hash, groupID: group, trainerID: trainer), battleID: battleID), instanceID: instance)
+    }
+
+    func testAnEmbeddedBuildLetsGoOfAHoldFromTheServerItLeftEvenBeforeJoining() async throws {
+        let credentials = SessionCredentials(); await credentials.setKey(nil)
+        let effects = SessionEffects()
+        effects.state.onlineBattleHolds = [try hold()]
+        let (session, http, _, _) = try await setup(credential: credentials, effects: effects, embeddedServer: "https://embedded.example.invalid")
+        await session.bootstrap()
+        XCTAssertEqual(effects.state.onlineBattleHolds, [], "no build of this app can reach that server again")
+        XCTAssertEqual(session.presentation.blockedEntryIDs, [])
+        let requests = await http.requests.count; XCTAssertEqual(requests, 0)
+    }
+    func testPracticeOpensAfterAnEmbeddedBuildLetsGoOfAnOldServerHold() async throws {
+        let effects = SessionEffects()
+        effects.state.dex = ["a", "b"].map { id in
+            var profile = PokemonProfile.generate(seed: 42, instanceID: id)
+            profile.level = 50; profile.gender = .male; profile.abilityName = "pressure"
+            profile.moves = [.init(name: "tackle", learnedAtLevel: 1)]
+            return DexEntry(baseID: 242, finalID: 242, chainOrder: [242], rarity: .common, caughtAt: nil, nature: .hardy, profile: profile)
+        }
+        effects.state.onlineBattleHolds = [try hold(instance: "a")]
+        let practice = PracticeSession(engineURL: engineURL, drivesAutomatically: false, effects: effects)
+        practice.prepare(state: effects.state, activeName: nil)
+        XCTAssertNotNil(practice.startBlock)
+        let credentials = SessionCredentials(); await credentials.setKey(nil)
+        let (session, _, _, _) = try await setup(credential: credentials, effects: effects, embeddedServer: "https://embedded.example.invalid")
+        await session.bootstrap()
+        XCTAssertNil(practice.startBlock)
+    }
+    func testAnEmbeddedBuildKeepsAHoldOfItsOwnServer() async throws {
+        let credentials = SessionCredentials(); await credentials.setKey(nil)
+        let effects = SessionEffects(), own = try hold(origin: "https://embedded.example.invalid")
+        effects.state.onlineBattleHolds = [own]
+        let (session, _, _, _) = try await setup(credential: credentials, effects: effects, embeddedServer: "https://embedded.example.invalid")
+        await session.bootstrap()
+        XCTAssertEqual(effects.state.onlineBattleHolds, [own], "with no account here yet, its room has not been read")
+    }
+    func testAnAddressEqualToTheEmbeddedOneKeepsItsHolds() async throws {
+        let room = try pendingRoom()
+        let effects = SessionEffects(), own = try hold(battleID: room.battleId)
+        effects.state.onlineBattleHolds = [own]
+        let (session, _, _, _) = try await setup([room], effects: effects, embeddedServer: Self.savedServer)
+        await session.bootstrap()
+        XCTAssertEqual(effects.state.onlineBattleHolds, [own])
+    }
+    func testAMemberWhoRejoinedAsANewTrainerGetsTheirEntryBack() async throws {
+        let effects = SessionEffects()
+        effects.state.onlineBattleHolds = [try hold(trainer: "trainer-removed")]
+        let (session, _, _, _) = try await setup(effects: effects)
+        await session.bootstrap()
+        XCTAssertEqual(effects.state.onlineBattleHolds, [], "the old trainer's key is gone and its room can no longer be read")
+        XCTAssertEqual(session.presentation.blockedEntryIDs, [])
+        XCTAssertTrue(session.presentation.entryIsEligible(try XCTUnwrap(session.presentation.roster.first { $0.id == "instance-one" })))
+    }
+    func testAnotherGroupOnTheSameServerIsReleasedToo() async throws {
+        let effects = SessionEffects()
+        effects.state.onlineBattleHolds = [try hold(group: "group-before")]
+        let (session, _, _, _) = try await setup(effects: effects)
+        await session.bootstrap()
+        XCTAssertEqual(effects.state.onlineBattleHolds, [])
+    }
+    func testAFailedReadReleasesNothing() async throws {
+        let effects = SessionEffects(), old = try hold(trainer: "trainer-removed")
+        effects.state.onlineBattleHolds = [old]
+        let (session, http, _, _) = try await setup(effects: effects)
+        await http.route("/v1/battles", Data(), status: 503)
+        await session.bootstrap()
+        XCTAssertEqual(effects.state.onlineBattleHolds, [old], "only a read that worked proves which account this is")
+    }
+    /// A manual build keeps the key of every server it used, so it can go back. There the room still decides.
+    func testAManualBuildKeepsAnotherServersHoldAndSettlesItExactlyOnceOnReturn() async throws {
+        let final = try battle(), elsewhere = "https://elsewhere.example.invalid"
+        let effects = SessionEffects(), old = try hold(origin: elsewhere, battleID: final.battleId)
+        effects.state.onlineBattleHolds = [old]
+        let (session, http, _, _) = try await setup(effects: effects)
+        await session.bootstrap()
+        XCTAssertEqual(effects.state.onlineBattleHolds, [old], "visiting this server must not lose the other room's result")
+        XCTAssertEqual(session.presentation.blockedEntryIDs, ["instance-one"], "nor enter its pokemon twice")
+        XCTAssertEqual(effects.applications, 0)
+        await http.route("/v1/battles", try JSONEncoder().encode(OnlineBattlePage(battles: [final], before: nil)))
+        await session.configureServer(elsewhere)
+        XCTAssertEqual(effects.applications, 1)
+        XCTAssertEqual(effects.state.onlineBattleHolds, [])
+        await session.refresh()
+        // The first server has no such room; only the harness shares one list between addresses.
+        await http.route("/v1/battles", try JSONEncoder().encode(OnlineBattlePage(battles: [], before: nil)))
+        await session.configureServer(Self.savedServer)
+        await http.route("/v1/battles", try JSONEncoder().encode(OnlineBattlePage(battles: [final], before: nil)))
+        await session.configureServer(elsewhere)
+        XCTAssertEqual(effects.applications, 1, "a receipt keeps it to one application however often the address changes")
+    }
+}
+
+// MARK: - Review B, F3 item 2: an account connected from another save
+
+extension OnlineBattleSessionTests {
+    /// A healthy entry this save owns that no fixture room mentions.
+    private func entryHere(from room: OnlineBattleView, id: String = "instance-here") throws -> PracticeCandidate {
+        let template = try XCTUnwrap(room.p1.snapshot)
+        return .init(id: id, name: template.publicInfo.species,
+                     snapshot: .init(schemaVersion: 1, instanceID: id, engineHash: BattleEngineManifest.sha256, rulesVersion: BattleSnapshot.rules,
+                                     policyVersion: BattleSnapshot.policy, set: template.set, publicInfo: template.publicInfo),
+                     blockedReason: nil)
+    }
+    private func seat(_ player: OnlineBattlePlayer, snapshot: OnlineBattleSnapshot?) throws -> [String: Any] {
+        var value = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(player)) as? [String: Any])
+        value["snapshot"] = try snapshot.map { try JSONSerialization.jsonObject(with: JSONEncoder().encode($0)) } ?? NSNull()
+        return value
+    }
+    private func members(_ http: SessionHTTP, _ peers: [OnlineBattleMember]) async throws {
+        await http.route("/v1/group", try JSONEncoder().encode(OnlineBattleGroupMembers(group: account.group, members: peers)))
+    }
+
+    func testACompletedBattleFromAnotherSaveStaysARecordAndChallengesStillGoOut() async throws {
+        let final = try battle(), here = try entryHere(from: final)
+        let effects = SessionEffects()
+        let (session, http, _, _) = try await setup([final], effects: effects, rosterOverride: [here])
+        try await members(http, [peer()])
+        await session.bootstrap()
+        XCTAssertNil(session.presentation.notice, "a finished battle of another save is not a failure")
+        XCTAssertEqual(effects.applications, 0); XCTAssertEqual(effects.effectCalls, 0)
+        XCTAssertTrue(effects.state.battleHealth.isEmpty); XCTAssertTrue(effects.state.onlineBattleReceipts.isEmpty)
+        XCTAssertEqual(session.presentation.historyBattles.map(\.battleId), [final.battleId], "it stays in the history")
+        XCTAssertEqual(session.presentation.phase, .lobby)
+
+        await session.perform(.selectOpponent("trainer-two"))
+        XCTAssertTrue(session.presentation.canChallenge)
+        let sent = OnlineBattleSnapshot(snapshot: try XCTUnwrap(here.snapshot), hp: try XCTUnwrap(session.presentation.entryHP[here.id]))
+        let created = try changed(pendingRoom("bt_new_challenge"), ["p1": seat(final.p1, snapshot: sent), "p2": seat(final.p2, snapshot: nil)])
+        await http.queue("POST /v1/battles", [try response(created)])
+        await session.perform(.challenge)
+        let posts = await http.requests.filter { $0.httpMethod == "POST" && $0.url?.path == "/v1/battles" }.count
+        XCTAssertEqual(posts, 1, "the challenge reaches the server")
+        XCTAssertNil(session.presentation.notice)
+        XCTAssertEqual(session.presentation.room?.battleId, "bt_new_challenge")
+        XCTAssertEqual(effects.state.onlineBattleHolds.map(\.instanceID), [here.id], "the new room holds its own entry")
+    }
+    func testAnIncomingChallengeStillArrivesAndCanBeAcceptedNextToARecordFromAnotherSave() async throws {
+        let final = try battle(), here = try entryHere(from: final)
+        let incoming = try changed(pendingRoom("bt_incoming"), ["p1": seat(final.p1, snapshot: final.p1.snapshot), "p2": seat(final.p2, snapshot: nil)])
+        let (session, http, _, _) = try await setup([final, incoming], trainer: "trainer-two", rosterOverride: [here])
+        await session.bootstrap()
+        XCTAssertNil(session.presentation.notice)
+        XCTAssertEqual(session.presentation.activeBattles.map(\.battleId), ["bt_incoming"])
+        XCTAssertEqual(session.presentation.room?.battleId, "bt_incoming")
+        XCTAssertTrue(session.presentation.canAccept)
+        let sent = OnlineBattleSnapshot(snapshot: try XCTUnwrap(here.snapshot), hp: try XCTUnwrap(session.presentation.entryHP[here.id]))
+        let accepted = try changed(incoming, ["state": "ACCEPTED", "revision": incoming.revision + 1, "p2": seat(final.p2, snapshot: sent)])
+        await http.route("/v1/battles/bt_incoming/accept", try JSONEncoder().encode(accepted))
+        await session.perform(.accept("bt_incoming"))
+        let accepts = await http.count("/v1/battles/bt_incoming/accept"); XCTAssertEqual(accepts, 1)
+        XCTAssertEqual(session.presentation.room?.state, .accepted)
+    }
+    func testARunningBattleFromAnotherSaveIsSetAsideWithItsReasonAndOnlyThatOne() async throws {
+        let clock = SessionClock(), final = try battle(), here = try entryHere(from: final)
+        let running = try changed(final, ["battleId": "bt_elsewhere", "state": "RUNNING", "result": NSNull(), "roundSeq": 1, "deadline": 30000, "journal": []])
+        let incoming = try changed(pendingRoom("bt_incoming"), ["p1": seat(final.p2, snapshot: final.p2.snapshot), "p2": seat(final.p1, snapshot: nil)])
+        let effects = SessionEffects()
+        let (session, http, _, _) = try await setup([running, incoming], effects: effects, rosterOverride: [here], clock: .init(now: { clock.now() }, sleep: { _ in }))
+        await session.bootstrap()
+        XCTAssertEqual(session.presentation.notice, copy.onlineOtherSaveBattle)
+        XCTAssertEqual(session.presentation.activeBattles.map(\.battleId), ["bt_incoming"], "the rest of the list is still read")
+        XCTAssertEqual(session.presentation.room?.battleId, "bt_incoming")
+        XCTAssertEqual(effects.effectCalls, 0); XCTAssertEqual(effects.state.onlineBattleHolds, [])
+        XCTAssertTrue(effects.state.battleHealth.isEmpty)
+        // Its deadline has passed, yet nobody here can play it: no reads for it, no recovery loop.
+        for _ in 0..<30 { clock.advance(1); await session.tick() }
+        let reads = await http.count("/v1/battles/bt_elsewhere"); XCTAssertEqual(reads, 0)
+        // Closing the banner sticks; a later read does not bring it back for the same room.
+        session.presentation.send(.dismissNotice)
+        await session.refresh()
+        XCTAssertNil(session.presentation.notice)
+        // A person going back to the save that has it picks the room up again.
+        let voided = try changed(running, ["state": "VOID", "deadline": NSNull()])
+        await http.route("/v1/battles", try JSONEncoder().encode(OnlineBattlePage(battles: [voided, incoming], before: nil)))
+        await session.refresh()
+        XCTAssertEqual(session.presentation.historyBattles.map(\.battleId), ["bt_elsewhere"])
+        XCTAssertEqual(effects.effectCalls, 0)
+    }
+    func testARoomSetAsideComesBackOnceTheSaveHasItsPokemon() async throws {
+        let final = try battle()
+        let running = try changed(final, ["state": "RUNNING", "result": NSNull(), "roundSeq": 1, "journal": []])
+        var owned: [PracticeCandidate] = [try entryHere(from: final)]
+        let http = SessionHTTP(), effects = SessionEffects(), connection = SessionConnection()
+        await http.route("/v1/me", try JSONEncoder().encode(account))
+        await http.route("/v1/group", try JSONEncoder().encode(OnlineBattleGroupMembers(group: account.group, members: [])))
+        await http.route("/v1/battles", try JSONEncoder().encode(OnlineBattlePage(battles: [running], before: nil)))
+        let session = OnlineBattleSession(settings: .init(profileID: UUID().uuidString, serverURL: "https://battle.example.invalid"), credentials: SessionCredentials(), transport: http, effects: effects,
+                                          engineFactory: { try BattleEngine(url: self.engineURL) }, connectionFactory: { _ in connection }, rosterProvider: { owned }, automaticTicks: false)
+        await session.bootstrap()
+        XCTAssertEqual(session.presentation.activeBattles, [])
+        owned += roster(final)
+        await session.refresh()
+        XCTAssertEqual(session.presentation.room?.battleId, running.battleId)
+        XCTAssertEqual(session.presentation.phase, .arena)
+        XCTAssertEqual(effects.state.onlineBattleHolds.map(\.instanceID), ["instance-one"])
+    }
+    func testACompletedBattleFromAnotherSaveAppliesOnceTheSaveHasItsPokemonAndOnlyOnce() async throws {
+        let final = try battle()
+        var owned: [PracticeCandidate] = []
+        let http = SessionHTTP(), effects = SessionEffects(), connection = SessionConnection()
+        await http.route("/v1/me", try JSONEncoder().encode(account))
+        await http.route("/v1/group", try JSONEncoder().encode(OnlineBattleGroupMembers(group: account.group, members: [])))
+        await http.route("/v1/battles", try JSONEncoder().encode(OnlineBattlePage(battles: [final], before: nil)))
+        let session = OnlineBattleSession(settings: .init(profileID: UUID().uuidString, serverURL: "https://battle.example.invalid"), credentials: SessionCredentials(), transport: http, effects: effects,
+                                          engineFactory: { try BattleEngine(url: self.engineURL) }, connectionFactory: { _ in connection }, rosterProvider: { owned }, automaticTicks: false)
+        await session.bootstrap()
+        XCTAssertEqual(effects.applications, 0, "no receipt is written for a record, so nothing is lost if the pokemon shows up")
+        owned = roster(final)
+        await session.refresh(); await session.refresh()
+        XCTAssertEqual(effects.applications, 1)
+    }
+    /// The same pokemon, in the state this save knows: fainted here, or already in another room here.
+    func testARoomThisSavesPokemonCannotEnterIsSetAsideToo() async throws {
+        for failure in [OnlineBattleEffectError.faintedIndividual, .individualHeld] {
+            let final = try battle(), effects = SessionEffects()
+            let running = try changed(final, ["battleId": "bt_elsewhere", "state": "RUNNING", "result": NSNull(), "roundSeq": 1, "journal": []])
+            let incoming = try changed(pendingRoom("bt_incoming"), ["p1": seat(final.p2, snapshot: final.p2.snapshot), "p2": seat(final.p1, snapshot: nil)])
+            effects.holdFailure = failure
+            let (session, _, _, _) = try await setup([running, incoming], effects: effects)
+            await session.bootstrap()
+            XCTAssertEqual(session.presentation.notice, copy.onlineOtherSaveBattle, "\(failure)")
+            XCTAssertEqual(session.presentation.activeBattles.map(\.battleId), ["bt_incoming"], "\(failure)")
+            XCTAssertEqual(effects.effectCalls, 0)
+        }
+    }
+    func testAnUntrustedLedgerStillStopsTheRead() async throws {
+        let final = try battle(), effects = SessionEffects()
+        let running = try changed(final, ["state": "RUNNING", "result": NSNull(), "roundSeq": 1, "journal": []])
+        effects.holdFailure = .untrustedLedger
+        let (session, _, _, _) = try await setup([running], effects: effects)
+        await session.bootstrap()
+        XCTAssertEqual(session.presentation.notice, copy.onlineErrorGeneric, "nothing may be entered on a ledger that cannot be trusted")
+    }
+    func testAHoldOnACompletedRecordIsLetGoWithoutAnyEffect() async throws {
+        let final = try battle(), effects = SessionEffects()
+        effects.state.onlineBattleHolds = [try hold(battleID: final.battleId)]
+        let (session, _, _, _) = try await setup([final], effects: effects, rosterOverride: [])
+        await session.bootstrap()
+        XCTAssertEqual(effects.state.onlineBattleHolds, [], "nothing else will ever release it")
+        XCTAssertEqual(effects.effectCalls, 0)
+    }
+    func testOpeningARecordFromAnotherSaveSaysNothingChanged() async throws {
+        let final = try battle()
+        let (session, _, _, effects) = try await setup([final], rosterOverride: [])
+        await session.bootstrap()
+        await session.perform(.openBattle(final.battleId))
+        XCTAssertEqual(session.presentation.result?.title, copy.onlineOtherSaveResultTitle)
+        XCTAssertEqual(session.presentation.result?.detail, copy.onlineOtherSaveResultDetail)
+        XCTAssertEqual(session.presentation.result?.hpApplied, false)
+        XCTAssertEqual(session.presentation.result?.xpAwarded, 0)
+        XCTAssertEqual(effects.effectCalls, 0)
+    }
+}
+
+// MARK: - Review B, F3 item 3: why a code did not work
+
+extension OnlineBattleSessionTests {
+    private func codeNotice(_ action: OnlineBattleUIAction, path: String, code: String, status: Int) async throws -> String {
+        let credentials = SessionCredentials(); await credentials.setKey(nil)
+        let (session, http, _, _) = try await setup(credential: credentials)
+        await http.queue(path, [.init(status: status, body: errorBody(code))])
+        await session.bootstrap(); await session.perform(action)
+        XCTAssertEqual(session.presentation.phase, .setup)
+        return try XCTUnwrap(session.presentation.notice, code)
+    }
+    func testEveryRefusedCodeSaysItsOwnCauseAndNextStep() async throws {
+        let recover = OnlineBattleUIAction.recover(code: "synthetic"), reconnect = OnlineBattleUIAction.reconnect(code: "synthetic")
+        let cases: [(OnlineBattleUIAction, String, String, Int, String)] = [
+            (recover, "/v1/recover", "invalid_code", 404, "최근"),
+            (reconnect, "/v1/reconnect", "invalid_code", 404, "최근"),
+            (reconnect, "/v1/reconnect", "code_used", 410, "이미"),
+            (reconnect, "/v1/reconnect", "code_expired", 410, "시간"),
+            (recover, "/v1/recover", "account_left", 403, "초대코드"),
+        ]
+        var seen = Set<String>()
+        for (action, path, code, status, part) in cases {
+            let notice = try await codeNotice(action, path: path, code: code, status: status)
+            XCTAssertNotEqual(notice, copy.onlineErrorGeneric, code)
+            XCTAssertTrue(notice.contains(part), notice)
+            seen.insert(notice)
+        }
+        XCTAssertEqual(seen.count, 4, "invalid_code reads the same on both forms; the other three differ")
+    }
+    /// The same save on a second Mac: this app holds nothing, but the server still has the pokemon in a room.
+    func testAChallengeWithAPokemonBusyOnTheServerSaysSoAndNotTheConnection() async throws {
+        let (session, http, _, _) = try await setup()
+        try await members(http, [peer()])
+        await session.bootstrap()
+        await session.perform(.selectOpponent("trainer-two"))
+        await http.queue("POST /v1/battles", [.init(status: 409, body: errorBody("instance_busy"))])
+        await session.perform(.challenge)
+        XCTAssertEqual(session.presentation.notice, copy.onlineServerError(.init(code: .instanceBusy, retryAfter: nil)))
+        XCTAssertNotEqual(session.presentation.notice, copy.onlineErrorGeneric)
+    }
+    func testTheRetryWaitDoublesFromFiveSecondsUpToACap() {
+        var backoff = OnlineBattleRetryBackoff()
+        XCTAssertEqual((0..<9).map { _ in backoff.nextDelay() }, [5, 10, 20, 40, 80, 160, 300, 300, 300])
+        for _ in 0..<5000 { XCTAssertEqual(backoff.nextDelay(), 300) }
+    }
+    func testRefusedCodesHaveEnglishToo() {
+        for code in [OnlineBattleServerCode.invalidCode, .codeUsed, .codeExpired, .accountLeft, .instanceBusy] {
+            let text = L(.en).onlineServerError(.init(code: code, retryAfter: nil))
+            XCTAssertNotNil(text, code.rawValue)
+            XCTAssertFalse(text?.contains { $0.isHangul } ?? true, code.rawValue)
+        }
+    }
+    func testTheRevokedLineCoversAMemberWhoWasRemoved() {
+        let line = copy.onlineConnectionLine(.connection(.revoked))
+        XCTAssertTrue(line?.contains("초대코드") == true, line ?? "")
+        XCTAssertTrue(line?.contains("내보내") == true, line ?? "")
+        XCTAssertTrue(L(.en).onlineConnectionLine(.connection(.revoked))?.contains("invite") == true)
+    }
+    func testTheRecoveryScreenSaysTheOldCodeStoppedWorking() {
+        XCTAssertTrue(copy.onlineRecoveryHint.contains("이전 코드는 이제 쓸 수 없어요"), copy.onlineRecoveryHint)
+        XCTAssertTrue(L(.en).onlineRecoveryHint.contains("previous code"), L(.en).onlineRecoveryHint)
+    }
+    func testOnlyABuildWhoseServerMovedSaysSoOnTheForm() async throws {
+        let cases: [(stored: String?, embedded: String?, moved: Bool)] = [
+            ("https://old.example.invalid", "https://new.example.invalid", true),
+            ("https://new.example.invalid/", "https://new.example.invalid", false),
+            (nil, "https://new.example.invalid", false),
+            ("https://old.example.invalid", nil, false),
+        ]
+        for value in cases {
+            let settings = OnlineBattleSettings(profileID: UUID().uuidString, serverURL: value.stored, embeddedServerURL: value.embedded)
+            XCTAssertEqual(settings.serverMovedFromStored, value.moved, "\(value)")
+            let connection = SessionConnection(), effects = SessionEffects()
+            let session = OnlineBattleSession(settings: settings, credentials: SessionCredentials(), transport: SessionHTTP(), effects: effects,
+                                              engineFactory: { try BattleEngine(url: self.engineURL) }, connectionFactory: { _ in connection }, automaticTicks: false, enabled: false)
+            XCTAssertEqual(session.presentation.serverMoved, value.moved, "\(value)")
+            if value.embedded != nil {
+                XCTAssertFalse(session.presentation.setupInput.server.contains("old."), "the old address never reaches the form")
+                XCTAssertFalse(session.presentation.serverAddress.contains("old."))
+            }
+        }
+    }
+    func testTheMovedLineNamesNoAddress() {
+        for l in [copy, L(.en)] {
+            XCTAssertFalse(l.onlineServerMoved.contains("http"))
+            XCTAssertTrue(l.onlineServerMoved.contains("초대코드") || l.onlineServerMoved.contains("invite code"))
+        }
+    }
+}
+private extension Character {
+    var isHangul: Bool { unicodeScalars.contains { (0xAC00...0xD7A3).contains($0.value) } }
+}
+
+// MARK: - Review B, F3 item 4: request counts while reads keep failing
+
+extension OnlineBattleSessionTests {
+    private func runningRoom(deadline: Double = 9_000_000_000_000) throws -> OnlineBattleView {
+        try changed(battle(), ["state": "RUNNING", "result": NSNull(), "roundSeq": 1, "deadline": deadline, "journal": []])
+    }
+    private func failFullReads(_ http: SessionHTTP) async {
+        await http.route("/v1/battles", errorBody("internal"), status: 500)
+    }
+    private func requestCount(_ http: SessionHTTP) async -> Int { await http.requests.count }
+    private func run(_ session: OnlineBattleSession, _ clock: SessionClock, seconds: Int, step: Double = 1) async {
+        for _ in 0..<Int(Double(seconds) / step) { clock.advance(step); await session.tick() }
+    }
+
+    func testAFullReadThatKeepsFailingBacksOffToACap() async throws {
+        let clock = SessionClock()
+        let (session, http, _, _) = try await setup([try runningRoom()], clock: .init(now: { clock.now() }, sleep: { _ in }))
+        await session.bootstrap()
+        await failFullReads(http)
+        await session.refresh()
+        var before = await requestCount(http)
+        await run(session, clock, seconds: 60)
+        var after = await requestCount(http)
+        // me, group, battles at +5, +15 and +35 seconds. It used to be 36 requests in this minute.
+        XCTAssertEqual(after - before, 9, "60 seconds of failures")
+        before = after
+        await run(session, clock, seconds: 86_400, step: 5)
+        after = await requestCount(http)
+        // It used to be 51,840 requests a day.
+        XCTAssertLessThanOrEqual(after - before, 3 * (86_400 / 300 + 10), "a day of failures")
+        before = after
+        await run(session, clock, seconds: 305, step: 5)
+        after = await requestCount(http)
+        XCTAssertGreaterThanOrEqual(after - before, 3, "the cap is a few minutes: it still retries")
+    }
+    func testASuccessfulReadEndsTheBackoffAndArmsNothing() async throws {
+        let clock = SessionClock(), room = try runningRoom()
+        let (session, http, _, _) = try await setup([room], clock: .init(now: { clock.now() }, sleep: { _ in }))
+        await session.bootstrap()
+        await failFullReads(http)
+        await session.refresh()
+        await run(session, clock, seconds: 120)
+        try await list(http, [room])
+        await run(session, clock, seconds: 400, step: 5)
+        XCTAssertNil(session.presentation.notice, "the retry got through")
+        let settled = await requestCount(http)
+        await run(session, clock, seconds: 600, step: 5)
+        let idle = await requestCount(http); XCTAssertEqual(idle, settled, "a good read owes no other read")
+        // The next failure starts over at five seconds.
+        await failFullReads(http)
+        await session.refresh()
+        let failed = await requestCount(http)
+        clock.advance(4.9); await session.tick()
+        var now = await requestCount(http); XCTAssertEqual(now, failed)
+        clock.advance(0.1); await session.tick()
+        now = await requestCount(http); XCTAssertEqual(now, failed + 3)
+    }
+    func testOpeningThePopoverRetriesAtOnceAndStartsTheBackoffOver() async throws {
+        let clock = SessionClock()
+        let (session, http, _, _) = try await setup([try runningRoom()], clock: .init(now: { clock.now() }, sleep: { _ in }))
+        await session.bootstrap()
+        await failFullReads(http)
+        await session.refresh()
+        await run(session, clock, seconds: 70)
+        var before = await requestCount(http)
+        clock.advance(1); await session.tick()
+        var now = await requestCount(http); XCTAssertEqual(now, before, "the next retry is still far off")
+        await session.perform(.setPopoverVisible(true))
+        await session.tick()
+        now = await requestCount(http); XCTAssertEqual(now, before + 3, "a person looked")
+        before = now
+        clock.advance(5); await session.tick()
+        now = await requestCount(http); XCTAssertEqual(now, before + 3, "back to five seconds")
+    }
+    func testAWakeHintRetriesAtOnce() async throws {
+        let clock = SessionClock()
+        let (session, http, _, _) = try await setup([try runningRoom()], clock: .init(now: { clock.now() }, sleep: { _ in }))
+        await session.bootstrap()
+        await failFullReads(http)
+        await session.refresh()
+        await run(session, clock, seconds: 70)
+        let before = await requestCount(http)
+        await session.reconnectHint(.wake)
+        await session.tick()
+        let now = await requestCount(http); XCTAssertEqual(now, before + 3)
+    }
+    func testAPersonsOwnRefreshStartsTheBackoffOver() async throws {
+        let clock = SessionClock()
+        let (session, http, _, _) = try await setup([try runningRoom()], clock: .init(now: { clock.now() }, sleep: { _ in }))
+        await session.bootstrap()
+        await failFullReads(http)
+        await session.refresh()
+        await run(session, clock, seconds: 70)
+        await session.perform(.refresh)
+        var before = await requestCount(http)
+        clock.advance(5); await session.tick()
+        var now = await requestCount(http); XCTAssertEqual(now, before + 3)
+        before = now
+        clock.advance(5); await session.tick()
+        now = await requestCount(http); XCTAssertEqual(now, before, "then it grows again")
+    }
+    /// The same bytes fail the same way, however often they are read. Only a person, or news, is worth another read.
+    func testAResultThatCannotVerifyIsNotReadAgainOnItsOwn() async throws {
+        let clock = SessionClock(), running = try runningRoom()
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(battle(1))) as? [String: Any])
+        var result = object["result"] as! [String: Any]; result["logHash"] = "tampered"; object["result"] = result
+        let tampered = try JSONDecoder().decode(OnlineBattleView.self, from: JSONSerialization.data(withJSONObject: object))
+        let (session, http, _, effects) = try await setup([running], clock: .init(now: { clock.now() }, sleep: { _ in }))
+        await session.bootstrap()
+        try await list(http, [running, tampered])
+        await session.refresh()
+        XCTAssertEqual(session.presentation.notice, copy.onlineErrorResultUnverified)
+        var before = await requestCount(http)
+        await run(session, clock, seconds: 600, step: 5)
+        var now = await requestCount(http); XCTAssertEqual(now, before, "ten minutes of the same refusal cost nothing")
+        await session.perform(.setPopoverVisible(true))
+        await session.tick()
+        now = await requestCount(http); XCTAssertEqual(now, before + 3, "opening the popover asks once")
+        before = now
+        await run(session, clock, seconds: 600, step: 5)
+        now = await requestCount(http); XCTAssertEqual(now, before)
+        XCTAssertEqual(effects.effectCalls, 0)
+    }
+    func testABattleReadThatKeepsFailingBacksOff() async throws {
+        let clock = SessionClock(), room = try runningRoom(deadline: 30000)
+        let (session, http, _, _) = try await setup([room], clock: .init(now: { clock.now() }, sleep: { _ in }))
+        await session.bootstrap()
+        await http.route("/v1/battles/\(room.battleId)", errorBody("internal"), status: 500)
+        await run(session, clock, seconds: 60)
+        // +1, +6, +16, +36 seconds; +76 is outside. It used to be every five seconds, whichever timer got there first.
+        var reads = await http.count("/v1/battles/\(room.battleId)"); XCTAssertEqual(reads, 4)
+        await run(session, clock, seconds: 86_400, step: 5)
+        reads = await http.count("/v1/battles/\(room.battleId)")
+        XCTAssertLessThanOrEqual(reads, 86_400 / 300 + 12)
+    }
+    func testABattleReadThatCannotVerifyIsNotReadAgainOnItsOwn() async throws {
+        let clock = SessionClock(), final = try battle(), room = try runningRoom(deadline: 30000)
+        let gap = try changed(room, ["roundSeq": 2, "journal": JSONSerialization.jsonObject(with: JSONEncoder().encode(Array(final.journal.prefix(2).dropFirst())))])
+        let (session, http, _, _) = try await setup([room], clock: .init(now: { clock.now() }, sleep: { _ in }))
+        await session.bootstrap()
+        await http.route("/v1/battles/\(room.battleId)", try JSONEncoder().encode(gap))
+        clock.advance(1); await session.tick()
+        let reads = await http.count("/v1/battles/\(room.battleId)")
+        XCTAssertGreaterThan(reads, 0)
+        await run(session, clock, seconds: 600, step: 5)
+        var after = await http.count("/v1/battles/\(room.battleId)"); XCTAssertEqual(after, reads)
+        await session.perform(.refresh)
+        await session.tick()
+        after = await http.count("/v1/battles/\(room.battleId)")
+        XCTAssertGreaterThanOrEqual(after, reads, "a person may always ask")
+    }
+    func testADeadlineThatReadsFineStaysOnItsFiveSecondBeat() async throws {
+        let clock = SessionClock(), room = try runningRoom(deadline: 30000)
+        let (session, http, _, _) = try await setup([room], clock: .init(now: { clock.now() }, sleep: { _ in }))
+        await session.bootstrap()
+        await http.route("/v1/battles/\(room.battleId)", try JSONEncoder().encode(room))
+        await run(session, clock, seconds: 20)
+        let reads = await http.count("/v1/battles/\(room.battleId)")
+        XCTAssertEqual(reads, 4, "+1, +6, +11, +16: a healthy match is never slowed")
+    }
+    func testAFallbackAdvanceThatKeepsFailingBacksOffButAMovedRoomStartsOver() async throws {
+        let final = try battle(), clock = SessionClock()
+        let first = try changed(final, ["state": "RUNNING", "result": NSNull(), "roundSeq": 1,
+            "journal": JSONSerialization.jsonObject(with: JSONEncoder().encode(Array(final.journal.prefix(1))))])
+        let (session, http, _, _) = try await setup([first], trainer: "trainer-two", clock: .init(now: { clock.now() }, sleep: { _ in }))
+        let path = "/v1/battles/\(final.battleId)"
+        await http.route(path + "/advance", errorBody("internal"), status: 500)
+        await http.route(path, try JSONEncoder().encode(first))
+        await session.bootstrap()
+        await run(session, clock, seconds: 120)
+        // +2, then a 5/10/20/40 second wait and +2 before each next try. It used to be every seven seconds.
+        let advances = await http.count(path + "/advance")
+        XCTAssertLessThanOrEqual(advances, 6)
+        XCTAssertGreaterThanOrEqual(advances, 3)
+        let opened = try changed(first, ["roundSeq": 2, "deadline": clock.now() * 1000 + 30000])
+        await http.route(path, try JSONEncoder().encode(opened))
+        await run(session, clock, seconds: 300, step: 5)
+        XCTAssertEqual(session.presentation.room?.roundSeq, 2, "the next good read still moves the match")
+    }
+    func testARoomThatMovedStartsItsBattleBackoffOver() async throws {
+        let final = try battle(), clock = SessionClock(), room = try runningRoom(deadline: 30000)
+        let path = "/v1/battles/\(room.battleId)"
+        let (session, http, _, _) = try await setup([room], clock: .init(now: { clock.now() }, sleep: { _ in }))
+        await session.bootstrap()
+        await http.route(path, errorBody("internal"), status: 500)
+        await run(session, clock, seconds: 120)
+        // The next round opens and its deadline passes too. It is a new failure, not the old one going on.
+        let moved = try changed(room, ["roundSeq": 2, "deadline": 40000, "journal": JSONSerialization.jsonObject(with: JSONEncoder().encode(Array(final.journal.prefix(1))))])
+        await http.route(path, try JSONEncoder().encode(moved))
+        await run(session, clock, seconds: 300)
+        XCTAssertEqual(session.presentation.room?.roundSeq, 2)
+        await http.route(path, errorBody("internal"), status: 500)
+        clock.advance(5); await session.tick()
+        let before = await http.count(path)
+        clock.advance(4.9); await session.tick()
+        var after = await http.count(path); XCTAssertEqual(after, before)
+        clock.advance(0.1); await session.tick()
+        after = await http.count(path); XCTAssertEqual(after, before + 1, "five seconds, as for any first failure")
+    }
+    func testAStageDoesNotPlayBehindTheHostPanel() async throws {
+        let (session, http) = try await hostSession(members: [peer()])
+        let final = try battle()
+        let running = try changed(final, ["state": "RUNNING", "result": NSNull(), "roundSeq": 1, "journal": []])
+        try await list(http, [running])
+        await session.perform(.setOnlineScreenVisible(true))
+        await session.refresh()
+        await session.perform(.backToLobby)
+        await session.perform(.host(.open))
+        await http.route("/v1/invites", issuedInvite())
+        await session.perform(.host(.createInvite(.group)))
+        let played = try changed(final, ["state": "RUNNING", "result": NSNull(), "roundSeq": 2,
+            "journal": JSONSerialization.jsonObject(with: JSONEncoder().encode(Array(final.journal.prefix(1))))])
+        try await list(http, [played])
+        await session.perform(.followAttention(running.battleId))
+        await session.refresh()
+        XCTAssertTrue(session.presentation.showsHostPanel)
+        XCTAssertEqual(session.presentation.room?.battleId, running.battleId)
+        XCTAssertEqual(session.stagingHeldBattleIDs(), [], "nobody can see it, so nothing is held for it")
+    }
+    func testFirstFallbackAdvanceIsNotDelayed() async throws {
+        let final = try battle(), clock = SessionClock()
+        let first = try changed(final, ["state": "RUNNING", "result": NSNull(), "roundSeq": 1,
+            "journal": JSONSerialization.jsonObject(with: JSONEncoder().encode(Array(final.journal.prefix(1))))])
+        let (session, http, _, _) = try await setup([first], trainer: "trainer-two", clock: .init(now: { clock.now() }, sleep: { _ in }))
+        let path = "/v1/battles/\(final.battleId)/advance"
+        await http.route(path, try JSONEncoder().encode(first))
+        await session.bootstrap()
+        clock.advance(1.99); await session.tick()
+        var count = await http.count(path); XCTAssertEqual(count, 0)
+        clock.advance(0.01); await session.tick()
+        count = await http.count(path); XCTAssertEqual(count, 1)
+    }
+}
+
+// MARK: - Review B, F3 item 5: a move for a round that already closed
+
+extension OnlineBattleSessionTests {
+    func testAMoveForARoundThatAlreadyClosedSaysTheTurnPassedInsteadOfBlamingTheConnection() async throws {
+        let final = try battle(), room = try runningRoom()
+        let (session, http, _, _) = try await setup([room])
+        await session.bootstrap()
+        XCTAssertEqual(session.presentation.request?.kind, "move")
+        let moved = try changed(room, ["roundSeq": 2, "journal": JSONSerialization.jsonObject(with: JSONEncoder().encode(Array(final.journal.prefix(1))))])
+        try await list(http, [moved])
+        await http.route("/v1/battles/\(room.battleId)/choices", errorBody("stale_round"), status: 409)
+        let reads = await http.count("/v1/me")
+        await session.perform(.chooseMove(1))
+        let after = await http.count("/v1/me"); XCTAssertEqual(after, reads + 1, "the room is read again")
+        XCTAssertEqual(session.presentation.notice, copy.onlineErrorRoundPassed)
+        XCTAssertEqual(session.presentation.room?.roundSeq, 2)
+        XCTAssertFalse(session.presentation.choiceSubmitted)
+        await session.refresh()
+        XCTAssertEqual(session.presentation.notice, copy.onlineErrorRoundPassed, "a background read must not wipe it unread")
+    }
+}
+
+// MARK: - Review B, F3 item 6: a signal in the last turn of a read
+
+extension OnlineBattleSessionTests {
+    func testASignalThatLandsJustAfterTheLastReadStillGetsARead() async throws {
+        let (session, http, _, _) = try await setup()
+        await session.bootstrap()
+        let before = await http.count("/v1/me")
+        await http.suspendNext("/v1/me")
+        let owner = Task { await session.refresh() }
+        await http.waitUntilBlocked()
+        // A second waiter on the same read wakes in the same turn the owner does, before the owner clears its task.
+        let late = Task { await session.refresh(); session.requestRefresh() }
+        await Task.yield(); await Task.yield()
+        let group = try JSONEncoder().encode(account)
+        await http.resume(.init(status: 200, body: group))
+        await owner.value; await late.value
+        var reads = await http.count("/v1/me")
+        for _ in 0..<2000 where reads < before + 2 {
+            await Task.yield()
+            reads = await http.count("/v1/me")
+        }
+        XCTAssertEqual(reads, before + 2, "the signal asked for one more read")
+    }
+}
+
+// MARK: - Review B, F3 item 7: a code nobody has copied yet
+
+extension OnlineBattleSessionTests {
+    func testFollowingAnAlertKeepsAnUncopiedCodeAndMovesTheRoomBehindIt() async throws {
+        let (session, http) = try await hostSession(members: [peer()])
+        let room = try pendingRoom()
+        try await list(http, [room])
+        await session.refresh()
+        await session.perform(.dismissResult)
+        await session.perform(.host(.open))
+        await http.route("/v1/invites", issuedInvite())
+        await session.perform(.host(.createInvite(.group)))
+        XCTAssertEqual(session.presentation.host.secret?.code, "ABCDEFGHJKMN")
+        await session.perform(.followAttention(room.battleId))
+        XCTAssertEqual(session.presentation.host.secret?.code, "ABCDEFGHJKMN", "this was the only copy")
+        XCTAssertTrue(session.presentation.showsHostPanel)
+        XCTAssertTrue(session.presentation.hostSecretShowing, "the popover stays pinned for it")
+        XCTAssertEqual(session.presentation.room?.battleId, room.battleId, "the room is ready behind it")
+        session.presentation.send(.host(.close))
+        XCTAssertFalse(session.presentation.showsHostPanel)
+        XCTAssertEqual(session.presentation.phase, .room)
+    }
+    func testFollowingAnAlertWithNoCodeOnScreenStillClosesThePanel() async throws {
+        let (session, http) = try await hostSession(members: [peer()])
+        let room = try pendingRoom()
+        try await list(http, [room])
+        await session.refresh()
+        await session.perform(.dismissResult)
+        await session.perform(.host(.open))
+        await session.perform(.followAttention(room.battleId))
+        XCTAssertFalse(session.presentation.showsHostPanel)
+        XCTAssertEqual(session.presentation.room?.battleId, room.battleId)
+    }
+}
+
+// MARK: - Review B, F3 item 8: codes left on the clipboard
+
+extension OnlineBattleSessionTests {
+    func testAWorkingCodeIsOfferedForForgettingOnlyAfterItsKeyIsSaved() async throws {
+        let body = try JSONSerialization.data(withJSONObject: ["trainer": JSONSerialization.jsonObject(with: JSONEncoder().encode(account.trainer)), "group": JSONSerialization.jsonObject(with: JSONEncoder().encode(account.group)), "accessKey": "rotated-key", "recoveryCode": "new-code"])
+        let actions: [(OnlineBattleUIAction, String, String)] = [(.join(inviteCode: "ABCDEFGHJKMN", email: "synthetic"), "/v1/join", "ABCDEFGHJKMN"),
+                                                                 (.recover(code: "synthetic-recovery"), "/v1/recover", "synthetic-recovery"),
+                                                                 (.reconnect(code: "synthetic-reconnect"), "/v1/reconnect", "synthetic-reconnect")]
+        for (action, path, code) in actions {
+            let credentials = SessionCredentials(); await credentials.setKey(nil)
+            let (session, http, _, _) = try await setup(credential: credentials)
+            var used: [String] = []
+            session.onSetupCodeUsed = { used.append($0) }
+            await session.bootstrap()
+            await http.queue(path, [.init(status: 404, body: errorBody("invalid_code"))])
+            await session.perform(action)
+            XCTAssertEqual(used, [], "a refused code may still be wanted")
+            await http.route(path, body)
+            await credentials.setFailure(true)
+            await session.perform(action)
+            XCTAssertEqual(used, [], "the key is not safe yet")
+            await credentials.setFailure(false)
+            await session.perform(.retryCredentialSave)
+            XCTAssertEqual(used, [code])
+        }
+    }
+}
+// END F3 tests
