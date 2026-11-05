@@ -1243,7 +1243,7 @@ final class OnlineBattleSessionTests: XCTestCase {
         let running = try changed(final, ["state": "RUNNING", "result": NSNull(), "roundSeq": 1, "journal": []])
         let (session, http, _, _) = try await setup([ready])
         await http.route("/v1/battles/\(final.battleId)/start", try JSONEncoder().encode(running))
-        await session.bootstrap(); await session.perform(.openBattle(final.battleId)); await session.perform(.prepareBattle)
+        await session.bootstrap(); await session.perform(.openBattle(final.battleId)); await session.perform(.prepareBattle(final.battleId))
         let starts = await http.bodies("/v1/battles/\(final.battleId)/start")
         XCTAssertEqual(starts.count, 1)
         if let body = starts.first { let data = try JSONSerialization.jsonObject(with: body) as! [String: Any]; XCTAssertEqual(data["connectionId"] as? String, "connection") }
@@ -1289,7 +1289,7 @@ final class OnlineBattleSessionTests: XCTestCase {
     }
     func testAcceptConfirmDeclineCancelSendExpectedRevision() async throws {
         let final = try battle()
-        for (action, name, trainer, state) in [(OnlineBattleUIAction.accept, "accept", "trainer-two", "PENDING"), (.confirm, "confirm", "trainer-one", "ACCEPTED"), (.decline, "decline", "trainer-two", "PENDING"), (.cancel, "cancel", "trainer-one", "PENDING")] {
+        for (action, name, trainer, state) in [(OnlineBattleUIAction.accept(final.battleId), "accept", "trainer-two", "PENDING"), (.confirm(final.battleId), "confirm", "trainer-one", "ACCEPTED"), (.decline(final.battleId), "decline", "trainer-two", "PENDING"), (.cancel(final.battleId), "cancel", "trainer-one", "PENDING")] {
             let room = try changed(final, ["state": state, "config": NSNull(), "result": NSNull(), "confirmed": false, "roundSeq": 0, "journal": []])
             let (session, http, _, _) = try await setup([room], trainer: trainer)
             let updated = try changed(room, ["state": name == "decline" ? "DECLINED" : name == "cancel" ? "CANCELLED" : "ACCEPTED", "confirmed": name == "confirm"])
@@ -1318,7 +1318,7 @@ final class OnlineBattleSessionTests: XCTestCase {
         let (session, http, _, _) = try await setup([accepted])
         await http.route("/v1/battles/\(final.battleId)/ready", try JSONEncoder().encode(accepted))
         await http.route("/v1/battles/\(final.battleId)/start", try JSONEncoder().encode(running))
-        await session.bootstrap(); await session.perform(.prepareBattle)
+        await session.bootstrap(); await session.perform(.prepareBattle(final.battleId))
         await http.route("/v1/battles", try JSONEncoder().encode(OnlineBattlePage(battles: [ready], before: nil)))
         await session.refresh()
         let starts = await http.count("/v1/battles/\(final.battleId)/start"); XCTAssertEqual(starts, 1)
@@ -1331,7 +1331,7 @@ final class OnlineBattleSessionTests: XCTestCase {
         await http.route("/v1/battles/\(final.battleId)/ready", try JSONEncoder().encode(accepted))
         await session.bootstrap()
         XCTAssertEqual(session.preparedBattleIDs(), [], "Nothing is ready before the gesture")
-        await session.perform(.prepareBattle)
+        await session.perform(.prepareBattle(final.battleId))
         XCTAssertEqual(session.preparedBattleIDs(), [final.battleId], "Ready for the revision on screen")
         let bumped = try changed(final, ["state": "ACCEPTED", "config": NSNull(), "result": NSNull(), "confirmed": true, "roundSeq": 0, "journal": [],
                                          "revision": accepted.revision + 5])
@@ -1355,7 +1355,7 @@ final class OnlineBattleSessionTests: XCTestCase {
         let final = try battle(), connection = SessionConnection(); await connection.setState(.polling)
         let ready = try changed(final, ["state": "READY", "result": NSNull(), "roundSeq": 0, "journal": []])
         let (session, http, _, _) = try await setup([ready], connection: connection)
-        await session.bootstrap(); await session.perform(.prepareBattle)
+        await session.bootstrap(); await session.perform(.prepareBattle(final.battleId))
         let starts = await http.count("/v1/battles/\(final.battleId)/start"); XCTAssertEqual(starts, 0)
         XCTAssertFalse(session.presentation.canStart)
     }
@@ -1367,11 +1367,11 @@ final class OnlineBattleSessionTests: XCTestCase {
         await http.route(path, Data(), status: 500)
         await session.bootstrap()
         XCTAssertFalse(session.presentation.localReady)
-        await session.perform(.prepareBattle)
+        await session.perform(.prepareBattle(final.battleId))
         XCTAssertFalse(session.presentation.localReady, "A failed ready call must not read as received")
         XCTAssertTrue(session.presentation.canPrepare, "The button must stay usable so the person can retry")
         await http.route(path, try JSONEncoder().encode(accepted))
-        await session.perform(.prepareBattle)
+        await session.perform(.prepareBattle(final.battleId))
         XCTAssertTrue(session.presentation.localReady)
         XCTAssertFalse(session.presentation.canPrepare)
         XCTAssertEqual(session.presentation.roomProgress?.turn, .theirs)
@@ -1413,7 +1413,7 @@ final class OnlineBattleSessionTests: XCTestCase {
         entries[0] = .init(id: original.instanceID, name: info.species, snapshot: .init(schemaVersion: 1, instanceID: original.instanceID, engineHash: original.engineHash, rulesVersion: original.rulesVersion, policyVersion: original.policyVersion, set: grown, publicInfo: info), blockedReason: nil)
         let (session, http, _, _) = try await setup([ready], rosterOverride: entries)
         await http.route("/v1/battles/\(final.battleId)/start", try JSONEncoder().encode(running))
-        await session.bootstrap(); await session.perform(.prepareBattle)
+        await session.bootstrap(); await session.perform(.prepareBattle(final.battleId))
         let starts = await http.count("/v1/battles/\(final.battleId)/start"); XCTAssertEqual(starts, 1)
     }
 
@@ -1846,7 +1846,7 @@ final class OnlineBattleSessionTests: XCTestCase {
             XCTAssertEqual(session.presentation.room?.state, .pending)
             let gone = try changed(pending, ["state": state])
             await http.route("/v1/battles", try JSONEncoder().encode(OnlineBattlePage(battles: [gone], before: nil)))
-            await session.perform(.accept)
+            await session.perform(.accept(pending.battleId))
             let accepts = await http.count("/v1/battles/\(pending.battleId)/accept")
             XCTAssertEqual(accepts, 0, state)
             notices[state] = session.presentation.notice ?? "<nil>"
@@ -1865,7 +1865,7 @@ final class OnlineBattleSessionTests: XCTestCase {
         // perform(.accept) first refreshes (still pending), the accept POST is refused, the re-read shows cancelled.
         await http.queue("/v1/battles", [try page(pending), try page(gone)])
         await http.queue("POST /v1/battles/\(pending.battleId)/accept", [.init(status: 409, body: errorBody("invalid_state"))])
-        await session.perform(.accept)
+        await session.perform(.accept(pending.battleId))
         let accepts = await http.count("/v1/battles/\(pending.battleId)/accept")
         XCTAssertEqual(accepts, 1)
         XCTAssertTrue(session.presentation.notice?.contains("취소") == true, session.presentation.notice ?? "<nil>")
@@ -1907,7 +1907,7 @@ final class OnlineBattleSessionTests: XCTestCase {
         XCTAssertTrue(notice.contains("하늘") && notice.contains("떠나"), notice)
     }
     func testMyOwnCancelAndDeclineDoNotAnnounceThemselvesBack() async throws {
-        for (action, name, trainer, state) in [(OnlineBattleUIAction.cancel, "cancel", "trainer-one", "CANCELLED"), (.decline, "decline", "trainer-two", "DECLINED")] {
+        for (action, name, trainer, state) in [(OnlineBattleUIAction.cancel(try pendingRoom().battleId), "cancel", "trainer-one", "CANCELLED"), (.decline(try pendingRoom().battleId), "decline", "trainer-two", "DECLINED")] {
             let pending = try pendingRoom()
             let (session, http, _, _) = try await setup([pending], trainer: trainer); try await namedOpponent(http, trainer: trainer)
             await http.route("/v1/battles/\(pending.battleId)/\(name)", try JSONEncoder().encode(try changed(pending, ["state": state, "revision": pending.revision + 1])))
@@ -1942,7 +1942,7 @@ final class OnlineBattleSessionTests: XCTestCase {
         let page = { (room: OnlineBattleView) throws -> OnlineBattleHTTPResponse in .init(status: 200, body: try JSONEncoder().encode(OnlineBattlePage(battles: [room], before: nil))) }
         await http.queue("/v1/battles", [try page(pending), try page(gone)])
         await http.queue("POST /v1/battles/\(pending.battleId)/accept", [.init(status: 409, body: errorBody("invalid_state"))])
-        await session.perform(.accept)
+        await session.perform(.accept(pending.battleId))
         let notice = try XCTUnwrap(session.presentation.notice)
         XCTAssertTrue(notice.contains("하늘") && notice.contains("취소"), notice)
         await session.refresh()
@@ -1992,7 +1992,7 @@ final class OnlineBattleSessionTests: XCTestCase {
         let (session, http, _, _) = try await setup([accepted], connection: connection, observer: observer)
         await http.route("/v1/battles/\(final.battleId)/ready", try JSONEncoder().encode(accepted))
         await http.route("/v1/battles/\(final.battleId)/start", try JSONEncoder().encode(running))
-        await session.bootstrap(); await session.perform(.prepareBattle)
+        await session.bootstrap(); await session.perform(.prepareBattle(final.battleId))
         XCTAssertTrue(session.presentation.localReady)
         await reconnect(connection, observer: observer, id: "connection-b")
         XCTAssertFalse(session.presentation.localReady, "The server no longer holds a ready from the old socket")
@@ -2010,7 +2010,7 @@ final class OnlineBattleSessionTests: XCTestCase {
         let connection = SessionConnection(), observer = SessionObserver()
         let (session, http, _, _) = try await setup([accepted], connection: connection, observer: observer)
         await http.route("/v1/battles/\(accepted.battleId)/ready", try JSONEncoder().encode(accepted))
-        await session.bootstrap(); await session.perform(.prepareBattle)
+        await session.bootstrap(); await session.perform(.prepareBattle(accepted.battleId))
         await reconnect(connection, observer: observer, id: "connection-b")
         await session.refresh(); await session.refresh()
         let readies = try await sentConnectionIDs(http, accepted.battleId)
@@ -2024,7 +2024,7 @@ final class OnlineBattleSessionTests: XCTestCase {
         let connection = SessionConnection(), observer = SessionObserver()
         let (session, http, _, _) = try await setup([accepted], connection: connection, observer: observer)
         await http.route("/v1/battles/\(accepted.battleId)/ready", try JSONEncoder().encode(accepted))
-        await session.bootstrap(); await session.perform(.prepareBattle)
+        await session.bootstrap(); await session.perform(.prepareBattle(accepted.battleId))
         await reconnect(connection, observer: observer, id: "connection-b")
         await http.route("/v1/battles/\(accepted.battleId)/ready", errorBody("not_ready"), status: 409)
         await session.refresh()
@@ -2038,7 +2038,7 @@ final class OnlineBattleSessionTests: XCTestCase {
         let connection = SessionConnection(), observer = SessionObserver()
         let (session, http, _, effects) = try await setup([accepted], connection: connection, observer: observer)
         await http.route("/v1/battles/\(accepted.battleId)/ready", try JSONEncoder().encode(accepted))
-        await session.bootstrap(); await session.perform(.prepareBattle)
+        await session.bootstrap(); await session.perform(.prepareBattle(accepted.battleId))
         effects.setHealthShare(0.5, of: "instance-one")
         await reconnect(connection, observer: observer, id: "connection-b")
         await session.refresh()
@@ -2052,7 +2052,7 @@ final class OnlineBattleSessionTests: XCTestCase {
         let connection = SessionConnection(), observer = SessionObserver()
         let (session, http, _, _) = try await setup([accepted], connection: connection, observer: observer)
         await http.route("/v1/battles/\(accepted.battleId)/ready", try JSONEncoder().encode(accepted))
-        await session.bootstrap(); await session.perform(.prepareBattle)
+        await session.bootstrap(); await session.perform(.prepareBattle(accepted.battleId))
         await connection.setConnection(.retryWaiting, id: nil)
         await observer.callback?(.changed(await connection.snapshot()))
         XCTAssertEqual(session.preparedBattleIDs(), [accepted.battleId], "A socket blip is no reason to notify; the press is sent again on hello")
@@ -2064,7 +2064,7 @@ final class OnlineBattleSessionTests: XCTestCase {
         let connection = SessionConnection(), observer = SessionObserver()
         let (session, http, _, _) = try await setup([accepted], connection: connection, observer: observer)
         await http.route("/v1/battles/\(accepted.battleId)/ready", try JSONEncoder().encode(accepted))
-        await session.bootstrap(); await session.perform(.prepareBattle)
+        await session.bootstrap(); await session.perform(.prepareBattle(accepted.battleId))
         await reconnect(connection, observer: observer, id: "connection-b")
         await http.route("/v1/battles", Data(), status: 503)
         await session.refresh()
@@ -2076,7 +2076,7 @@ final class OnlineBattleSessionTests: XCTestCase {
         let connection = SessionConnection(), observer = SessionObserver()
         let (session, http, _, _) = try await setup([ready], connection: connection, observer: observer)
         await http.route("/v1/battles/\(final.battleId)/start", try JSONEncoder().encode(ready))
-        await session.bootstrap(); await session.perform(.prepareBattle)
+        await session.bootstrap(); await session.perform(.prepareBattle(final.battleId))
         XCTAssertTrue(session.presentation.localReady)
         await reconnect(connection, observer: observer, id: "connection-b")
         await session.refresh()
@@ -2088,8 +2088,90 @@ final class OnlineBattleSessionTests: XCTestCase {
         let final = try battle(), ready = try changed(final, ["state": "READY", "result": NSNull(), "roundSeq": 0, "journal": []])
         let (session, http, _, _) = try await setup([ready])
         await http.route("/v1/battles/\(final.battleId)/start", Data(), status: 503)
-        await session.bootstrap(); await session.perform(.prepareBattle)
+        await session.bootstrap(); await session.perform(.prepareBattle(final.battleId))
         XCTAssertFalse(session.presentation.localReady, "A failed start must not read as received")
         XCTAssertTrue(session.presentation.canPrepare, "Nothing else would retry it on this screen")
+    }
+    // MARK: Review A F1.2: a room action belongs to the room on screen
+    private func pendingRoom(_ id: String, newerBy: Double = 0) throws -> OnlineBattleView {
+        let base = try pendingRoom()
+        return try changed(base, ["battleId": id, "createdAt": base.createdAt + newerBy])
+    }
+    private func list(_ http: SessionHTTP, _ rooms: [OnlineBattleView]) async throws {
+        await http.route("/v1/battles", try JSONEncoder().encode(OnlineBattlePage(battles: rooms, before: nil)))
+    }
+    func testAcceptNeverMovesToTheNextRoomWhenTheOneOnScreenWasCancelled() async throws {
+        let older = try pendingRoom("bt_older"), shown = try pendingRoom("bt_shown", newerBy: 60_000)
+        let (session, http, _, effects) = try await setup([older, shown], trainer: "trainer-two")
+        for room in [older, shown] {
+            await http.route("/v1/battles/\(room.battleId)/accept", try JSONEncoder().encode(changed(room, ["state": "ACCEPTED"])))
+        }
+        await session.bootstrap()
+        session.presentation.selectedEntryID = "instance-two"
+        XCTAssertEqual(session.presentation.room?.battleId, shown.battleId)
+        try await list(http, [older, try changed(shown, ["state": "CANCELLED"])])
+        await session.perform(.accept(shown.battleId))
+        let accepts = await http.requests.filter { $0.url?.path.hasSuffix("/accept") == true }.count
+        XCTAssertEqual(accepts, 0, "Agreeing to a match must not reach a room the person was not looking at")
+        XCTAssertTrue(effects.state.onlineBattleHolds.allSatisfy { $0.key.battleID != older.battleId || $0.instanceID != "instance-two" })
+        XCTAssertNotEqual(session.presentation.room?.battleId, older.battleId)
+        XCTAssertEqual(session.presentation.phase, .lobby)
+        XCTAssertTrue(session.presentation.notice?.contains("취소") == true, session.presentation.notice ?? "<nil>")
+    }
+    func testNewChallengeDoesNotPushAsideTheRoomOnScreen() async throws {
+        let shown = try pendingRoom("bt_shown"), newer = try pendingRoom("bt_newer", newerBy: 60_000)
+        let (session, http, _, _) = try await setup([shown], trainer: "trainer-two")
+        await session.bootstrap()
+        XCTAssertEqual(session.presentation.room?.battleId, shown.battleId)
+        try await list(http, [shown, newer])
+        await session.refresh()
+        XCTAssertEqual(session.presentation.room?.battleId, shown.battleId)
+        XCTAssertEqual(Set(session.presentation.battles.map(\.battleId)), [shown.battleId, newer.battleId], "The new one waits in the list")
+    }
+    func testActionNamingAnotherRoomIsNotSent() async throws {
+        let shown = try confirmedRoom()
+        let other = try changed(shown, ["battleId": "bt_other"])
+        for action in [OnlineBattleUIAction.accept(other.battleId), .confirm(other.battleId), .prepareBattle(other.battleId), .decline(other.battleId), .cancel(other.battleId)] {
+            let (session, http, _, _) = try await setup([shown, other])
+            await session.bootstrap(); await session.perform(.openBattle(shown.battleId))
+            let before = await http.requests.filter { $0.httpMethod == "POST" }.count
+            await session.perform(action)
+            let after = await http.requests.filter { $0.httpMethod == "POST" }.count
+            XCTAssertEqual(after, before, "\(action)")
+        }
+    }
+    func testEndedRoomOnScreenLeavesToTheLobbyInsteadOfOpeningTheNextOne() async throws {
+        let older = try pendingRoom("bt_older"), shown = try pendingRoom("bt_shown", newerBy: 60_000)
+        let (session, http, _, _) = try await setup([older, shown], trainer: "trainer-two")
+        await session.bootstrap()
+        try await list(http, [older, try changed(shown, ["state": "CANCELLED"])])
+        await session.refresh()
+        XCTAssertEqual(session.presentation.phase, .lobby, "The next request must not appear where the last one's buttons were")
+        await session.perform(.openBattle(older.battleId))
+        XCTAssertEqual(session.presentation.room?.battleId, older.battleId)
+        XCTAssertEqual(session.presentation.phase, .room)
+    }
+    func testMatchInPlayStillTakesTheScreenFromAWaitingRoom() async throws {
+        let shown = try pendingRoom("bt_shown")
+        let (session, http, _, _) = try await setup([shown], trainer: "trainer-two")
+        await session.bootstrap()
+        XCTAssertEqual(session.presentation.room?.battleId, shown.battleId)
+        let running = try changed(battle(), ["state": "RUNNING", "result": NSNull(), "roundSeq": 1, "journal": []])
+        try await list(http, [shown, running])
+        await session.refresh()
+        XCTAssertEqual(session.presentation.room?.battleId, running.battleId)
+        XCTAssertEqual(session.presentation.phase, .arena)
+    }
+    func testFinishedMatchOnScreenKeepsItsResultWhenAnotherMatchIsInPlay() async throws {
+        let final = try battle()
+        let shown = try changed(final, ["state": "RUNNING", "result": NSNull(), "roundSeq": 1, "journal": []])
+        let (session, http, _, _) = try await setup([shown])
+        await session.bootstrap()
+        XCTAssertEqual(session.presentation.room?.battleId, final.battleId)
+        let other = try changed(shown, ["battleId": "bt_other", "createdAt": shown.createdAt + 60_000])
+        try await list(http, [final, other])
+        await session.refresh()
+        XCTAssertEqual(session.presentation.room?.battleId, final.battleId)
+        XCTAssertEqual(session.presentation.phase, .result)
     }
 }

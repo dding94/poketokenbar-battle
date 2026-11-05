@@ -202,16 +202,16 @@ extension OnlineBattlePresentationTests {
             }
         }
         model.room = OnlineBattleScreenRenderingTests.room(state: .pending, confirmed: false)
-        model.localSide = .p1; model.send(.accept); model.send(.decline)
-        model.localSide = .p2; model.entryHP["synthetic-pikachu"] = 0; model.send(.accept)
-        model.entryHP["synthetic-pikachu"] = 88; model.send(.accept); model.send(.decline)
+        model.localSide = .p1; model.send(.accept(model.room?.battleId ?? "")); model.send(.decline(model.room?.battleId ?? ""))
+        model.localSide = .p2; model.entryHP["synthetic-pikachu"] = 0; model.send(.accept(model.room?.battleId ?? ""))
+        model.entryHP["synthetic-pikachu"] = 88; model.send(.accept(model.room?.battleId ?? "")); model.send(.decline(model.room?.battleId ?? ""))
         model.room = OnlineBattleScreenRenderingTests.room(state: .accepted, confirmed: false)
-        model.send(.confirm)
-        model.localSide = .p1; model.send(.confirm)
+        model.send(.confirm(model.room?.battleId ?? ""))
+        model.localSide = .p1; model.send(.confirm(model.room?.battleId ?? ""))
         model.room = OnlineBattleScreenRenderingTests.room(state: .accepted)
-        model.send(.confirm); model.send(.prepareBattle)
-        model.canStart = true; model.send(.prepareBattle); model.send(.cancel)
-        model.room = OnlineBattleScreenRenderingTests.room(state: .running); model.send(.cancel)
+        model.send(.confirm(model.room?.battleId ?? "")); model.send(.prepareBattle(model.room?.battleId ?? ""))
+        model.canStart = true; model.send(.prepareBattle(model.room?.battleId ?? "")); model.send(.cancel(model.room?.battleId ?? ""))
+        model.room = OnlineBattleScreenRenderingTests.room(state: .running); model.send(.cancel(model.room?.battleId ?? ""))
         XCTAssertEqual(events, ["accept", "decline", "confirm", "prepare", "cancel"])
     }
     func testSelectionsRejectUnknownAndReservedIDsAndVisibilityAlwaysReachesSession() {

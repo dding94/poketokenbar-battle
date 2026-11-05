@@ -173,20 +173,20 @@ struct OnlineBattleRoom: View {
         VStack(alignment: .leading, spacing: 6) {
             if room.state == .pending && model.localSide == .p2 {
                 HStack {
-                    Button(l.onlineAccept) { model.send(.accept) }.buttonStyle(.borderedProminent).disabled(!model.canAccept)
+                    Button(l.onlineAccept) { model.send(.accept(room.battleId)) }.buttonStyle(.borderedProminent).disabled(!model.canAccept)
                         .accessibilityIdentifier("online.accept")
                     if model.roomExits.contains(.decline) {
-                        Button(l.onlineDecline) { model.send(.decline) }.disabled(model.isBusy)
+                        Button(l.onlineDecline) { model.send(.decline(room.battleId)) }.disabled(model.isBusy)
                             .accessibilityIdentifier("online.decline")
                     }
                 }
                 OnlineBattleBlockReason(block: model.acceptBlock, l: l, identifier: "online.accept.reason")
             } else if room.state == .accepted && model.localSide == .p1 && !room.confirmed {
-                Button(l.onlineConfirm) { model.send(.confirm) }.buttonStyle(.borderedProminent).disabled(!model.canConfirm)
+                Button(l.onlineConfirm) { model.send(.confirm(room.battleId)) }.buttonStyle(.borderedProminent).disabled(!model.canConfirm)
                     .accessibilityIdentifier("online.confirm")
                 OnlineBattleBlockReason(block: model.isBusy ? .busy : nil, l: l, identifier: "online.confirm.reason")
             } else if room.confirmed && [.accepted, .ready].contains(room.state) {
-                Button(model.localReady ? l.onlineOwnReady : l.onlinePrepare) { model.send(.prepareBattle) }
+                Button(model.localReady ? l.onlineOwnReady : l.onlinePrepare) { model.send(.prepareBattle(room.battleId)) }
                     .buttonStyle(.borderedProminent).disabled(!model.canPrepare)
                     .accessibilityIdentifier("online.prepare")
                 OnlineBattleBlockReason(block: model.prepareBlock, l: l, identifier: "online.prepare.reason")
@@ -195,11 +195,11 @@ struct OnlineBattleRoom: View {
             }
             // Only the challenger sees "cancel request"; the receiver declines, or cancels the battle after accepting.
             if model.roomExits.contains(.cancelRequest) {
-                Button(l.onlineCancel) { model.send(.cancel) }.disabled(model.isBusy)
+                Button(l.onlineCancel) { model.send(.cancel(room.battleId)) }.disabled(model.isBusy)
                     .accessibilityIdentifier("online.cancel")
             }
             if model.roomExits.contains(.cancelBattle) {
-                Button(l.onlineCancelBattle) { model.send(.cancel) }.disabled(model.isBusy)
+                Button(l.onlineCancelBattle) { model.send(.cancel(room.battleId)) }.disabled(model.isBusy)
                     .accessibilityIdentifier("online.cancelBattle")
             }
         }

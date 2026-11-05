@@ -48,7 +48,7 @@ final class OnlineBattleRoomGuideTests: XCTestCase {
             XCTAssertFalse(model.canPrepare, "A second press must not be sent after the server accepted the first")
             var prepared = 0
             model.onAction = { if case .prepareBattle = $0 { prepared += 1 } }
-            model.send(.prepareBattle)
+            model.send(.prepareBattle(model.room?.battleId ?? ""))
             XCTAssertEqual(prepared, 0)
         }
     }

@@ -184,15 +184,15 @@ final class OnlineBattlePresentation {
             guard !showsHistory, !showsStandings, rematchSourceID == nil else { return }
             self.mode = mode
         case .challenge: guard canChallenge else { return }
-        case .accept: guard canAccept else { return }
-        case .confirm: guard canConfirm else { return }
-        case .prepareBattle: guard canPrepare else { return }
+        case .accept(let id): guard room?.battleId == id, canAccept else { return }
+        case .confirm(let id): guard room?.battleId == id, canConfirm else { return }
+        case .prepareBattle(let id): guard room?.battleId == id, canPrepare else { return }
         case .chooseMove(let slot):
             guard canChooseMove(slot) else { return }
             if let room { localChoice = LocalChoice(battleID: room.battleId, roundSeq: room.roundSeq, slot: slot) }
             choiceSubmitted = true
-        case .decline: guard !showsHistory, !showsStandings, rematchSourceID == nil, !isBusy, localSide == .p2, room?.state == .pending else { return }
-        case .cancel: guard !showsHistory, !showsStandings, rematchSourceID == nil, !isBusy, [.pending, .accepted, .ready].contains(room?.state) else { return }
+        case .decline(let id): guard room?.battleId == id, !showsHistory, !showsStandings, rematchSourceID == nil, !isBusy, localSide == .p2, room?.state == .pending else { return }
+        case .cancel(let id): guard room?.battleId == id, !showsHistory, !showsStandings, rematchSourceID == nil, !isBusy, [.pending, .accepted, .ready].contains(room?.state) else { return }
         case .retryCredentialSave: guard !isBusy, canRetryCredentialSave else { return }
         case .applyingServer(let address, let inner):
             // Manual builds only: the session saves this address, then runs the inner setup request against it.
@@ -235,7 +235,9 @@ enum OnlineBattleUIAction {
     case setPopoverVisible(Bool)
     case setOnlineScreenVisible(Bool), skipStage, setStageSpeed(PracticePlaybackSpeed)
     case selectEntry(String), selectOpponent(String), setMode(OnlineBattleMode)
-    case challenge, openBattle(String), accept, confirm, prepareBattle, decline, cancel
+    case challenge, openBattle(String)
+    /// Room actions name the battle on screen: agreeing to a match can never land on another room.
+    case accept(String), confirm(String), prepareBattle(String), decline(String), cancel(String)
     case showStandings, refreshStandings, prepareRematch(String), submitRematch, cancelRematch
     case showHistory, openReplay(String), seekReplay(Int), closeReplay
     case chooseMove(Int), dismissResult, backToLobby, dismissNotice
