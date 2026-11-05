@@ -216,6 +216,7 @@ RED 테스트를 먼저 커밋하고, 결함 주입으로 테스트가 잡는지
 
 수용 기준:
 
+- 재대결 신청도 알림 대상이다(운영자 결정, 2026-11-05: 상대의 응답이 필요한 상태를 놓치면 안 된다). T02의 4종 제한과 그 테스트를 함께 고친다
 - incomingChallenge, challengeAccepted, finalConfirmed, myTurn에서만 알림이 가고 identifier는 battleId+단계로 고정되어 중복이 없다
 - 팝오버가 열려 있으면 알림을 보내지 않고, 이벤트가 해소되면 대기 중 알림을 철회한다
 - AppDelegate에 UNUserNotificationCenterDelegate가 있고 didReceive에서 openPopover 후 해당 배틀 화면으로 라우팅한다
@@ -388,7 +389,7 @@ RED 테스트를 먼저 커밋하고, 결함 주입으로 테스트가 잡는지
 - 닫힌 상태의 presence는 refresh를 생략하고 dirty 표시 후 열릴 때 1회 갱신한다(한 명의 온오프가 동료 전체의 3요청으로 번지는 것을 막는다)
 - :199의 모르는 메시지 type은 종료 대신 무시한다. 배포된 2.6.0은 모르는 type을 받으면 복구 불가로 멈춘다
 - 연결 상태 전이를 AppLog에 기록해 T24 실측에 쓴다(키와 주소는 제외)
-- :195 문구를 "다시 연결하는 중"으로 바꾼다
+- :195 문구를 "다시 연결하는 중"으로 바꾼다. T03의 `onlineHomeSubtitle`과 메뉴 표식은 연결 상태를 화면 문구(`L.onlineReconnectingStatuses`, `L.onlineConnectedStatus`) 비교로 구분하므로, presentation에 타입이 있는 연결 상태를 두고 그 비교를 없앤다
 - 주기 폴링과 60초 수치는 넣지 않는다. WebSocket이 막힌 환경은 T24 결과에 따라 T25로 다룬다
 
 판단 근거(Opus 검토):
