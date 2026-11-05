@@ -226,7 +226,6 @@ final class OnlineBattleScreenRenderingTests: XCTestCase {
         XCTAssertEqual(closed2, 0); XCTAssertEqual(backed2, 1)
     }
 
-    func testOnlineBattlePasteButtonReadsOnlyOnExplicitClickAndNeverAppliesOrJoins() async throws {
     func testOnlineBattleEmbeddedPasteReadsOnlyOnExplicitClickAndTakesAOneLineCode() async throws {
         let model = OnlineBattlePresentation()
         model.serverAddress = "https://saved.example.invalid"; model.serverIsEmbedded = true
