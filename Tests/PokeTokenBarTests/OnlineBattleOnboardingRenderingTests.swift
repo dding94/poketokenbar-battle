@@ -127,7 +127,8 @@ final class OnlineBattleOnboardingRenderingTests: XCTestCase {
         XCTAssertTrue(compact(try recognized(view)).contains(Self.code), "the code is readable until it is copied")
         let text = try recognized(view)
         XCTAssertTrue(text.contains("Copy"), "a copy button:\n\(text)")
-        XCTAssertTrue(text.contains("Copy it or write it down first"), "the reason the keep button is shut:\n\(text)")
+        // Fonts differ across systems, so the line may wrap anywhere (macOS 15 in CI).
+        XCTAssertTrue(text.replacingOccurrences(of: "\n", with: " ").contains("down first"), "the reason the keep button is shut:\n\(text)")
         model.send(.setRecoveryWrittenDown(true))
         try await Task.sleep(for: .milliseconds(150)); view.layoutSubtreeIfNeeded()
         let checked = try await capture(view, named: "t11-01-recovery-checked.png")
@@ -136,7 +137,7 @@ final class OnlineBattleOnboardingRenderingTests: XCTestCase {
         // so the difference holds wherever the wording above moves the button.
         let shut = darkPixels(unchecked, fromRow: 0), open = darkPixels(checked, fromRow: 0)
         XCTAssertGreaterThan(open - shut, 200, "the keep button's words turn black once the check is made")
-        XCTAssertFalse(try recognized(view).contains("Copy it or write it down first"), "the reason goes away with the check")
+        XCTAssertFalse(try recognized(view).replacingOccurrences(of: "\n", with: " ").contains("down first"), "the reason goes away with the check")
         model.send(.acknowledgeRecoveryCode)
         XCTAssertNil(model.recoveryCode)
     }
