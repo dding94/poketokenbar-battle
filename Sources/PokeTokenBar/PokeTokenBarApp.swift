@@ -265,7 +265,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
                 }, connectionFactory: { OnlineBattleConnection(observer: $0) },
                 saveSettings: { try $0.save(to: directory) }, enabled: !store.disableKeychainAccess,
                 accessAllowed: { !KeychainAccessGate.isDisabled },
-                localization: { [companion] in companion.l })
+                localization: { [companion = companion!] in companion.l })
             online = session; onlinePresentation = session.presentation
             Task { await session.bootstrap() }
         } catch {
