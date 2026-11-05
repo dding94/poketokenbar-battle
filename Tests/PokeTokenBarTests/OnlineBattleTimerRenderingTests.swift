@@ -244,7 +244,6 @@ final class OnlineBattleTimerRenderingTests: XCTestCase {
         XCTAssertTrue(fixture.staging.playback.introShown, "the screen claimed the splash when it appeared")
         let withSplash = try band(host, fromPoint: 0, toPoint: footerTop), pickerWith = try band(host, fromPoint: footerTop, toPoint: OnlineBattleArena.boardHeight)
         XCTAssertEqual(try inkBelowTheBoard(host), 0, "splash")
-        try keep(host, as: "splash-board.png")
         try click(host, x: PopoverMetrics.scrollContentWidth / 2, y: 130)
         await settle(host, milliseconds: 600)
         let without = try band(host, fromPoint: 0, toPoint: footerTop), pickerWithout = try band(host, fromPoint: footerTop, toPoint: OnlineBattleArena.boardHeight)
@@ -289,27 +288,22 @@ final class OnlineBattleTimerRenderingTests: XCTestCase {
             }
             model.standings = .init(groupId: "g", championTrainerId: nil, rows: [
                 .init(trainerId: foeID, displayName: "x", wins: 5, losses: 0, draws: 0, streak: 3, bestStreak: 5, winRate: 1)])
-            model.deadline = nil
+            model.deadline = Date().addingTimeInterval(29.5)
             let host = await screenHost(model, lang)
             try keep(host, as: "t18-splash-\(tag).png")
             fixture.staging.playback.introShown = true
-            model.deadline = Date().addingTimeInterval(28.5)
-            await settle(host, milliseconds: 3_400)
-            model.deadline = Date().addingTimeInterval(28.5)
-            await settle(host)
-            try keep(host, as: "t18-counting-\(tag).png")
-            model.deadline = Date().addingTimeInterval(3.5)
-            await settle(host)
-            try keep(host, as: "t18-urgent-\(tag).png")
-            model.choiceSubmitted = true
-            await settle(host)
-            try keep(host, as: "t18-sent-\(tag).png")
-            model.choiceSubmitted = false; model.deadline = nil
-            await settle(host)
-            try keep(host, as: "t18-preparing-\(tag).png")
+            // The fill drains over a second per tick, so each state settles for longer than one before it is kept.
+            for (name, change) in [("counting", { model.deadline = Date().addingTimeInterval(28.5) }),
+                                   ("urgent", { model.deadline = Date().addingTimeInterval(3.5) }),
+                                   ("sent", { model.choiceSubmitted = true }),
+                                   ("preparing", { model.choiceSubmitted = false; model.deadline = nil })] as [(String, () -> Void)] {
+                change()
+                await settle(host, milliseconds: 1_300)
+                try keep(host, as: "t18-\(name)-\(tag).png")
+            }
             try fixture.play(rounds: 1)
             model.deadline = Date().addingTimeInterval(21.5)
-            await settle(host)
+            await settle(host, milliseconds: 1_300)
             try keep(host, as: "t18-playing-\(tag).png")
         }
     }

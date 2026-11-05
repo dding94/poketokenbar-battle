@@ -39,7 +39,7 @@ struct OnlineBattleArena: View {
     /// One height for every state, so the picker keeps its place and never drops out of the 520pt scroll area.
     /// The header, two cards (the foe's may wrap its chips to a second line), the beat lines, the prompt and the picker.
     static let boardHeight: CGFloat = 488
-    private static let footerHeight: CGFloat = 122
+    static let footerHeight: CGFloat = 122
 
     private var mode: OnlineBattleMode { model.room?.mode ?? .manual }
     private var playing: Bool { model.stage?.isPlaying ?? false }
@@ -47,6 +47,8 @@ struct OnlineBattleArena: View {
     private var footer: Footer {
         Self.footer(mode: mode, submitted: model.choiceSubmitted, requestKind: model.request?.kind ?? "none", playing: playing)
     }
+    /// The opening mark is drawn state of this view; the staging remembers that it was shown.
+    @State private var splash = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -55,6 +57,12 @@ struct OnlineBattleArena: View {
                 VStack(alignment: .leading, spacing: 6) {
                     sideCard(.opponent, view: view)
                     sideCard(.player, view: view)
+                }
+                .overlay {
+                    if splash {
+                        OnlineBattleVersus(l: l, nickname: model.opponentNickname) { dismissSplash() }
+                            .transition(.scale(scale: 1.15).combined(with: .opacity))
+                    }
                 }
                 beatLines(view)
                 prompt(view)
@@ -66,6 +74,40 @@ struct OnlineBattleArena: View {
         }
         .frame(maxWidth: .infinity, minHeight: Self.boardHeight, maxHeight: Self.boardHeight, alignment: .top)
         .task(id: nameKey) { await loadSpeciesNames() }
+        .task(id: model.arena != nil) { await playSplash() }
+        // A choice, or a beat starting, means the battle is under way: the mark has done its job.
+        .onChange(of: playing) { _, now in if now { dismissSplash() } }
+        .onChange(of: model.choiceSubmitted) { _, now in if now { dismissSplash() } }
+    }
+
+    // MARK: Splash
+
+    /// Once per battle, before anything has played and on the first turn. A battle already under way when the screen
+    /// opens (a reopened popover, a returning app) never gets it.
+    static func splashDue(turn: Int?, introShown: Bool, played: Bool) -> Bool {
+        PracticeBattleBoard.splashDue(phase: .running, turn: turn, introShown: introShown, played: played)
+    }
+
+    /// True when the splash is due, and records that it was shown so a view built later does not show it again.
+    func claimSplash() -> Bool {
+        guard let playback = model.stage?.playback,
+              Self.splashDue(turn: model.arena?.turn, introShown: playback.introShown,
+                             played: !playback.history.isEmpty || playback.beat != nil) else { return false }
+        playback.introShown = true
+        return true
+    }
+
+    /// Three seconds or so: the spring in, a pause, the fade out. A press, a choice or a beat clears it sooner.
+    private func playSplash() async {
+        guard claimSplash() else { return }
+        withAnimation(.spring(duration: 0.25, bounce: 0.3)) { splash = true }
+        try? await Task.sleep(for: .milliseconds(2_500))
+        dismissSplash()
+    }
+
+    private func dismissSplash() {
+        guard splash else { return }
+        withAnimation(.easeIn(duration: 0.3)) { splash = false }
     }
 
     /// Fills the shared name cache for both species, so the cards and the beat lines speak the app's language.
@@ -83,24 +125,27 @@ struct OnlineBattleArena: View {
     // MARK: Header
 
     private func header(_ view: BattleView) -> some View {
-        HStack {
-            Text(mode == .auto ? l.onlineAutomatic : l.onlineManual).font(.subheadline.bold())
-            Spacer(minLength: 4)
-            // The server's clock keeps running while beats play; hiding the screen never pauses it.
-            TimelineView(.periodic(from: .now, by: 1)) { context in
-                let remaining = Self.remainingSeconds(deadline: model.deadline, now: context.date)
-                Text(l.onlineTurn(shownTurn(view), seconds: remaining)).font(.caption).monospacedDigit()
-                    .foregroundStyle(remaining <= 5 ? Color.orange : Color.secondary)
-            }
-        }
+        // The server's clock keeps running while beats play; hiding the screen never pauses it.
+        OnlineBattleClockBand(title: mode == .auto ? l.onlineAutomatic : l.onlineManual, l: l, mode: mode, footer: footer,
+                              deadline: model.deadline, playing: playing, stagedTurn: shownTurn(view), viewTurn: view.turn)
     }
+
+    /// The state the bar is in at `now`, from the model alone. Internal so tests can read it.
+    func turnClock(now: Date) -> OnlineBattleTurnClock.State {
+        OnlineBattleTurnClock.state(mode: mode, footer: footer, deadline: model.deadline, playing: playing, now: now)
+    }
+
+    /// The turn the header names: the seconds belong to the turn being chosen, which the beats on screen have not
+    /// reached yet. With no clock the turn on screen is the beat's.
+    func clockTurn(_ view: BattleView, state: OnlineBattleTurnClock.State) -> Int { state == .idle ? shownTurn(view) : view.turn }
 
     /// The turn of the beat on screen; the view is already at the next turn while its beats still play.
     func shownTurn(_ view: BattleView) -> Int { model.stage?.playback.beat?.turn ?? view.turn }
 
     /// Dates come from the server's millisecond deadline via the session; hiding the screen never pauses it.
-    static func remainingSeconds(deadline: Date?, now: Date) -> Int {
-        guard let deadline else { return 0 }
+    /// nil when the server has given none yet: that is not zero seconds.
+    static func remainingSeconds(deadline: Date?, now: Date) -> Int? {
+        guard let deadline else { return nil }
         return max(0, Int(ceil(deadline.timeIntervalSince(now))))
     }
 
@@ -136,7 +181,9 @@ struct OnlineBattleArena: View {
                                 display: staging?.shown(side) ?? OnlineBattleStaging.resting(pokemon),
                                 beatID: beat?.id, delta: beat?.hpDelta[side], hitTrigger: lastHit(side), reveal: reveal,
                                 moveSlugs: model.moveSlugs[seat] ?? [:], abilitySlugs: model.abilitySlugs[seat] ?? [:],
-                                spriteSpecies: pokemon.speciesNum)
+                                spriteSpecies: pokemon.speciesNum,
+                                label: own ? nil : model.opponentNickname.map { l.onlineFoeLabel(nickname: $0) },
+                                caption: own ? nil : l.onlineOpponentLine(record: model.opponentRecord, streak: model.opponentStreak) ?? " ")
     }
 
     /// Names and slugs the beat lines speak with; the opponent's set is never part of it.

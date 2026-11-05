@@ -288,6 +288,10 @@ struct PracticeSideCard: View {
     var abilitySlugs: [String: String] = [:]
     /// Without a snapshot the sprite is the plain species artwork (the online opponent's public species).
     var spriteSpecies: Int?
+    /// Replaces the "Foe" tag (the online foe's "Foe · nickname"); it shortens before the row around it does.
+    var label: String?
+    /// One small line at the card's foot (the online foe's streak and record). A blank string keeps the line's room.
+    var caption: String?
 
     private var revealedMoves: [String] { reveal?.moves ?? side.moves }
     private var revealedAbility: String? {
@@ -315,8 +319,10 @@ struct PracticeSideCard: View {
                         if wild {
                             PracticeWildTag(l: l)
                         } else {
-                            Text(own ? l.practiceYou : l.practiceFoe)
-                                .font(.caption2).foregroundStyle(.secondary).fixedSize()
+                            Text(label ?? (own ? l.practiceYou : l.practiceFoe))
+                                .font(.caption2).foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail)
+                                .frame(maxWidth: label == nil ? nil : 96, alignment: .leading)
+                                .fixedSize(horizontal: label == nil, vertical: false)
                         }
                         PracticeNameLevel(name: name, level: side.level)
                         PracticeTypeBadges(types: side.types, l: l, artwork: artwork).fixedSize()
@@ -338,6 +344,9 @@ struct PracticeSideCard: View {
                 }
             }
             if own { ownAbility } else { revealed }
+            if let caption {
+                Text(caption).font(.caption2).foregroundStyle(.secondary).lineLimit(1).minimumScaleFactor(0.8)
+            }
         }
         .practiceCard(padding: 8)
     }

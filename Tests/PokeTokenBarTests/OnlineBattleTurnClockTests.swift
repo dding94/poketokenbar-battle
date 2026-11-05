@@ -21,8 +21,9 @@ final class OnlineBattleTurnClockTests: XCTestCase {
 
     func testChoosingCountsDownFromTheServersDeadline() {
         XCTAssertEqual(state(.moves, deadline: at(30)), .counting(remaining: 30, fraction: 1, mine: true))
-        XCTAssertEqual(state(.moves, deadline: at(12.2)), .counting(remaining: 13, fraction: 12.2 / 30, mine: true))
-        XCTAssertEqual(state(.moves, deadline: at(0.4)), .counting(remaining: 1, fraction: 0.4 / 30, mine: true))
+        // Quarter seconds are exact in a Date, so the fraction can be compared as it is.
+        XCTAssertEqual(state(.moves, deadline: at(12.25)), .counting(remaining: 13, fraction: 12.25 / 30, mine: true))
+        XCTAssertEqual(state(.moves, deadline: at(0.5)), .counting(remaining: 1, fraction: 0.5 / 30, mine: true))
     }
 
     func testAPastDeadlineEmptiesTheBarAndAFarOneNeverOverfillsIt() {
@@ -70,11 +71,18 @@ final class OnlineBattleTurnClockTests: XCTestCase {
         }
     }
 
-    func testOnlyACountingBarTicks() {
+    func testOnlyACountingBarTicksAndItsTicksEndAtTheDeadline() {
         XCTAssertTrue(state(.moves, deadline: at(20)).ticks)
         XCTAssertTrue(state(.sent, deadline: at(20)).ticks)
         XCTAssertFalse(Clock.State.idle.ticks, "an idle bar draws no timeline at all")
         XCTAssertFalse(Clock.State.preparing.ticks, "the deadline arriving redraws the view; nothing needs to wake up for it")
+        XCTAssertFalse(state(.moves, deadline: at(-1)).ticks, "a deadline that passed has nothing left to count")
+        let dates = Clock.tickDates(deadline: at(3.5), now: now)
+        XCTAssertEqual(dates, [now, at(0.5), at(1.5), at(2.5), at(3.5)].map { $0 }, "now, then each whole second left, ending at the deadline")
+        XCTAssertEqual(Clock.tickDates(deadline: at(0.25), now: now), [now, at(0.25)])
+        XCTAssertEqual(Clock.tickDates(deadline: at(-2), now: now), [now])
+        XCTAssertLessThanOrEqual(Clock.tickDates(deadline: at(900), now: now).count, 32, "a far deadline never makes a long schedule")
+        XCTAssertEqual(Clock.tickDates(deadline: at(900), now: now).last, at(900))
     }
 
     // MARK: pulse
@@ -150,8 +158,11 @@ final class OnlineBattleTurnClockTests: XCTestCase {
             XCTAssertFalse(source.contains("Timer.publish"), "\(file) must not own a timer")
         }
         let clock = try String(contentsOf: ui.appendingPathComponent("OnlineBattleTurnClock.swift"), encoding: .utf8)
-        XCTAssertTrue(clock.contains("TimelineView(.periodic(from: .now, by: 1))"), "the one-second timeline is the bar's only clock")
+        XCTAssertFalse(clock.contains(".periodic"), "a periodic timeline never ends; the schedule is the finite one up to the deadline")
+        XCTAssertTrue(clock.contains("TimelineView(.explicit("), "the finite timeline is the bar's only clock")
         XCTAssertEqual(clock.components(separatedBy: "TimelineView(").count - 1, 1)
+        let arena = try String(contentsOf: ui.appendingPathComponent("OnlineBattleScreenArena.swift"), encoding: .utf8)
+        XCTAssertFalse(arena.contains("TimelineView"), "the arena's header has no clock of its own any more")
     }
 
     // MARK: splash
