@@ -85,6 +85,15 @@ final class OnlineBattleMoveHintTests: XCTestCase {
         }
     }
 
+    /// STAB only boosts damage: a status move of my own type (Will-O-Wisp, Bulk Up) is not "same type attack bonus".
+    func testAStatusMoveOfMyOwnTypeShowsNoStab() throws {
+        let resolver = try resolver(Mon(species: 4, moves: ["will-o-wisp", "ember"]), bulbasaur); defer { resolver.close() }
+        let wisp = try XCTUnwrap(resolver.moveHints()[1])
+        XCTAssertEqual(wisp.info.type, "Fire"); XCTAssertTrue(wisp.info.isStatus)
+        XCTAssertFalse(wisp.stab, "a Fire status move on a Fire type is no STAB"); XCTAssertNil(wisp.multiplier)
+        XCTAssertEqual(resolver.moveHints()[2]?.stab, true, "the damaging Fire move still is")
+    }
+
     func testHintsExistOnlyWhileTheRequestIsAMoveRequest() throws {
         let resolver = try resolver(charmander, bulbasaur); defer { resolver.close() }
         XCTAssertEqual(resolver.request.kind, "move")
