@@ -1178,6 +1178,21 @@ final class OnlineBattleSessionTests: XCTestCase {
         let starts = await http.count("/v1/battles/\(final.battleId)/start"); XCTAssertEqual(starts, 1)
         XCTAssertEqual(session.presentation.room?.state, .running)
     }
+    func testPreparedBattleIDsFollowTheReadyGestureAndTheRevision() async throws {
+        let final = try battle()
+        let accepted = try changed(final, ["state": "ACCEPTED", "config": NSNull(), "result": NSNull(), "confirmed": true, "roundSeq": 0, "journal": []])
+        let (session, http, _, _) = try await setup([accepted])
+        await http.route("/v1/battles/\(final.battleId)/ready", try JSONEncoder().encode(accepted))
+        await session.bootstrap()
+        XCTAssertEqual(session.preparedBattleIDs(), [], "Nothing is ready before the gesture")
+        await session.perform(.prepareBattle)
+        XCTAssertEqual(session.preparedBattleIDs(), [final.battleId], "Ready for the revision on screen")
+        let bumped = try changed(final, ["state": "ACCEPTED", "config": NSNull(), "result": NSNull(), "confirmed": true, "roundSeq": 0, "journal": [],
+                                         "revision": accepted.revision + 5])
+        await http.route("/v1/battles", try JSONEncoder().encode(OnlineBattlePage(battles: [bumped], before: nil)))
+        await session.refresh()
+        XCTAssertEqual(session.preparedBattleIDs(), [], "A newer revision has to be readied again")
+    }
     func testOldFailureDoesNotDisableNewServerActions() async throws {
         let (session, http, _, _) = try await setup()
         await http.suspendNext("/v1/me")

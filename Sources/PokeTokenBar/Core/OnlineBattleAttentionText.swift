@@ -74,3 +74,16 @@ extension L {
         max(1, Int((attention.deadline ?? now).timeIntervalSince(now).rounded(.up)))
     }
 }
+
+/// What the menu bar shows at the end of its first line for online play.
+struct OnlineMenuMark: Equatable, Sendable {
+    enum Tone: Equatable, Sendable { case attention, urgent, ongoing }
+    let text: String
+    let tone: Tone
+    let tooltip: String
+}
+
+extension L {
+    func onlineMenuMark(_ input: OnlineAttentionInput) -> OnlineMenuMark? { nil }
+    func onlineHomeSubtitle(_ input: OnlineAttentionInput, connectionStatus: String) -> String { "" }
+}

@@ -25,6 +25,8 @@ final class OnlineBattleSession {
     private var acknowledgedStarts = Set<String>()
     private var submittedReports = Set<String>()
     private var nextRecoveryRead: TimeInterval?
+    /// Battles this connection already pressed "ready" for at their current revision. The server view does not expose it.
+    func preparedBattleIDs() -> Set<String> { [] }
     private struct RoundWork: Hashable {
         let generation: UInt64
         let battleID: String

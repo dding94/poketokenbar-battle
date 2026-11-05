@@ -69,14 +69,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     nonisolated static let faintedMark = "\u{271A}"
 
     /// The first line's suffix: the practice badge and the fainted mark, in that order; nil when neither.
-    nonisolated static func menuBadge(practice: String?, fainted: Bool) -> String? {
+    nonisolated static func menuBadge(practice: String?, fainted: Bool, online: String? = nil) -> String? {
         let parts = [practice, fainted ? faintedMark : nil].compactMap { $0 }
         return parts.isEmpty ? nil : parts.joined(separator: " ")
     }
 
     /// The tooltip with the practice line and, while the current Pokémon (`faintedName`) is fainted, how to heal it.
     nonisolated static func menuToolTip(base: String?, badge: String?, resultReady: Bool, faintedName: String?,
-                                        l: L) -> String? {
+                                        onlineLine: String? = nil, l: L) -> String? {
         var lines: [String] = []
         if let base, !base.isEmpty { lines.append(base) }
         if badge != nil { lines.append(resultReady ? l.practiceStatusResult : l.practiceStatusRunning) }
