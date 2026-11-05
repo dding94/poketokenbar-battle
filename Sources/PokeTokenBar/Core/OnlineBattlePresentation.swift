@@ -103,6 +103,9 @@ final class OnlineBattlePresentation {
     var historyError: String?
     var liveLogs: [String] = []
     var stage: OnlineBattleStaging?
+    /// True while the popover is open and the online screen is on it. Written by the session. Announcements wait for it.
+    var screenShown = false
+    @ObservationIgnored var announcements = OnlineBattleAnnouncementLedger()
     var stageSpeed: PracticePlaybackSpeed = .normal
     var roster: [PracticeCandidate] = []
     var entryHP: [String: Int] = [:]
@@ -237,6 +240,12 @@ final class OnlineBattlePresentation {
         case .dismissNotice: host.notice = nil; return false
         }
     }
+
+    /// The turn-start line for VoiceOver when it is due, nil when it is not (closed popover, beats still playing,
+    /// already said, no open picker).
+    func claimTurnAnnouncement(l: L, pickerOpen: Bool, playing: Bool, now: Date) -> String? { nil }
+    /// The result line for VoiceOver when it is due.
+    func claimResultAnnouncement(l: L, screen: OnlineBattleResultScreen) -> String? { nil }
 
     func send(_ action: OnlineBattleUIAction) {
         // These are presentation guards. The session independently validates server state and replay state.

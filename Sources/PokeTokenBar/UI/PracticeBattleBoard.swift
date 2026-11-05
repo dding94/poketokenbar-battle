@@ -292,6 +292,8 @@ struct PracticeSideCard: View {
     var label: String?
     /// One small line at the card's foot (the online foe's streak and record). A blank string keeps the line's room.
     var caption: String?
+    /// What VoiceOver reads for the whole card; nil leaves the card's own children to speak (practice).
+    var spoken: OnlineBattleSpoken.Card?
 
     private var revealedMoves: [String] { reveal?.moves ?? side.moves }
     private var revealedAbility: String? {
@@ -437,6 +439,10 @@ struct PracticeMoveCard: View {
     /// The mark takes the key badge's place, so the card never changes size.
     var chosen = false
     let action: () -> Void
+
+    /// The name and the value VoiceOver reads for this card.
+    var spokenLabel: String { "" }
+    var spokenValue: String { "" }
 
     private var special: Bool { move.id == "recharge" || move.id == "struggle" }
     private var disabled: Bool { locked || move.disabled || (!special && move.pp <= 0) }

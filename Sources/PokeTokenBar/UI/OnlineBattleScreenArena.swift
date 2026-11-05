@@ -11,6 +11,11 @@ struct OnlineBattleArena: View {
     let artwork: Bool
     var speciesNameProvider: any PokemonNameProviding = PokemonNameClient.shared
     var speciesNameStore: PokemonNameDisplayStore = .shared
+    /// Where VoiceOver announcements go; tests record them.
+    var announce: (String) -> Void = { AccessibilityNotification.Announcement($0).post() }
+
+    /// Says the turn start when it is due (see `OnlineBattlePresentation.claimTurnAnnouncement`).
+    func announceTurnIfDue(now: Date = .now) {}
 
     /// What fills the place under the beat lines.
     enum Footer: Equatable {

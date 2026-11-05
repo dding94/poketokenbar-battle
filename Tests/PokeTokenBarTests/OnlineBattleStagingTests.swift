@@ -714,6 +714,25 @@ final class OnlineBattleStagingSessionTests: XCTestCase {
         XCTAssertEqual(stage.playback.history.count, played, "nothing replays on reopening")
     }
 
+    /// T21: announcements wait for `screenShown`, which is the popover being open and the screen being on it.
+    func testScreenShownFollowsThePopoverAndTheOnlineScreen() async throws {
+        let final = try battle(), first = try running(final, rounds: 1)
+        let h = try await setup([first], roomForRoster: final)
+        XCTAssertFalse(h.model.screenShown)
+        await h.session.perform(.setOnlineScreenVisible(true))
+        XCTAssertFalse(h.model.screenShown, "the screen without an open popover is not on anyone's display")
+        await h.session.perform(.setPopoverVisible(true))
+        XCTAssertTrue(h.model.screenShown)
+        await h.session.perform(.setPopoverVisible(false))
+        XCTAssertFalse(h.model.screenShown, "a closed popover is hidden even before its views report it")
+        await h.session.perform(.setPopoverVisible(true))
+        XCTAssertFalse(h.model.screenShown, "closing released the screen; it reports again when it appears")
+        await h.session.perform(.setOnlineScreenVisible(true))
+        XCTAssertTrue(h.model.screenShown)
+        await h.session.perform(.setOnlineScreenVisible(false))
+        XCTAssertFalse(h.model.screenShown)
+    }
+
     func testRoundsWhileHiddenNeverPlayOnReopening() async throws {
         let final = try battle(), first = try running(final, rounds: 1)
         let advance = "/v1/battles/\(final.battleId)/advance"

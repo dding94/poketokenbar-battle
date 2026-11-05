@@ -8,6 +8,10 @@ struct OnlineBattleResultView: View {
     let model: OnlineBattlePresentation
     let l: L
     let artwork: Bool
+    var announce: (String) -> Void = { AccessibilityNotification.Announcement($0).post() }
+
+    /// Says the outcome once the result is on screen.
+    func announceResultIfDue(_ screen: OnlineBattleResultScreen) {}
 
     var body: some View {
         if let screen = model.resultScreen(l: l) {
