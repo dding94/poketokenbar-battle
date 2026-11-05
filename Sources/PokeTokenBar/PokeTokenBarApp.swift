@@ -50,7 +50,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
     }
 
     /// 팝오버를 열 때의 화면 결정 — Home 으로 reset 한 뒤 진행 중인 연습이 있으면 연습 화면, 그다음 `route`.
-    static func applyOpenRoute(to navigation: PopoverNavigation, practiceActive: Bool,
+    static func applyOpenRoute(to navigation: PopoverNavigation, practiceActive: Bool, onlineActive: Bool = false,
                                route: (PopoverNavigation) -> Void) {
         navigation.reset()
         navigation.showingPractice = practiceActive   // reset() 이 이 플래그를 지우는지에 기대지 않는다

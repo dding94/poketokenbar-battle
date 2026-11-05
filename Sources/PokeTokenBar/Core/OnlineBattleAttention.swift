@@ -231,3 +231,17 @@ private extension OnlineAttentionSeenRecord {
         return record
     }
 }
+
+/// Which online steps keep the popover open while the person works elsewhere, and where a reopened popover lands.
+/// Pure: the app delegate reads it to choose `NSPopover.behavior`; nothing here opens or closes anything.
+enum OnlinePopoverPinning {
+    /// Entry, waiting and battle steps pin. The lobby list, a result and the home screen stay transient.
+    static func isPinned(phase: OnlineBattlePresentation.Phase, onlineScreenShowing: Bool) -> Bool {
+        false
+    }
+
+    /// A relaunched or reopened popover returns to a match that is still being played or verified.
+    static func routesToOnlineScreenOnOpen(phase: OnlineBattlePresentation.Phase) -> Bool {
+        false
+    }
+}

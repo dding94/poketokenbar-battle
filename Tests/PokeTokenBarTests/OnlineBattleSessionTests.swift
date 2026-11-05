@@ -665,6 +665,34 @@ final class OnlineBattleSessionTests: XCTestCase {
         XCTAssertEqual(after, requests)
         XCTAssertEqual(effects.effectCalls, 0)
     }
+    // T05: a newer request must not hide the match that is still being played or verified after a relaunch.
+    func testRelaunchShowsTheRunningMatchEvenWhenANewerChallengeIsPending() async throws {
+        let running = try changed(battle(), ["state": "RUNNING", "result": NSNull(), "roundSeq": 1, "journal": []])
+        let newer = try changed(battle(idOverride: "bt_newer"), ["state": "PENDING", "result": NSNull(), "journal": [], "createdAt": running.createdAt + 60_000])
+        let (session, _, _, _) = try await setup([newer, running])
+        await session.bootstrap()
+        XCTAssertEqual(session.presentation.room?.battleId, running.battleId)
+        XCTAssertEqual(session.presentation.phase, .arena)
+    }
+    func testRelaunchShowsTheVerifyingMatchEvenWhenANewerChallengeIsPending() async throws {
+        let reported = try changed(battle(), ["state": "REPORTED"])
+        let newer = try changed(battle(idOverride: "bt_newer"), ["state": "PENDING", "result": NSNull(), "journal": [], "createdAt": reported.createdAt + 60_000])
+        let (session, http, _, _) = try await setup([newer, reported])
+        // The relaunched app re-sends its identical report; the server answers that it is already REPORTED.
+        await http.route("/v1/battles/\(reported.battleId)/report", try JSONEncoder().encode(reported))
+        await session.bootstrap()
+        XCTAssertEqual(Set(session.presentation.battles.map(\.battleId)), [reported.battleId, newer.battleId], "both rooms were processed")
+        XCTAssertEqual(session.presentation.room?.battleId, reported.battleId)
+        XCTAssertEqual(session.presentation.phase, .verifying)
+    }
+    func testRelaunchStillShowsTheNewestPendingChallengeWhenNothingIsRunning() async throws {
+        let older = try changed(battle(), ["state": "PENDING", "result": NSNull(), "journal": []])
+        let newer = try changed(battle(idOverride: "bt_newer"), ["state": "PENDING", "result": NSNull(), "journal": [], "createdAt": older.createdAt + 60_000])
+        let (session, _, _, _) = try await setup([older, newer])
+        await session.bootstrap()
+        XCTAssertEqual(session.presentation.room?.battleId, newer.battleId)
+        XCTAssertEqual(session.presentation.phase, .room)
+    }
     func testHistoryOverlayBlocksHiddenLiveManualChoiceAtSessionBoundary() async throws {
         let room = try changed(battle(), ["state": "RUNNING", "result": NSNull(), "roundSeq": 1, "journal": []])
         let (session, http, _, _) = try await setup([room])

@@ -9,6 +9,8 @@ final class OnlineBattlePresentation {
     var phase: Phase = .setup
     var connectionStatus = ""
     var notice: String?
+    /// True while the popover ignores outside clicks (entry, waiting and battle steps). Written by the app delegate.
+    var popoverPinned = false
     /// macOS notification guidance owned by the online notifier; nil when nothing needs saying.
     var notificationHint: OnlineNotificationHint?
     /// Set with an ended-challenge notice so a background refresh does not wipe it before it is read.

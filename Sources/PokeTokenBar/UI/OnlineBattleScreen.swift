@@ -10,6 +10,7 @@ struct OnlineBattleScreen: View {
     var readInvitationClipboard: () -> String? = { NSPasteboard.general.string(forType: .string) }
     var speciesNameProvider: any PokemonNameProviding = PokemonNameClient.shared
     var speciesNameStore: PokemonNameDisplayStore = .shared
+    var onClosePopover: () -> Void = {}
     let onClose: () -> Void
 
     var showsGroupBack: Bool { !model.showsHistory && !model.showsStandings && model.rematchSourceID == nil && [.room, .arena, .verifying].contains(model.phase) }

@@ -57,12 +57,14 @@ final class OnlineBattleScreenRenderingTests: XCTestCase {
             .init(slot: 2, id: "quickattack", name: "Quick Attack", type: "Normal", pp: 30, maxpp: 30, disabled: false)])
     }
 
-    private func host(_ model: OnlineBattlePresentation, clipboard: @escaping () -> String? = { nil }) async -> NSView {
+    private func host(_ model: OnlineBattlePresentation, clipboard: @escaping () -> String? = { nil },
+                      onClose: @escaping () -> Void = {}, onClosePopover: @escaping () -> Void = {}) async -> NSView {
         let provider = OnlineBattleSyntheticNameProvider()
         let names = PokemonNameDisplayStore()
         for id in [25, 129] { _ = await names.load(.init(kind: .pokemonSpecies, name: String(id)), provider: provider) }
         let host = NSHostingView(rootView: OnlineBattleScreen(model: model, l: L(.ko), artwork: false, readInvitationClipboard: clipboard,
-                                                             speciesNameProvider: provider, speciesNameStore: names, onClose: {})
+                                                             speciesNameProvider: provider, speciesNameStore: names,
+                                                             onClosePopover: onClosePopover, onClose: onClose)
             .background(Color.white).environment(\.colorScheme, .light))
         host.frame = NSRect(x: 0, y: 0, width: 360, height: 610)
         let window = NSWindow(contentRect: NSRect(x: -10000, y: -10000, width: 360, height: 610),
@@ -124,6 +126,65 @@ final class OnlineBattleScreenRenderingTests: XCTestCase {
             window.sendEvent(event)
         }
     }
+    // MARK: T05 pinned header
+
+    private func accessibilityElements(in object: Any) -> [NSObject] {
+        guard let element = object as? NSObject else { return [] }
+        let children = (element as? NSAccessibilityProtocol)?.accessibilityChildren() ?? []
+        return [element] + children.flatMap { accessibilityElements(in: $0) }
+    }
+    private func labelled(_ label: String, in host: NSView) -> [NSObject] {
+        accessibilityElements(in: host).filter { ($0 as? NSAccessibilityProtocol)?.accessibilityLabel() == label }
+    }
+    private func pinnedModel(_ pinned: Bool) -> OnlineBattlePresentation {
+        let model = Self.model()
+        model.phase = .room; model.room = Self.room(state: .pending, confirmed: false)
+        model.popoverPinned = pinned
+        return model
+    }
+    func testPinnedHeaderShowsOneMarkerAndACloseButtonAndStaysAtThreeSixtyPoints() async throws {
+        let l = L(.ko)
+        let host = await host(pinnedModel(true))
+        _ = try await capture(host, named: "online-synthetic-pinned-header.png")
+        XCTAssertEqual(labelled(l.onlinePinned, in: host).count, 1, "exactly one pinned marker")
+        XCTAssertEqual(labelled(l.close, in: host).count, 1, "one visible close button")
+    }
+    func testUnpinnedHeaderHasNeitherMarkerNorCloseButton() async throws {
+        let l = L(.ko)
+        let host = await host(pinnedModel(false))
+        _ = try await capture(host, named: "online-synthetic-unpinned-header.png")
+        XCTAssertTrue(labelled(l.onlinePinned, in: host).isEmpty)
+        XCTAssertTrue(labelled(l.close, in: host).isEmpty)
+    }
+    func testCloseButtonClosesThePopoverAndNotJustTheScreen() async throws {
+        var closed = 0, backed = 0
+        let host = await host(pinnedModel(true), onClose: { backed += 1 }, onClosePopover: { closed += 1 })
+        _ = try await capture(host, named: "online-synthetic-pinned-close.png")
+        let button = try XCTUnwrap(labelled(L(.ko).close, in: host).first as? NSAccessibilityProtocol)
+        XCTAssertTrue(button.accessibilityPerformPress())
+        XCTAssertEqual(closed, 1); XCTAssertEqual(backed, 0)
+    }
+    func testEscapeClosesThePopoverWhilePinnedAndGoesBackToHomeOtherwise() async throws {
+        func escape(_ host: NSView) throws {
+            let window = try XCTUnwrap(host.window)
+            let event = try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                                     windowNumber: window.windowNumber, context: nil, characters: "\u{1b}", charactersIgnoringModifiers: "\u{1b}",
+                                                     isARepeat: false, keyCode: 53))
+            XCTAssertTrue(window.performKeyEquivalent(with: event))
+        }
+        var closed = 0, backed = 0
+        let pinned = await host(pinnedModel(true), onClose: { backed += 1 }, onClosePopover: { closed += 1 })
+        _ = try await capture(pinned, named: "online-synthetic-pinned-escape.png")
+        try escape(pinned)
+        XCTAssertEqual(closed, 1); XCTAssertEqual(backed, 0)
+        window?.close()
+        var closed2 = 0, backed2 = 0
+        let plain = await host(pinnedModel(false), onClose: { backed2 += 1 }, onClosePopover: { closed2 += 1 })
+        _ = try await capture(plain, named: "online-synthetic-unpinned-escape.png")
+        try escape(plain)
+        XCTAssertEqual(closed2, 0); XCTAssertEqual(backed2, 1)
+    }
+
     func testOnlineBattlePasteButtonReadsOnlyOnExplicitClickAndNeverAppliesOrJoins() async throws {
         let model = OnlineBattlePresentation()
         model.serverAddress = "https://saved.example.invalid"
