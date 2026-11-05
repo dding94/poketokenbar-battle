@@ -92,12 +92,16 @@ final class OnlineBattleOnboardingRenderingTests: XCTestCase {
         return (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }.joined(separator: " ")
     }
     private func compact(_ text: String) -> String { text.filter { !$0.isWhitespace }.uppercased() }
-    private func buttons(in view: NSView) -> [NSButton] {
-        (view as? NSButton).map { [$0] } ?? view.subviews.flatMap { buttons(in: $0) }
-    }
-    /// SwiftUI draws a button as an NSButton; its words may sit in the title or in the accessibility label.
-    private func button(_ words: String, in view: NSView) -> NSButton? {
-        buttons(in: view).first { $0.title == words || $0.accessibilityLabel() == words }
+    /// Dark pixels (near-black text) in the rows from `top` down, in 2x pixels. A disabled control draws its words grey.
+    private func darkPixels(_ bitmap: NSBitmapImageRep, fromRow top: Int) -> Int {
+        var count = 0
+        for y in top..<bitmap.pixelsHigh {
+            for x in 0..<bitmap.pixelsWide {
+                guard let c = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB) else { continue }
+                if c.redComponent < 0.3, c.greenComponent < 0.3, c.blueComponent < 0.3 { count += 1 }
+            }
+        }
+        return count
     }
 
     // MARK: the recovery code
@@ -108,18 +112,21 @@ final class OnlineBattleOnboardingRenderingTests: XCTestCase {
         model.recoveryCode = Self.code; model.popoverPinned = true
         let l = L(.en)
         let view = await screen(model, l: l)
-        XCTAssertNotNil(button(l.onlineRecoveryCopy, in: view), "a copy button")
-        let keep = try XCTUnwrap(button(l.onlineRecoverySaved, in: view))
-        XCTAssertFalse(keep.isEnabled, "nothing was copied or written down yet")
         let unchecked = try await capture(view, named: "t11-00-recovery-unchecked.png")
         XCTAssertTrue(compact(try recognized(view)).contains(Self.code), "the code is readable until it is copied")
+        let text = try recognized(view)
+        XCTAssertTrue(text.contains("Copy"), "a copy button:\n\(text)")
+        XCTAssertTrue(text.contains("Copy it or write it down first"), "the reason the keep button is shut:\n\(text)")
         model.send(.setRecoveryWrittenDown(true))
         try await Task.sleep(for: .milliseconds(150)); view.layoutSubtreeIfNeeded()
-        let opened = try XCTUnwrap(button(l.onlineRecoverySaved, in: view))
-        XCTAssertTrue(opened.isEnabled)
         let checked = try await capture(view, named: "t11-01-recovery-checked.png")
-        XCTAssertNotEqual(try pixels(unchecked), try pixels(checked), "the check is drawn")
-        opened.performClick(nil)
+        // SwiftUI draws these buttons without an NSButton here, so the keep button's state is read from its words:
+        // black while it can be pressed, grey while it cannot. Rows below the checkbox hold only that button.
+        let shut = darkPixels(unchecked, fromRow: 436), open = darkPixels(checked, fromRow: 436)
+        XCTAssertLessThan(shut, 50, "the keep button's words are grey before the check")
+        XCTAssertGreaterThan(open, 400, "the keep button's words turn black once the check is made")
+        XCTAssertFalse(try recognized(view).contains("Copy it or write it down first"), "the reason goes away with the check")
+        model.send(.acknowledgeRecoveryCode)
         XCTAssertNil(model.recoveryCode)
     }
 

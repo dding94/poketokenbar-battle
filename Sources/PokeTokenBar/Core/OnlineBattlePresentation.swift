@@ -52,6 +52,8 @@ final class OnlineBattlePresentation {
         didSet {
             // A different account, or one that stopped being the host, takes the panel and any unsaved code with it.
             if account?.trainer.trainerId != oldValue?.trainer.trainerId || !isHost { host.close() }
+            // The first steps are for whoever just saw their recovery code; another account never inherits them.
+            if account?.trainer.trainerId != oldValue?.trainer.trainerId { firstSteps = nil }
         }
     }
     /// The host panel (T10): invite codes, members, reconnect codes. Only a host ever shows it.
@@ -65,10 +67,12 @@ final class OnlineBattlePresentation {
         isHost && phase == .lobby && !isBusy && !showsHistory && !showsStandings && rematchSourceID == nil
     }
     /// Who the host can act on: every active member but the host.
-    var hostMembers: [OnlineBattleMember] {
+    var hostMembers: [OnlineBattleMember] { lobbyPeers }
+    var members: [OnlineBattleMember] = []
+    /// Who the lobby can challenge: every active member but me. Empty means the group has nobody else yet.
+    var lobbyPeers: [OnlineBattleMember] {
         members.filter { $0.status == .active && $0.trainerId != account?.trainer.trainerId }
     }
-    var members: [OnlineBattleMember] = []
     var battles: [OnlineBattleView] = []
     /// Archive navigation is independent of the live room and arena.
     var showsStandings = false
@@ -128,7 +132,22 @@ final class OnlineBattlePresentation {
     var deadline: Date?
     var choiceSubmitted = false
     /// Transient onboarding output only; never an access key or persisted UI state.
-    var recoveryCode: String?
+    var recoveryCode: String? {
+        // The check belongs to the code it was made for: a new code, or none, starts unchecked.
+        didSet { if recoveryCode != oldValue { recoveryWrittenDown = false } }
+    }
+    /// The person says they wrote the code down. Only then may the keep button close the code screen.
+    var recoveryWrittenDown = false
+    var canAcknowledgeRecoveryCode: Bool { recoveryCode != nil && recoveryWrittenDown }
+    /// The three-line guide shown once on the lobby after the recovery code was kept or copied. Memory only.
+    var firstSteps: OnlineBattleFirstSteps?
+    /// Leaves the recovery code screen for good: the code is forgotten and the first steps take its place.
+    /// Nothing happens when no code is on screen, so a repeated press cannot bring the guide back.
+    func finishRecoveryScreen(copied: Bool) {
+        guard recoveryCode != nil else { return }
+        recoveryCode = nil
+        firstSteps = .init(copiedRecoveryCode: copied)
+    }
     var result: OnlineBattleUIResult?
     var onAction: (OnlineBattleUIAction) -> Void = { _ in }
 
@@ -286,15 +305,32 @@ final class OnlineBattlePresentation {
         case .configureServer(let address): guard !isBusy, (try? OnlineBattleOrigin(address)) != nil else { return }
         case .join(let code, let email): guard !isBusy, !code.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         case .recover(let code), .reconnect(let code): guard !isBusy, !code.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        case .setRecoveryWrittenDown(let written):
+            // Pure presentation: ticking the box never reaches the session.
+            if recoveryCode != nil { recoveryWrittenDown = written }
+            return
+        case .recoveryCopied:
+            // The clipboard has the code, so this screen forgets it, as a host's one-time code does.
+            finishRecoveryScreen(copied: true)
+            return
+        case .dismissFirstSteps:
+            firstSteps = nil
+            return
         case .acknowledgeRecoveryCode:
-            guard recoveryCode != nil else { return }
-            recoveryCode = nil
+            guard canAcknowledgeRecoveryCode else { return }
+            finishRecoveryScreen(copied: false)
         case .openBattle(let id): guard !showsHistory, !showsStandings, rematchSourceID == nil, !isBusy, battles.contains(where: { $0.battleId == id && $0.state.isActive }) else { return }
         case .refresh, .dismissResult: guard !isBusy else { return }
         case .host(let hostAction): guard applyHost(hostAction) else { return }
         }
         onAction(action)
     }
+}
+
+/// What the first lobby says after the recovery code was dealt with. `copiedRecoveryCode` adds the line that says
+/// the code went to the clipboard and is hidden. Never holds the code.
+struct OnlineBattleFirstSteps: Equatable, Sendable {
+    let copiedRecoveryCode: Bool
 }
 
 struct OnlineBattleUIResult {
@@ -312,6 +348,8 @@ enum OnlineBattleUIAction {
     case recover(code: String)
     case reconnect(code: String)
     case acknowledgeRecoveryCode, retryCredentialSave, refresh
+    /// Recovery code screen, all pure presentation: the box "I wrote it down", the code reaching the clipboard, closing the guide.
+    case setRecoveryWrittenDown(Bool), recoveryCopied, dismissFirstSteps
     case setPopoverVisible(Bool)
     case setOnlineScreenVisible(Bool), skipStage, setStageSpeed(PracticePlaybackSpeed)
     case selectEntry(String), selectOpponent(String), setMode(OnlineBattleMode)

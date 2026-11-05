@@ -881,7 +881,7 @@ final class OnlineBattleSession {
             guard presentation.rematchSourceID == nil else { return }
             if presentation.mode != mode { challengeIntent = nil }
             presentation.mode = mode; return
-        case .acknowledgeRecoveryCode: presentation.recoveryCode = nil; return
+        case .acknowledgeRecoveryCode: presentation.finishRecoveryScreen(copied: false); return
         case .dismissResult, .backToLobby: resetExtras(); clearHistory(); prefersLobby = true; navigationRevision &+= 1; selectedBattleID = nil; pinnedBattleID = nil; publish(); return
         case .openBattle(let id): selectBattle(id); return
         case .host(let hostAction): await performHost(hostAction); return

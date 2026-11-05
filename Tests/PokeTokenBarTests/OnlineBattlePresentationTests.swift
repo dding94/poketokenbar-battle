@@ -104,6 +104,8 @@ extension OnlineBattlePresentationTests {
         let model = OnlineBattlePresentation(); model.recoveryCode = "SYNTHETIC-RECOVERY"
         var acknowledged = 0
         model.onAction = { if case .acknowledgeRecoveryCode = $0 { acknowledged += 1 } }
+        // The keep button needs the "I wrote it down" box first (T11).
+        model.send(.setRecoveryWrittenDown(true))
         model.send(.acknowledgeRecoveryCode); model.send(.acknowledgeRecoveryCode)
         XCTAssertNil(model.recoveryCode); XCTAssertEqual(acknowledged, 1)
     }

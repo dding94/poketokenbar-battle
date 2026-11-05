@@ -61,8 +61,8 @@ struct OnlineBattleScreen: View {
                         Button(l.onlineRetrySave) { model.send(.retryCredentialSave) }
                             .disabled(model.isBusy)
                     }
-                    if let code = model.recoveryCode {
-                        recoveryCode(code)
+                    if model.recoveryCode != nil {
+                        OnlineBattleRecoveryCodeCard(model: model, l: l, writeClipboard: writeClipboard)
                     } else {
                         stage
                     }
@@ -169,18 +169,6 @@ struct OnlineBattleScreen: View {
             .frame(maxWidth: .infinity, alignment: .leading).practiceCard()
         }
         }
-    }
-
-    private func recoveryCode(_ code: String) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Label(l.onlineRecoveryTitle, systemImage: "key").font(.headline)
-            Text(l.onlineRecoveryHint).font(.callout).fixedSize(horizontal: false, vertical: true)
-            Text(code).font(.system(.body, design: .monospaced)).textSelection(.enabled)
-                .fixedSize(horizontal: false, vertical: true)
-            Button(l.onlineRecoverySaved) { model.send(.acknowledgeRecoveryCode) }
-                .buttonStyle(.borderedProminent)
-        }.practiceCard()
-        .privacySensitive()
     }
 }
 
