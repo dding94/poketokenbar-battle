@@ -201,7 +201,8 @@ struct OnlineBattleArena: View {
     // MARK: Beat lines
 
     /// The beat on screen over the newest finished ones, newest first. The card takes the room the board has left
-    /// (three finished lines at least, five at most), so the picker below it keeps its place.
+    /// (one finished line at least, five at most), so the picker below it keeps its place. The tallest foe card with
+    /// its nickname, record and wrapped move chips leaves room for the one line only.
     private func beatLines(_ view: BattleView) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             if let playback = model.stage?.playback {
@@ -210,6 +211,8 @@ struct OnlineBattleArena: View {
                     PracticeBeatLines(playback: playback, wording: wording, idle: idle, l: l, artwork: artwork, recentCount: 5)
                     PracticeBeatLines(playback: playback, wording: wording, idle: idle, l: l, artwork: artwork, recentCount: 4)
                     PracticeBeatLines(playback: playback, wording: wording, idle: idle, l: l, artwork: artwork, recentCount: 3)
+                    PracticeBeatLines(playback: playback, wording: wording, idle: idle, l: l, artwork: artwork, recentCount: 2)
+                    PracticeBeatLines(playback: playback, wording: wording, idle: idle, l: l, artwork: artwork, recentCount: 1)
                 }
             } else {
                 Text(mode == .manual ? l.practiceBattleBegins : l.practiceTurn(view.turn))
@@ -217,7 +220,7 @@ struct OnlineBattleArena: View {
             }
         }
         .font(.caption)
-        .frame(maxWidth: .infinity, minHeight: 92, maxHeight: .infinity, alignment: .topLeading)
+        .frame(maxWidth: .infinity, minHeight: 56, maxHeight: .infinity, alignment: .topLeading)
         .practiceCard(padding: 8)
     }
 
