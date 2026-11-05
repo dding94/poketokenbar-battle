@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import Vision
 import XCTest
 @testable import PokeTokenBar
 
@@ -390,5 +391,150 @@ final class OnlineBattleScreenRenderingTests: XCTestCase {
         Self.arena(model)
         let whileLive = try await capture(host, named: "online-synthetic-replay-while-live.png")
         XCTAssertEqual(next, whileLive)
+    }
+
+    // MARK: T14 arena board
+
+    private func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap { descendants($0) } }
+    private func buttons(titled title: String, in view: NSView) -> [NSButton] {
+        descendants(view).compactMap { $0 as? NSButton }.filter { $0.title == title }
+    }
+    private func arenaHost(_ model: OnlineBattlePresentation, width: CGFloat = PopoverMetrics.scrollContentWidth) async -> NSView {
+        let provider = OnlineBattleSyntheticNameProvider()
+        let host = NSHostingView(rootView: OnlineBattleArena(model: model, l: L(.en), artwork: false, speciesNameProvider: provider,
+                                                             speciesNameStore: PokemonNameDisplayStore())
+            .frame(width: width).background(Color.white).environment(\.colorScheme, .light))
+        host.frame = NSRect(x: 0, y: 0, width: width, height: 700)
+        let window = NSWindow(contentRect: host.frame, styleMask: .borderless, backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false; window.appearance = NSAppearance(named: .aqua)
+        window.contentView = host; window.orderFront(nil); self.window = window
+        try? await Task.sleep(for: .milliseconds(150))
+        host.layoutSubtreeIfNeeded()
+        return host
+    }
+    private func recognized(_ host: NSView) throws -> String {
+        let bitmap = try PracticeScreenRenderingTests.capture2x(host)
+        let request = VNRecognizeTextRequest()
+        request.recognitionLevel = .accurate; request.recognitionLanguages = ["en-US"]
+        try VNImageRequestHandler(cgImage: XCTUnwrap(bitmap.cgImage)).perform([request])
+        return (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }.joined(separator: "\n")
+    }
+
+    /// The board has one height whatever the state, so the move picker never moves or leaves the scroll area.
+    func testArenaKeepsOneHeightInEveryStateAndFitsTheScrollArea() async throws {
+        let manual = try OnlineBattleArenaFixture.arena(seat: .p1)
+        defer { manual.close() }
+        try manual.play(rounds: 1); manual.staging.skipToEnd(); manual.publish()
+        let host = await arenaHost(manual.model)
+        var heights = [("choosing", host.fittingSize.height)]
+        try manual.play(rounds: 1)
+        XCTAssertTrue(manual.staging.isPlaying)
+        try await Task.sleep(for: .milliseconds(150)); host.layoutSubtreeIfNeeded()
+        heights.append(("playing", host.fittingSize.height))
+        manual.model.choiceSubmitted = true
+        try await Task.sleep(for: .milliseconds(150)); host.layoutSubtreeIfNeeded()
+        heights.append(("sent", host.fittingSize.height))
+        manual.model.choiceSubmitted = false
+        manual.staging.skipToEnd()
+        manual.model.request = .init(kind: "none", moves: [])
+        try await Task.sleep(for: .milliseconds(150)); host.layoutSubtreeIfNeeded()
+        heights.append(("forced", host.fittingSize.height))
+        manual.model.request = .init(kind: "move", moves: [.init(slot: 1, id: "thunderbolt", name: "Thunderbolt", type: "Electric", pp: 1, maxpp: 1, disabled: false)])
+        try await Task.sleep(for: .milliseconds(150)); host.layoutSubtreeIfNeeded()
+        heights.append(("one move", host.fittingSize.height))
+        let auto = try OnlineBattleArenaFixture.arena(seat: .p2, name: "auto")
+        defer { auto.close() }
+        try auto.play(rounds: 1, mode: .auto, secondsLeft: nil)
+        auto.model.room = try OnlineBattleArenaFixture.liveRoom("auto", seat: .p2, deadline: nil)
+        let autoHost = await self.host2(auto.model)
+        heights.append(("auto", autoHost.fittingSize.height))
+        for (name, height) in heights { XCTAssertEqual(height, heights[0].1, accuracy: 0.5, "\(name) must not change the board height") }
+        // The popover's scroll area is 520pt: the group-back row (about 16pt) and the 12pt gaps come before the board.
+        XCTAssertLessThanOrEqual(heights[0].1, 520 - 16 - 12 - 12 - 24, "the move picker must stay inside the scroll area")
+    }
+    private func host2(_ model: OnlineBattlePresentation) async -> NSView {
+        window?.close()
+        return await arenaHost(model)
+    }
+
+    /// My moves are the picker's cards only: the old card also listed them as chips, so each name showed twice.
+    func testArenaShowsEachOfMyMoveNamesOnce() async throws {
+        let fixture = try OnlineBattleArenaFixture.arena(seat: .p1)
+        defer { fixture.close() }
+        try fixture.play(rounds: 1); fixture.staging.skipToEnd(); fixture.publish()
+        let text = try recognized(await arenaHost(fixture.model))
+        func count(_ needle: String) -> Int { text.components(separatedBy: needle).count - 1 }
+        XCTAssertEqual(count("Thunderbolt"), 1, text)
+        XCTAssertEqual(count("Quick Attack"), 1, text)
+    }
+
+    func testSkipButtonsAppearOnlyWhileTheBeatsPlay() async throws {
+        let l = L(.en)
+        let manual = try OnlineBattleArenaFixture.arena(seat: .p1)
+        defer { manual.close() }
+        var actions: [String] = []
+        manual.model.onAction = { action in
+            switch action {
+            case .skipStage: actions.append("skip")
+            default: break
+            }
+        }
+        try manual.play(rounds: 1); manual.staging.skipToEnd(); manual.publish()
+        let host = await arenaHost(manual.model)
+        XCTAssertTrue(buttons(titled: l.practiceSkip, in: host).allSatisfy { !$0.isEnabled || $0.isHidden }, "nothing to skip at rest")
+        try manual.play(rounds: 1)
+        try await Task.sleep(for: .milliseconds(150)); host.layoutSubtreeIfNeeded()
+        let skip = try XCTUnwrap(buttons(titled: l.practiceSkip, in: host).first)
+        XCTAssertTrue(skip.isEnabled)
+        skip.performClick(nil)
+        XCTAssertEqual(actions, ["skip"])
+        XCTAssertTrue(buttons(titled: l.practiceSkipToResult, in: host).isEmpty, "the result button is for automatic battles")
+    }
+
+    func testAutomaticBattleOffersShowResultWhilePlayingAndKeepsItsPlaceAtRest() async throws {
+        let l = L(.en)
+        let auto = try OnlineBattleArenaFixture.arena(seat: .p2, name: "auto")
+        defer { auto.close() }
+        var actions = 0
+        auto.model.onAction = { if case .skipStage = $0 { actions += 1 } }
+        try auto.play(rounds: 1, mode: .auto, secondsLeft: nil)
+        auto.model.room = try OnlineBattleArenaFixture.liveRoom("auto", seat: .p2, deadline: nil)
+        XCTAssertTrue(auto.staging.isPlaying)
+        let host = await arenaHost(auto.model)
+        let result = try XCTUnwrap(buttons(titled: l.practiceSkipToResult, in: host).first)
+        XCTAssertTrue(result.isEnabled)
+        result.performClick(nil)
+        XCTAssertEqual(actions, 1)
+        auto.staging.skipToEnd(); auto.publish()
+        try await Task.sleep(for: .milliseconds(150)); host.layoutSubtreeIfNeeded()
+        XCTAssertTrue(buttons(titled: l.practiceSkipToResult, in: host).allSatisfy { !$0.isEnabled })
+    }
+
+    // MARK: T14 arena board states (PR images)
+
+    /// Four states of the arena the way a real battle reaches them: before a choice, while a staged round plays,
+    /// after the choice is sent, and an automatic battle. Set `PTB_SNAPSHOT_SCREENSHOT_DIR` to keep the PNGs.
+    func testArenaStatesRenderInsidePopoverForPRImages() async throws {
+        let manual = try OnlineBattleArenaFixture.arena(seat: .p1)
+        defer { manual.close() }
+        try manual.play(rounds: 1)
+        manual.staging.skipToEnd()
+        manual.publish()
+        let host = await host(manual.model)
+        let choosing = try await capture(host, named: "arena-1-choosing.png")
+        try manual.play(rounds: 1)
+        XCTAssertTrue(manual.staging.isPlaying)
+        let playing = try await capture(host, named: "arena-2-playing.png")
+        manual.model.choiceSubmitted = true
+        let sent = try await capture(host, named: "arena-3-choice-sent.png")
+        XCTAssertNotEqual(choosing, playing); XCTAssertNotEqual(playing, sent)
+
+        let auto = try OnlineBattleArenaFixture.arena(seat: .p2, name: "auto")
+        defer { auto.close() }
+        try auto.play(rounds: 1, mode: .auto, secondsLeft: nil)
+        auto.model.room = try OnlineBattleArenaFixture.liveRoom("auto", seat: .p2, deadline: nil)
+        XCTAssertTrue(auto.staging.isPlaying)
+        let autoHost = await self.host(auto.model)
+        _ = try await capture(autoHost, named: "arena-4-auto.png")
     }
 }
