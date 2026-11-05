@@ -4005,6 +4005,41 @@ extension OnlineBattleSessionTests {
         XCTAssertTrue(session.presentation.choiceSubmitted)
     }
 
+    /// The send reached the server and only the answer was lost. The next read shows it in, so nothing goes out twice.
+    func testAKeptMoveWhoseAnswerWasLostIsNotSentAgainOnceTheReadShowsIt() async throws {
+        let (final, open, next) = try aroundTheGap(), observer = SessionObserver(), connection = SessionConnection()
+        let (session, http, _, _) = try await setup([open], trainer: "trainer-two", connection: connection, observer: observer)
+        await session.bootstrap()
+        try await notify(observer, connection, room: final, fields: pairNotice(final))
+        let slot = try XCTUnwrap(usableSlots(session).first)
+        session.presentation.send(.chooseMove(slot)); await settleTasks()
+        await http.route(choicesPath(open), errorBody("internal"), status: 500)
+        await http.route("/v1/battles/\(open.battleId)", try JSONEncoder().encode(next))
+        try await notify(observer, connection, room: final, fields: openNotice(next))
+        let before = await http.count(choicesPath(open))
+        try await list(http, [try changed(next, ["ownChoice": "move \(slot)"])])
+        await session.refresh()
+        let after = await http.count(choicesPath(open)); XCTAssertEqual(after, before)
+        XCTAssertNil(session.presentation.heldChoice)
+        XCTAssertEqual(session.presentation.chosenSlot, slot)
+    }
+
+    /// A read brings the battle's last round while the room still runs: there is no next round for the kept move.
+    func testAKeptMoveIsDroppedWhenAReadBringsTheLastRound() async throws {
+        let (final, open, _) = try aroundTheGap(), observer = SessionObserver(), connection = SessionConnection()
+        let (session, http, _, _) = try await setup([open], trainer: "trainer-two", connection: connection, observer: observer)
+        await session.bootstrap()
+        try await notify(observer, connection, room: final, fields: pairNotice(final))
+        session.presentation.send(.chooseMove(try XCTUnwrap(usableSlots(session).first))); await settleTasks()
+        XCTAssertNotNil(session.presentation.heldChoice)
+        let last = try changed(final, ["state": "RUNNING", "result": NSNull(), "deadline": NSNull()])
+        await http.route("/v1/battles/\(final.battleId)/report", try JSONEncoder().encode(changed(final, ["state": "REPORTED", "result": NSNull()])))
+        try await list(http, [last])
+        await session.refresh()
+        XCTAssertNil(session.presentation.heldChoice)
+        let posted = await http.count(choicesPath(open)); XCTAssertEqual(posted, 0)
+    }
+
     /// No turn-start line and no "what will you do" until the round has really opened.
     func testTheTurnStartWaitsForTheRoundToOpen() async throws {
         let (final, open, next) = try aroundTheGap(), observer = SessionObserver(), connection = SessionConnection()
@@ -4062,6 +4097,24 @@ extension OnlineBattleSessionTests {
         guard case .answer(_, let id)? = model.resultScreen(l: copy)?.rematch else { return XCTFail("the result answers theirs") }
         XCTAssertEqual(id, theirs.battleId)
         XCTAssertNil(model.notice)
+    }
+
+    /// From the archive there is no result to answer on, so their request's own room opens.
+    func testSubmittingFromTheArchiveWhenTheirsIsWaitingOpensTheirRoom() async throws {
+        let source = try battle(), theirs = try theirRematch(source)
+        let (session, http, _, _) = try await setup([source])
+        try await activeOpponent(http)
+        await session.bootstrap()
+        await session.perform(.backToLobby)
+        await session.perform(.showHistory); await session.perform(.openReplay(source.battleId)); await session.perform(.prepareRematch(source.battleId))
+        XCTAssertEqual(session.presentation.rematchSourceID, source.battleId)
+        session.presentation.selectedEntryID = "instance-one"
+        try await list(http, [source, theirs])
+        await session.perform(.submitRematch)
+        let posted = await http.count("/v1/battles/\(source.battleId)/rematch"); XCTAssertEqual(posted, 0)
+        XCTAssertEqual(session.presentation.room?.battleId, theirs.battleId)
+        XCTAssertEqual(session.presentation.phase, .room)
+        XCTAssertTrue(session.presentation.canAccept)
     }
 
     /// Both POSTs passed each other. With one Pokémon, my own request holds it, so nobody can answer. The result names
