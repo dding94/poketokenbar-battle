@@ -66,4 +66,21 @@ final class BinaryLocatorTests: XCTestCase {
         XCTAssertTrue(paths.contains { $0.contains("/.asdf/shims/ccusage") })
         XCTAssertTrue(paths.contains { $0.contains("/.volta/bin/ccusage") })
     }
+
+    /// These FileHandle reads raise an Objective-C exception on failure, and Swift cannot catch it: the whole app goes
+    /// down. The locator's deadline closes the handle under its reader, which killed a CI run on macOS 15 (2026-11-05).
+    /// It did not reproduce on macOS 27, so the guard is on the API itself. `readToEnd()` and `read(upToCount:)` throw instead.
+    func testNoSourceUsesAFileHandleReadThatRaises() throws {
+        let sources = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Sources")
+        var offenders: [String] = []
+        for case let url as URL in try XCTUnwrap(FileManager.default.enumerator(at: sources, includingPropertiesForKeys: nil))
+        where url.pathExtension == "swift" {
+            let text = try String(contentsOf: url, encoding: .utf8)
+            for api in [".readDataToEndOfFile()", ".readData(ofLength", ".availableData"] where text.contains(api) {
+                offenders.append("\(url.lastPathComponent): \(api)")
+            }
+        }
+        XCTAssertEqual(offenders, [])
+    }
 }

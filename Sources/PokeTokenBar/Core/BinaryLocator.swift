@@ -138,7 +138,9 @@ enum BinaryLocator {
         let drained = DispatchSemaphore(value: 0)
         let handle = output.fileHandleForReading
         DispatchQueue.global().async {
-            box.data = handle.readDataToEndOfFile()
+            // `readDataToEndOfFile` raises an Objective-C exception when the deadline below closes the handle first,
+            // and that takes the whole app down. The throwing form reports it as an error instead.
+            box.data = (try? handle.readToEnd()) ?? Data()
             drained.signal()
         }
 

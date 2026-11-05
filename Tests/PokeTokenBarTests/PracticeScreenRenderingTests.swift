@@ -317,7 +317,9 @@ final class PracticeScreenRenderingTests: XCTestCase {
         XCTAssertGreaterThan(dealt, 0, "the summary counts the damage dealt")
 
         let host = host(session)
-        let needles = ["Victory", "Finishing move", "Volt Tackle", "Damage dealt", "\(dealt)%", "Rematch"]
+        // Not the prominent Rematch button: when the host window turns key its label is white, and a capture off screen
+        // has no accent fill behind it (CI on macOS 15, 2026-11-05).
+        let needles = ["Victory", "Finishing move", "Volt Tackle", "Damage dealt", "\(dealt)%"]
         let (text, bitmap) = try await waitForText(needles, in: host)
         try save(bitmap, as: "practice-popover-result.png")
         assertRendered(needles, in: text)
