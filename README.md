@@ -4,21 +4,21 @@
 
 회사 동료끼리 기존에 키운 포켓몬으로 1:1 배틀을 하고, 진 쪽 포켓몬은 기절하며 이긴 쪽은 성장 경험치를 받는 macOS 앱 확장 프로젝트입니다. 배틀로 포켓몬을 빼앗지 않습니다.
 
-**현재 상태: 로컬 연습전과 온라인 정식전·경기 기록/다시보기·그룹 전적판까지 구현하고 자동 검증했습니다. PR 13에서 무료 운영 비용·인수·릴리스 준비를 진행 중입니다. 최신 앱과 서버의 설치/배포 여부는 [AI_HANDOFF](docs/AI_HANDOFF.md)를 확인하세요. 2.6.0 테스트판은 공개했으며 실제 두 맥 인수와 정식 릴리스는 아직 완료하지 않았습니다.**
+**현재 상태: 로컬 연습전과 온라인 정식전·경기 기록/다시보기·그룹 전적판에 더해, PR 14에서 온라인 사용 흐름(주소 입력 없는 가입, 방장 패널, 알림, 대전 연출, 접근성)과 앱 이름 변경을 구현하고 자동 검증했습니다. 공개 전 실제 두 맥 시험은 하지 않았고 공개 후 실전에서 확인합니다. 최신 앱·서버 배포 여부와 미검증 범위는 [AI_HANDOFF](docs/AI_HANDOFF.md)를 확인하세요.**
 
 ## 다른 AI가 작업을 시작할 때
 
 1. [AGENTS.md](AGENTS.md): 작업 규칙과 반드시 유지할 결정
 2. [docs/AI_HANDOFF.md](docs/AI_HANDOFF.md): 현재 구현 상태, 기준 소스, 다음 작업
-3. [docs/BATTLE_PLAN.md](docs/BATTLE_PLAN.md): 승인된 설계, PR 00~13(PR 08~10 폐기), TDD·인수·무료 운영 검증 기준
+3. [docs/BATTLE_PLAN.md](docs/BATTLE_PLAN.md): 승인된 설계, PR 00~14(PR 08~10 폐기), TDD·인수·무료 운영 검증 기준
 4. [CLAUDE.md](CLAUDE.md): 기존 Swift 앱의 상세 기여·테스트 규칙
 
-PR 00~07·11~12의 구현·자동 검증을 마쳤습니다(PR 08~10 폐기). 구현 요청을 받으면 AI_HANDOFF의 현재 PR 13 작업과 미검증 항목부터 이어갑니다. 문서를 읽은 것만으로 배포나 구현 권한이 생기는 것은 아닙니다.
+PR 00~07·11~14의 구현·자동 검증을 마쳤습니다(PR 08~10 폐기). 구현 요청을 받으면 AI_HANDOFF의 공개 전 남은 일과 미검증 항목부터 이어갑니다. 문서를 읽은 것만으로 배포나 구현 권한이 생기는 것은 아닙니다.
 
 ## 확정한 방향
 
 - macOS 전용. 기존 육성 데이터와 개체를 가져와 사용합니다.
-- 초대코드 + 닉네임으로 가입합니다. 로그인 화면과 이메일 인증은 추가하지 않습니다.
+- 초대코드 + 닉네임으로 가입합니다. 서버 주소는 앱에 내장돼 있어 입력하지 않습니다. 로그인 화면과 이메일 인증은 추가하지 않습니다.
 - 앱이 개인 접속키를 Keychain에 보관합니다. 닉네임을 계정 소유 증명으로 사용하지 않습니다.
 - 두 맥이 같은 시뮬레이터([Pokémon Showdown](https://github.com/smogon/pokemon-showdown) 기반 `@pkmn/sim`)로 같은 입력을 동시에 계산합니다. 서버는 전투를 계산하지 않습니다.
 - 배틀 방식은 신청할 때 고릅니다: 직접 조작(턴마다 기술 선택, 시간 초과 시 자동) 또는 자동 배틀. 온라인 경기는 정식전만 있습니다. 진 쪽 포켓몬은 기절하고, 이긴 쪽의 현재 포켓몬은 1천만 경험치를 받습니다(온라인 승리 하루 10회까지). 직접 조작 턴은 30초입니다.
@@ -48,22 +48,39 @@ PR 00~07·11~12의 구현·자동 검증을 마쳤습니다(PR 08~10 폐기). �
 - `engine/`: 고정 버전 시뮬레이터, JSON 계약·결정성 테스트, 제품 번들
 - `server/`: Cloudflare Worker·SQLite League DO·실시간 선택 중계와 결과 확정
 
-## 검증과 배포 상태
+## 설치와 업데이트
 
-자체 서명 **[2.6.0 테스트판](https://github.com/dding94/poketokenbar-battle/releases/tag/v2.6.0)**을 공개했습니다. **macOS 15 이상**, Apple Silicon·Intel을 지원합니다.
+**macOS 15 이상**, Apple Silicon·Intel을 지원합니다. 자체 서명 앱이며 Apple 공증은 받지 않았습니다. 최신 버전은 [릴리스 페이지](https://github.com/dding94/poketokenbar-battle/releases/latest)에서 확인하세요.
 
 ```bash
 brew install --cask dding94/tap/poke-token-bar-battle
 open -a "PokeTokenBattle"
 ```
 
-업데이트는 `brew update` 후 `brew upgrade --cask poke-token-bar-battle`입니다. 수동 설치한 포크가 이미 있으면 먼저 앱과 포크 세이브를 백업하세요. 강제 덮어쓰기는 하지 마세요.
+업데이트는 앱 안의 업데이트 버튼이나 아래 명령입니다.
 
-Apple 공증된 앱은 아닙니다. 첫 실행이 차단되면 [Apple 안내](https://support.apple.com/en-gb/102445)에 따라 시스템 설정 → 개인정보 보호 및 보안에서 이 앱의 실행을 허용할 수 있습니다. 받는 맥에 인증서를 따로 설치하거나 Gatekeeper를 끄지 않습니다. 회사 정책으로 실행이 제한될 수 있습니다.
+```bash
+brew update
+brew upgrade --cask poke-token-bar-battle
+```
 
-온라인 배틀 화면에서 방장이 별도로 보낸 HTTPS 서버 주소를 입력하고 **서버 주소 적용**을 누른 뒤 초대코드·닉네임으로 **그룹 참여**를 누르세요. Keychain 접근 비활성화 설정이 켜져 있으면 온라인 연결이 중단됩니다. 서버 주소·초대코드는 공개 파일에 넣지 않습니다. [한국어 설치·시험 안내 파일](https://github.com/dding94/poketokenbar-battle/releases/download/v2.6.0/INSTALL-ko.txt)도 제공합니다.
+**2.6.0에서 올라오는 경우** (앱 이름이 PokeTokenBar Battle에서 PokeTokenBattle로 바뀌었습니다)
 
-공개 ZIP의 SHA-256과 Homebrew 임시 폴더 설치·서명 검증을 확인했습니다. 앱을 실행한 두 맥 시험·실제 기본 경로 업그레이드·Free 운영 부하/복구는 미검증이며 PR 13 전체 완료는 아닙니다. 자세한 준비·백업 절차는 [RELEASE.md](RELEASE.md)를 따릅니다.
+- 업데이트하면 `/Applications/PokeTokenBar Battle.app`이 지워지고 `/Applications/PokeTokenBattle.app`이 설치됩니다. 첫 업데이트 뒤에는 앱이 자동으로 다시 열리지 않을 수 있으니 **PokeTokenBattle을 직접 한 번 여세요.** 시작 시 자동 실행 설정은 그때 새 경로로 다시 등록됩니다.
+- 세이브(`~/Library/Application Support/PokeTokenBarBattle`)와 접속키는 그대로 쓰지만 서버가 새로 바뀌어, **2.6.0에서 가입했던 사람도 방장에게 새 초대코드를 받아 다시 가입해야 합니다.**
+- 올리기 전에 위 세이브 폴더를 백업하세요. 패배하면 출전한 포켓몬이 기절하고 실제 세이브에 반영됩니다.
+- brew로 설치하지 않은 경우 앱 안 업데이트 버튼은 릴리스 페이지만 엽니다. 새 앱을 `/Applications`로 옮기고 옛 `PokeTokenBar Battle.app`을 지우세요.
+
+첫 실행이 차단되면 [Apple 안내](https://support.apple.com/en-gb/102445)에 따라 시스템 설정 → 개인정보 보호 및 보안에서 이 앱의 실행을 허용하세요. 받는 맥에 인증서를 따로 설치하거나 Gatekeeper를 끄지 않습니다. 회사 정책으로 실행이 제한될 수 있으며, 그 경우 방장에게 알려 주세요. Keychain 접근 비활성화 설정이 켜져 있으면 온라인 연결이 중단됩니다. 원본 PokeTokenBar 앱과 세이브는 건드리지 않습니다.
+
+## 온라인 대전 시작하기
+
+1. 방장에게 **초대코드**를 받습니다. 서버 주소는 앱에 들어 있어 주소를 입력하지 않습니다. 코드는 공개 파일에 올리지 않습니다.
+2. 앱의 홈에서 **온라인 배틀**을 열고 **닉네임**과 **초대코드**를 입력한 뒤 **그룹 참여**를 누르세요. 클립보드에 있는 코드는 **초대코드 붙여넣기**로 넣을 수 있습니다. 가입 직후 보이는 복구코드를 복사해 두세요.
+3. 로비에서 동료에게 정식전을 신청하고, 수락·최종 확인·전투 준비 3단계를 거쳐 직접 조작 또는 자동으로 겨룹니다. 팝오버를 닫아 둬도 메뉴바 표식과 macOS 알림으로 신청·내 차례를 알려 줍니다.
+4. 지면 출전한 포켓몬이 **기절하고**(실제 세이브에 반영됩니다), 이기면 현재 포켓몬이 경험치를 받습니다. 기절은 상점에서 산 회복약으로 되살립니다.
+
+**방장 패널**: 방장에게만 로비에 **멤버 관리**가 보입니다. 초대코드 발급·회수(30명 7일 또는 1회용 7일), 멤버 제거, 키를 잃은 동료를 위한 재연결 코드 발급을 앱 안에서 처리합니다. 초대코드는 만든 직후에만 보이며, 복사하는 동안 다른 앱을 눌러도 팝오버가 닫히지 않습니다.
 
 `npm test --prefix engine`과 `cd engine && npm run corpus && npm run compatibility`로 엔진을 검증합니다. Node와 JavaScriptCore의 같은 2,200판을 로컬 macOS 26.5 및 CI macOS 15·26에서 실행했습니다. 정책 auto-v2(standard는 v1과 같음)는 불일치·재생·상태 복원 실패 0건입니다. BW2 541개 기술 호출 검사는 모든 조건별 효과 조합을 증명하지 않습니다.
 
@@ -83,8 +100,12 @@ GitHub Actions는 `feat/**` 브랜치 푸시와 PR에서 자동으로 돌고(문
 
 ### 온라인 화면 미리보기
 
-아래는 합성 fixture로 렌더한 **한국어 SwiftUI 화면**이며 실제 두 사용자 경기 캡처가 아닙니다. 포켓몬 그림 대신 회색 대체 아이콘을 사용합니다. 두 맥 인수 검증은 아직 남아 있습니다.
+아래는 합성 fixture로 렌더한 **한국어 SwiftUI 화면**이며 실제 두 사용자 경기 캡처가 아닙니다. 닉네임·코드는 가상의 예시이고, 포켓몬 그림 대신 회색 대체 아이콘을 사용합니다. 두 맥 실사용 확인은 공개 후 진행합니다.
 
+![합성 한국어 화면: 닉네임과 초대코드로 가입](assets/screenshot-online-join.png)
+![합성 한국어 화면: 방장의 멤버 관리 패널과 새 초대코드](assets/screenshot-online-host-panel.png)
+![합성 한국어 화면: 직접 조작 대전 아레나](assets/screenshot-online-arena.png)
+![합성 한국어 화면: 결과와 재대결 신청](assets/screenshot-online-result.png)
 ![합성 한국어 화면: 그룹 전적판](assets/screenshot-online-standings.png)
 ![합성 한국어 화면: 재대결 출전 준비](assets/screenshot-online-rematch.png)
 

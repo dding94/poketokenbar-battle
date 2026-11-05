@@ -1,6 +1,6 @@
 > **非公式ファンプロジェクト:** PokeTokenBattle は The Pokémon Company、任天堂、元の PokeTokenBar とは関係がなく、承認・後援を受けていません。
 
-> **Battle フォーク:** このリポジトリは `dding94/poketokenbar-battle`、必要環境は macOS 15 以降です。以下の育成アプリの紹介は upstream 由来です。オンライン機能の現在の実装・検証状況は [AI_HANDOFF](docs/AI_HANDOFF.md)、インストール・公開の境界は [RELEASE.md](RELEASE.md) を参照してください。2.6.0テスト版を公開しました。2台のMacによる実機検証は未完了です。
+> **Battle フォーク:** このリポジトリは `dding94/poketokenbar-battle`、必要環境は macOS 15 以降です。以下の育成アプリの紹介は upstream 由来です。オンライン機能の現在の実装・検証状況は [AI_HANDOFF](docs/AI_HANDOFF.md)、インストール・公開の境界は [RELEASE.md](RELEASE.md) を参照してください。公開前の2台のMacによる実機検証は行っておらず、公開後に実環境で確認します。
 
 <div align="center">
 
@@ -197,27 +197,44 @@ Pi は複数のモデルを一つのセッションログに流すことがあ�
 
 すべてローカルから読み取り — 外部の使用量CLIは不要。ツールはプロバイダーの実装と登録で追加します（[CONTRIBUTING.ja.md](CONTRIBUTING.ja.md) 参照）。
 
+## オンライン対戦のはじめ方
+
+1. ホストから**招待コード**を受け取ります。サーバーのアドレスはアプリに内蔵されているため入力しません。コードは公開ファイルに載せません。
+2. ホームで**オンライン対戦**を開き、**ニックネーム**と**招待コード**を入力して**グループに参加**を押します。クリップボードのコードは**招待コードを貼り付け**で入力できます。参加直後に表示される復旧コードはコピーして保管してください。
+3. ロビーで同僚に正式戦を申し込み、承諾・最終確認・戦闘準備を経て、手動操作または自動で対戦します。ポップオーバーを閉じていても、メニューバーの表示とmacOS通知で申し込みや自分の番を知らせます。
+4. 負けると出場したポケモンが**ひんし**になり(実際のセーブに反映されます)、勝つと現在のポケモンが経験値を得ます。ひんしはショップで買った回復アイテムで復活させます。
+
+**ホストパネル**: ロビーの**メンバー管理**はホストにだけ表示されます。招待コードの発行・回収(30人7日または1回限り7日)、メンバーの削除、キーを失った同僚への再接続コード発行をアプリ内で行います。
+
 ## オンライン画面プレビュー
 
-以下は合成 fixture からレンダリングした **韓国語の SwiftUI 画面**で、実際の2人対戦のキャプチャではありません。ポケモン画像の代わりに灰色の代替アイコンを使っています。2台の Mac による受け入れ検証は未完了です。
+以下は合成 fixture からレンダリングした **韓国語の SwiftUI 画面**で、実際の2人対戦のキャプチャではありません。ニックネームとコードは架空の例で、ポケモン画像の代わりに灰色の代替アイコンを使っています。
 
+![合成された韓国語画面: ニックネームと招待コードで参加](assets/screenshot-online-join.png)
+![合成された韓国語画面: ホストのメンバー管理パネルと新しい招待コード](assets/screenshot-online-host-panel.png)
+![合成された韓国語画面: 手動操作の対戦アリーナ](assets/screenshot-online-arena.png)
+![合成された韓国語画面: 結果と再対戦の申し込み](assets/screenshot-online-result.png)
 ![合成された韓国語画面: グループ成績](assets/screenshot-online-standings.png)
 ![合成された韓国語画面: 再対戦の出場準備](assets/screenshot-online-rematch.png)
 
-## インストールとリリース準備
+## インストールとアップデート
 
-自己署名の **[2.6.0テスト版](https://github.com/dding94/poketokenbar-battle/releases/tag/v2.6.0)** を公開しました。macOS 15以降、Apple Silicon・Intelに対応します。
+macOS 15以降、Apple Silicon・Intel対応の自己署名アプリです(Apple公証なし)。最新版は[リリースページ](https://github.com/dding94/poketokenbar-battle/releases/latest)で確認してください。
 
 ```bash
 brew install --cask dding94/tap/poke-token-bar-battle
 open -a "PokeTokenBattle"
 ```
 
-更新は `brew update` の後に `brew upgrade --cask poke-token-bar-battle` を実行します。手動インストール済みの場合はアプリとフォークのセーブを先にバックアップしてください。Apple公証はありません。初回起動が制限された場合は[Appleの案内](https://support.apple.com/en-gb/102445)に従って設定から許可してください。証明書の追加やGatekeeperの無効化は不要です。管理されたMacでは利用が制限される場合があります。
+更新はアプリ内のアップデートボタン、または `brew update` の後に `brew upgrade --cask poke-token-bar-battle` を実行します。
 
-オンライン対戦画面でホストから別途届くHTTPSサーバーURLを適用し、招待コードとニックネームでグループに参加してください。Keychainアクセス無効化中は接続できません。サーバーURL・招待コードは公開しません。
+**2.6.0から更新する場合**(アプリ名が PokeTokenBar Battle から PokeTokenBattle に変わりました)
 
-公開ZIPのハッシュと一時フォルダーへのHomebrewインストール・署名を確認しました。2台のMac、実際のアップグレード、Free環境の負荷・復旧は未検証です。[RELEASE.md](RELEASE.md)を参照してください。
+- 更新すると `/Applications/PokeTokenBar Battle.app` が削除され、`/Applications/PokeTokenBattle.app` がインストールされます。最初の更新後はアプリが自動で再起動しないことがあるため、**PokeTokenBattleを一度手動で開いてください。** ログイン時の自動起動はそのとき新しいパスで再登録されます。
+- サーバーが新しくなったため、**2.6.0で参加していた人もホストから新しい招待コードを受け取って再参加する必要があります。** セーブ(`~/Library/Application Support/PokeTokenBarBattle`)はそのまま使われます。更新前にバックアップしてください。負けると出場したポケモンがひんしになり、実際のセーブに反映されます。
+- brewを使わずに入れた場合、アプリ内のボタンはリリースページを開くだけです。新しいアプリを `/Applications` に移し、古い `PokeTokenBar Battle.app` を削除してください。
+
+初回起動がブロックされたら[Appleの案内](https://support.apple.com/en-gb/102445)に従い、システム設定 → プライバシーとセキュリティで許可してください。証明書の追加やGatekeeperの無効化は不要です。管理されたMacで制限される場合はホストに連絡してください。Keychainアクセス無効化中はオンライン接続できません。詳しい手順は[RELEASE.md](RELEASE.md)を参照してください。
 
 インストールせずソースからバンドルを作る場合:
 

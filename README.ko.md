@@ -1,6 +1,6 @@
 > **비공식 팬 프로젝트:** PokeTokenBattle은 The Pokémon Company, Nintendo 및 원본 PokeTokenBar와 무관하며 이들의 승인·후원을 받지 않았습니다.
 
-> **Battle 포크 안내:** 이 저장소는 `dding94/poketokenbar-battle`이며 최소 macOS 15입니다. 아래 기존 육성 앱 소개는 upstream에서 가져온 설명입니다. 온라인 기능의 최신 구현/검증 상태는 [AI_HANDOFF](docs/AI_HANDOFF.md), 설치·공개 경계는 [RELEASE.md](RELEASE.md)를 따릅니다. 2.6.0 테스트판을 공개했으며 실제 두 맥 검증은 아직 완료되지 않았습니다.
+> **Battle 포크 안내:** 이 저장소는 `dding94/poketokenbar-battle`이며 최소 macOS 15입니다. 아래 기존 육성 앱 소개는 upstream에서 가져온 설명입니다. 온라인 기능의 최신 구현/검증 상태는 [AI_HANDOFF](docs/AI_HANDOFF.md), 설치·공개 경계는 [RELEASE.md](RELEASE.md)를 따릅니다. 공개 전 실제 두 맥 시험은 하지 않았고 공개 후 실전에서 확인합니다.
 
 <div align="center">
 
@@ -197,29 +197,44 @@ Pi는 모델 여러 개를 세션 로그 하나로 흘려보낼 수 있습니다
 
 모두 로컬에서 읽습니다 — 외부 사용량 CLI 불필요. 도구는 프로바이더 구현과 등록으로 추가합니다([CONTRIBUTING.ko.md](CONTRIBUTING.ko.md) 참고).
 
+## 온라인 대전 시작하기
+
+1. 방장에게 **초대코드**를 받습니다. 서버 주소는 앱에 들어 있어 입력하지 않습니다. 코드는 공개 파일에 올리지 않습니다.
+2. 홈에서 **온라인 배틀**을 열고 **닉네임**과 **초대코드**를 입력한 뒤 **그룹 참여**를 누르세요. 클립보드의 코드는 **초대코드 붙여넣기**로 넣을 수 있고, 가입 직후 보이는 복구코드는 복사해 두세요.
+3. 로비에서 동료에게 정식전을 신청하고 수락·최종 확인·전투 준비를 거쳐 직접 조작 또는 자동으로 겨룹니다. 팝오버를 닫아도 메뉴바 표식과 macOS 알림으로 신청·내 차례를 알려 줍니다.
+4. 지면 출전한 포켓몬이 **기절하고**(실제 세이브에 반영됩니다), 이기면 현재 포켓몬이 경험치를 받습니다. 기절은 상점에서 산 회복약으로 되살립니다.
+
+**방장 패널**: 방장에게만 로비에 **멤버 관리**가 보입니다. 초대코드 발급·회수(30명 7일 또는 1회용 7일), 멤버 제거, 키를 잃은 동료의 재연결 코드 발급을 앱 안에서 처리합니다.
+
 ## 온라인 화면 미리보기
 
-아래는 합성 fixture로 렌더한 **한국어 SwiftUI 화면**이며 실제 두 사용자 경기 캡처가 아닙니다. 포켓몬 그림 대신 회색 대체 아이콘을 사용합니다. 두 맥 인수 검증은 아직 남아 있습니다.
+아래는 합성 fixture로 렌더한 **한국어 SwiftUI 화면**이며 실제 두 사용자 경기 캡처가 아닙니다. 닉네임·코드는 가상의 예시이고 포켓몬 그림 대신 회색 대체 아이콘을 사용합니다.
 
+![합성 한국어 화면: 닉네임과 초대코드로 가입](assets/screenshot-online-join.png)
+![합성 한국어 화면: 방장의 멤버 관리 패널과 새 초대코드](assets/screenshot-online-host-panel.png)
+![합성 한국어 화면: 직접 조작 대전 아레나](assets/screenshot-online-arena.png)
+![합성 한국어 화면: 결과와 재대결 신청](assets/screenshot-online-result.png)
 ![합성 한국어 화면: 그룹 전적판](assets/screenshot-online-standings.png)
 ![합성 한국어 화면: 재대결 출전 준비](assets/screenshot-online-rematch.png)
 
-## 설치와 릴리스 준비
+## 설치와 업데이트
 
-자체 서명 **[2.6.0 테스트판](https://github.com/dding94/poketokenbar-battle/releases/tag/v2.6.0)**을 공개했습니다. **macOS 15 이상**, Apple Silicon·Intel을 지원합니다.
+**macOS 15 이상**, Apple Silicon·Intel을 지원하는 자체 서명 앱입니다(Apple 공증 없음). 최신 버전은 [릴리스 페이지](https://github.com/dding94/poketokenbar-battle/releases/latest)에서 확인하세요.
 
 ```bash
 brew install --cask dding94/tap/poke-token-bar-battle
 open -a "PokeTokenBattle"
 ```
 
-업데이트는 `brew update` 후 `brew upgrade --cask poke-token-bar-battle`입니다. 수동 설치한 포크가 이미 있으면 먼저 앱과 포크 세이브를 백업하세요. 강제 덮어쓰기는 하지 마세요.
+업데이트는 앱 안의 업데이트 버튼이나 `brew update` 후 `brew upgrade --cask poke-token-bar-battle`입니다.
 
-Apple 공증된 앱은 아닙니다. 첫 실행이 차단되면 [Apple 안내](https://support.apple.com/en-gb/102445)에 따라 시스템 설정 → 개인정보 보호 및 보안에서 이 앱의 실행을 허용할 수 있습니다. 받는 맥에 인증서를 따로 설치하거나 Gatekeeper를 끄지 않습니다. 회사 정책으로 실행이 제한될 수 있습니다.
+**2.6.0에서 올라오는 경우** (앱 이름이 PokeTokenBar Battle에서 PokeTokenBattle로 바뀌었습니다)
 
-온라인 배틀 화면에서 방장이 별도로 보낸 HTTPS 서버 주소를 입력하고 **서버 주소 적용**을 누른 뒤 초대코드·닉네임으로 **그룹 참여**를 누르세요. Keychain 접근 비활성화 설정이 켜져 있으면 온라인 연결이 중단됩니다. 서버 주소·초대코드는 공개 파일에 넣지 않습니다. [한국어 설치·시험 안내 파일](https://github.com/dding94/poketokenbar-battle/releases/download/v2.6.0/INSTALL-ko.txt)도 제공합니다.
+- 업데이트하면 `/Applications/PokeTokenBar Battle.app`이 지워지고 `/Applications/PokeTokenBattle.app`이 설치됩니다. 첫 업데이트 뒤 앱이 자동으로 다시 열리지 않을 수 있으니 **PokeTokenBattle을 직접 한 번 여세요.** 시작 시 자동 실행은 그때 새 경로로 다시 등록됩니다.
+- 서버가 새로 바뀌어 **2.6.0에서 가입했던 사람도 방장에게 새 초대코드를 받아 다시 가입해야 합니다.** 세이브(`~/Library/Application Support/PokeTokenBarBattle`)는 그대로 쓰며, 올리기 전에 백업하세요. 패배하면 출전한 포켓몬이 기절하고 실제 세이브에 반영됩니다.
+- brew로 설치하지 않았다면 앱 안 업데이트 버튼은 릴리스 페이지만 엽니다. 새 앱을 `/Applications`로 옮기고 옛 `PokeTokenBar Battle.app`을 지우세요.
 
-공개 ZIP의 SHA-256과 Homebrew 임시 폴더 설치·서명 검증을 확인했습니다. 앱을 실행한 두 맥 시험·실제 기본 경로 업그레이드·Free 운영 부하/복구는 미검증이며 PR 13 전체 완료는 아닙니다. 자세한 준비·백업 절차는 [RELEASE.md](RELEASE.md)를 따릅니다.
+첫 실행이 차단되면 [Apple 안내](https://support.apple.com/en-gb/102445)에 따라 시스템 설정 → 개인정보 보호 및 보안에서 실행을 허용하세요. 받는 맥에 인증서를 따로 설치하거나 Gatekeeper를 끄지 않습니다. 회사 정책으로 실행이 제한되면 방장에게 알려 주세요. Keychain 접근 비활성화 설정이 켜져 있으면 온라인 연결이 중단됩니다. 자세한 준비·백업 절차는 [RELEASE.md](RELEASE.md)를 따릅니다.
 
 설치 없이 소스 번들만 만들려면:
 
