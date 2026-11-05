@@ -97,6 +97,11 @@ struct OnlineBattleClockBand: View {
             }
             OnlineBattleTurnBar(state: state, dim: state.pulseDim(reduceMotion: reduceMotion))
         }
+        // One element: the mode as its name, the turn and the seconds as its value. It changes with the clock but
+        // VoiceOver only reads it when asked, so the seconds never interrupt anything.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(title)
+        .accessibilityValue(OnlineBattleSpoken.clock(l: l, state: state, turn: state == .idle ? stagedTurn : viewTurn))
     }
 }
 

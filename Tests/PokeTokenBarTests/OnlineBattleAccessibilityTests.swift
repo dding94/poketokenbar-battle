@@ -10,9 +10,10 @@ import XCTest
 final class OnlineBattleAccessibilityTests: XCTestCase {
     private let languages: [AppLanguage] = [.ko, .en]
     private var window: NSWindow?
+    @MainActor private final class Recorder { var lines: [String] = [] }
     override func tearDown() async throws { window?.close(); window = nil }
 
-    private func arenaView(_ model: OnlineBattlePresentation, announce: @escaping (String) -> Void = { _ in }) -> OnlineBattleArena {
+    private func arenaView(_ model: OnlineBattlePresentation, announce: @escaping @MainActor (String) -> Void = { _ in }) -> OnlineBattleArena {
         var arena = OnlineBattleArena(model: model, l: L(.ko), artwork: false, speciesNameProvider: OnlineBattleSyntheticNameProvider(),
                                       speciesNameStore: PokemonNameDisplayStore())
         arena.announce = announce
@@ -220,20 +221,20 @@ final class OnlineBattleAccessibilityTests: XCTestCase {
         let fixture = try OnlineBattleArenaFixture.arena(seat: .p1); defer { fixture.close() }
         fixture.staging.skipToEnd(); fixture.publish()
         fixture.model.screenShown = false
-        var spoken: [String] = []
-        let arena = arenaView(fixture.model) { spoken.append($0) }
+        let recorder = Recorder()
+        let arena = arenaView(fixture.model) { recorder.lines.append($0) }
         let host = NSHostingView(rootView: arena.frame(width: PopoverMetrics.scrollContentWidth, height: 600))
         host.frame = NSRect(x: 0, y: 0, width: PopoverMetrics.scrollContentWidth, height: 600)
         let window = NSWindow(contentRect: host.frame, styleMask: .borderless, backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false; window.contentView = host; window.orderFront(nil); self.window = window
         try? await Task.sleep(for: .milliseconds(200))
-        XCTAssertEqual(spoken, [], "a screen that is not shown stays quiet")
+        XCTAssertEqual(recorder.lines, [], "a screen that is not shown stays quiet")
         fixture.model.screenShown = true
         try? await Task.sleep(for: .milliseconds(300))
-        XCTAssertEqual(spoken.count, 1, "\(spoken)")
+        XCTAssertEqual(recorder.lines.count, 1, "\(recorder.lines)")
         fixture.model.deadline = Date().addingTimeInterval(20)
         try? await Task.sleep(for: .milliseconds(300))
-        XCTAssertEqual(spoken.count, 1, "a new deadline in the same turn is not a new turn: \(spoken)")
+        XCTAssertEqual(recorder.lines.count, 1, "a new deadline in the same turn is not a new turn: \(recorder.lines)")
     }
 
     // MARK: Wiring

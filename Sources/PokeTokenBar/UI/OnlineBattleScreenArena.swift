@@ -12,10 +12,26 @@ struct OnlineBattleArena: View {
     var speciesNameProvider: any PokemonNameProviding = PokemonNameClient.shared
     var speciesNameStore: PokemonNameDisplayStore = .shared
     /// Where VoiceOver announcements go; tests record them.
-    var announce: (String) -> Void = { AccessibilityNotification.Announcement($0).post() }
+    var announce: @MainActor (String) -> Void = { AccessibilityNotification.Announcement($0).post() }
 
     /// Says the turn start when it is due (see `OnlineBattlePresentation.claimTurnAnnouncement`).
-    func announceTurnIfDue(now: Date = .now) {}
+    func announceTurnIfDue(now: Date = .now) {
+        guard let line = model.claimTurnAnnouncement(l: l, pickerOpen: footer == .moves, playing: playing, now: now) else { return }
+        announce(line)
+    }
+
+    /// Everything that can make a turn due or not: a new turn or room, the picker opening, the beats ending, the
+    /// screen being shown. A deadline or an HP change is not among them.
+    private struct TurnCue: Equatable {
+        let battleID: String?
+        let turn: Int?
+        let open: Bool
+        let playing: Bool
+        let shown: Bool
+    }
+    private var turnCue: TurnCue {
+        TurnCue(battleID: model.room?.battleId, turn: model.arena?.turn, open: footer == .moves, playing: playing, shown: model.screenShown)
+    }
 
     /// What fills the place under the beat lines.
     enum Footer: Equatable {
@@ -83,6 +99,8 @@ struct OnlineBattleArena: View {
         // A choice, or a beat starting, means the battle is under way: the mark has done its job.
         .onChange(of: playing) { _, now in if now { dismissSplash() } }
         .onChange(of: model.choiceSubmitted) { _, now in if now { dismissSplash() } }
+        // VoiceOver hears a turn open once, on a screen that is shown, after the beats on screen have ended.
+        .onChange(of: turnCue, initial: true) { announceTurnIfDue() }
     }
 
     // MARK: Splash
@@ -179,16 +197,21 @@ struct OnlineBattleArena: View {
     func sideCard(_ side: PracticeSide, view: BattleView) -> PracticeSideCard {
         let own = side == .player, staging = model.stage, seat = frame.seat(side)
         let pokemon = frame.pokemon(side, in: view), beat = staging?.playback.beat
+        // What the card draws, and so what VoiceOver says: never the view that is already ahead of the beats.
+        let display = staging?.shown(side) ?? OnlineBattleStaging.resting(pokemon)
+        let name = speciesName(side, view: view).displayName
         // The view is ahead of the beats on screen, so while they play the opponent shows only what they showed.
         let reveal: PracticeReveal? = own || staging?.isPlaying != true ? nil : staging.map { PracticeReveal(staged: $0.playback) }
-        return PracticeSideCard(side: pokemon, own: own, name: speciesName(side, view: view).displayName,
+        return PracticeSideCard(side: pokemon, own: own, name: name,
                                 snapshot: own ? ownSnapshot : nil, l: l, artwork: artwork,
-                                display: staging?.shown(side) ?? OnlineBattleStaging.resting(pokemon),
+                                display: display,
                                 beatID: beat?.id, delta: beat?.hpDelta[side], hitTrigger: lastHit(side), reveal: reveal,
                                 moveSlugs: model.moveSlugs[seat] ?? [:], abilitySlugs: model.abilitySlugs[seat] ?? [:],
                                 spriteSpecies: pokemon.speciesNum,
                                 label: own ? nil : model.opponentNickname.map { l.onlineFoeLabel(nickname: $0) },
-                                caption: own ? nil : l.onlineOpponentLine(record: model.opponentRecord, streak: model.opponentStreak) ?? " ")
+                                caption: own ? nil : l.onlineOpponentLine(record: model.opponentRecord, streak: model.opponentStreak) ?? " ",
+                                spoken: OnlineBattleSpoken.card(l: l, own: own, name: name, level: pokemon.level,
+                                                                nickname: own ? nil : model.opponentNickname, display: display))
     }
 
     /// Names and slugs the beat lines speak with; the opponent's set is never part of it.

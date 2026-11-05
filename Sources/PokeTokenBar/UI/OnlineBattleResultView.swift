@@ -8,10 +8,20 @@ struct OnlineBattleResultView: View {
     let model: OnlineBattlePresentation
     let l: L
     let artwork: Bool
-    var announce: (String) -> Void = { AccessibilityNotification.Announcement($0).post() }
+    var announce: @MainActor (String) -> Void = { AccessibilityNotification.Announcement($0).post() }
 
     /// Says the outcome once the result is on screen.
-    func announceResultIfDue(_ screen: OnlineBattleResultScreen) {}
+    func announceResultIfDue(_ screen: OnlineBattleResultScreen) {
+        guard let line = model.claimResultAnnouncement(l: l, screen: screen) else { return }
+        announce(line)
+    }
+
+    /// What can make the result due: a new room, the screen being shown, the last beat ending.
+    private struct ResultCue: Equatable {
+        let battleID: String?
+        let shown: Bool
+        let playing: Bool
+    }
 
     var body: some View {
         if let screen = model.resultScreen(l: l) {
@@ -37,6 +47,8 @@ struct OnlineBattleResultView: View {
             actions(screen)
         }
         .frame(maxWidth: .infinity)
+        .onChange(of: ResultCue(battleID: model.room?.battleId, shown: model.screenShown, playing: model.stage?.isPlaying ?? false),
+                  initial: true) { announceResultIfDue(screen) }
     }
 
     private func hero(_ screen: OnlineBattleResultScreen) -> some View {

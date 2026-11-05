@@ -925,10 +925,12 @@ final class OnlineBattleSession {
             if open { requestStandingsRefresh(); retryNow() } else { invalidateStandingsRead() }
             // The popover's views are released on close with no guaranteed onDisappear; the screen's onAppear sets it again.
             if !open { onlineScreenVisible = false }
+            presentation.screenShown = popoverOpen && onlineScreenVisible
             refreshStageVisibility()
             await connection?.setPopoverOpen(open); return
         case .setOnlineScreenVisible(let visible):
             onlineScreenVisible = visible
+            presentation.screenShown = popoverOpen && onlineScreenVisible
             refreshStageVisibility(); return
         case .skipStage:
             presentation.stage?.skipToEnd()

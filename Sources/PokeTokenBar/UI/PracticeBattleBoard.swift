@@ -261,6 +261,22 @@ struct PracticeBattleBoard: View {
     }
 }
 
+/// Gives a side card one spoken name and value while its chips stay reachable inside it. Without words it does nothing.
+@MainActor
+private struct PracticeSpokenCard: ViewModifier {
+    let spoken: OnlineBattleSpoken.Card?
+
+    @ViewBuilder func body(content: Content) -> some View {
+        if let spoken {
+            content.accessibilityElement(children: .contain)
+                .accessibilityLabel(spoken.label)
+                .accessibilityValue(spoken.value)
+        } else {
+            content
+        }
+    }
+}
+
 /// One side of the battle: sprite, name and level, types, status, HP, and what is known about its
 /// moves and ability. The opponent's HP is a percentage. With a playback, `display` overrides the
 /// engine's HP and status, `delta` floats over the HP for the beat `beatID`, and `hitTrigger` shakes
@@ -337,11 +353,13 @@ struct PracticeSideCard: View {
                         }
                     }
                     HStack(spacing: 8) {
-                        PracticeHPBar(hp: hp, maxHP: maxHP)
+                        // With spoken words the card's value carries the HP, so the bar and its number stay silent.
+                        PracticeHPBar(hp: hp, maxHP: maxHP).accessibilityHidden(spoken != nil)
                         Text(hpText)
                             .font(.caption.weight(.semibold)).monospacedDigit()
                             .foregroundStyle(fainted ? Color.secondary : Color.primary)
                             .frame(minWidth: 52, alignment: .trailing)
+                            .accessibilityHidden(spoken != nil)
                     }
                 }
             }
@@ -351,6 +369,7 @@ struct PracticeSideCard: View {
             }
         }
         .practiceCard(padding: 8)
+        .modifier(PracticeSpokenCard(spoken: spoken))
     }
 
     /// The beat's HP change next to the name row, right above the HP bar; keyed by the beat so each
@@ -438,11 +457,27 @@ struct PracticeMoveCard: View {
     /// The online arena marks the card whose choice is already in; it stays full strength while the rest dim.
     /// The mark takes the key badge's place, so the card never changes size.
     var chosen = false
+    /// The names VoiceOver reads come from the store the card's own labels fill, so it says what the screen shows.
+    var nameStore: PokemonNameDisplayStore = .shared
     let action: () -> Void
 
     /// The name and the value VoiceOver reads for this card.
-    var spokenLabel: String { "" }
-    var spokenValue: String { "" }
+    var spokenLabel: String { OnlineBattleSpoken.moveLabel(l: l, slot: key, name: spokenName) }
+    var spokenValue: String {
+        OnlineBattleSpoken.moveValue(l: l, typeName: spokenType, pp: move.pp, maxPP: move.maxpp, special: special,
+                                     details: spokenDetails, chosen: chosen)
+    }
+    private var spokenName: String {
+        switch move.id {
+        case "recharge": l.practiceRecharge
+        case "struggle": l.practiceStruggle
+        default: OnlineBattleSpoken.name(.move, slug: PracticeMetadataName.slug(.move, move.id, in: snapshot), l: l,
+                                         artwork: artwork, names: nameStore.names)
+        }
+    }
+    private var spokenType: String {
+        move.type.isEmpty ? "" : OnlineBattleSpoken.name(.type, slug: move.type.lowercased(), l: l, artwork: artwork, names: nameStore.names)
+    }
 
     private var special: Bool { move.id == "recharge" || move.id == "struggle" }
     private var disabled: Bool { locked || move.disabled || (!special && move.pp <= 0) }
@@ -497,8 +532,8 @@ struct PracticeMoveCard: View {
         .opacity(disabled && !chosen ? 0.45 : 1)
         .accessibilityAddTraits(chosen ? .isSelected : [])
         .keyboardShortcut(KeyEquivalent(Character(String(key))), modifiers: [])
-        .accessibilityLabel(l.practiceMoveLabel(key, move.name))
-        .accessibilityValue(chosen ? [l.onlineYourPick, spoken].filter { !$0.isEmpty }.joined(separator: l.practiceSeparator) : spoken)
+        .accessibilityLabel(OnlineBattleSpoken.moveLabel(l: l, slot: key, name: spokenName))
+        .accessibilityValue(spokenValue)
     }
 
     private enum PriorityStyle { case text, glyph, hidden }
@@ -536,9 +571,10 @@ struct PracticeMoveCard: View {
                                    accuracy: info.accuracy, fixedDamage: info.fixedDamage)
     }
 
-    private var spoken: String {
+    /// The hint's words without the PP, which the value says for every card.
+    private var spokenDetails: String {
         guard let hint else { return "" }
-        var parts = [stats, "PP \(move.pp)/\(move.maxpp)"]
+        var parts = [stats]
         if hint.info.variableType { parts.append(l.practiceVariableType) }
         if let multiplier { parts.append(l.practiceMultiplier(multiplier)) }
         if hint.stab { parts.append(l.practiceStab) }

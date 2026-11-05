@@ -243,9 +243,18 @@ final class OnlineBattlePresentation {
 
     /// The turn-start line for VoiceOver when it is due, nil when it is not (closed popover, beats still playing,
     /// already said, no open picker).
-    func claimTurnAnnouncement(l: L, pickerOpen: Bool, playing: Bool, now: Date) -> String? { nil }
-    /// The result line for VoiceOver when it is due.
-    func claimResultAnnouncement(l: L, screen: OnlineBattleResultScreen) -> String? { nil }
+    func claimTurnAnnouncement(l: L, pickerOpen: Bool, playing: Bool, now: Date) -> String? {
+        guard let room, let turn = arena?.turn,
+              announcements.claimTurn(battleID: room.battleId, turn: turn, shown: screenShown, open: pickerOpen, playing: playing)
+        else { return nil }
+        return OnlineBattleSpoken.turnStart(l: l, turn: turn, remaining: OnlineBattleArena.remainingSeconds(deadline: deadline, now: now))
+    }
+    /// The result line for VoiceOver when it is due: once, on a visible screen, after the last beat.
+    func claimResultAnnouncement(l: L, screen: OnlineBattleResultScreen) -> String? {
+        guard let room, announcements.claimResult(battleID: room.battleId, shown: screenShown, playing: stage?.isPlaying ?? false)
+        else { return nil }
+        return OnlineBattleSpoken.result(l: l, title: screen.title, subtitle: screen.subtitle)
+    }
 
     func send(_ action: OnlineBattleUIAction) {
         // These are presentation guards. The session independently validates server state and replay state.
