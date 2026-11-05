@@ -52,6 +52,7 @@ final class OnlineBattleRoomGuideRenderingTests: XCTestCase {
         },
     ]
 
+#if !BEFORE_BASELINE
     /// States the old screen could not express (my press received, why a button is disabled).
     static let guideScenarios: [Scenario] = [
         .init(name: "challenger-3b-ready-pressed") { challenger($0, state: .accepted, confirmed: true); $0.localReady = true },
@@ -64,17 +65,26 @@ final class OnlineBattleRoomGuideRenderingTests: XCTestCase {
         .init(name: "challenger-2b-accepted-long-nickname") { challenger($0, state: .accepted); named($0, longNickname) },
         .init(name: "lobby-fainted-entry") { $0.phase = .lobby; $0.entryHP["synthetic-pikachu"] = 0 },
     ]
+    static let allScenarios = baseScenarios + guideScenarios
+#else
+    static let allScenarios = baseScenarios
+#endif
+    /// Scenarios also captured through the real 520pt scroll viewport, to show what is above the fold.
+    static let viewportScenarios: Set<String> = ["challenger-1-pending", "challenger-3-confirmed", "receiver-1-pending", "receiver-3-confirmed"]
 
-    private func render(_ model: OnlineBattlePresentation, named name: String) async throws -> NSSize {
-        let provider = OnlineBattleSyntheticNameProvider()
-        let names = PokemonNameDisplayStore()
-        for id in [25, 129] { _ = await names.load(.init(kind: .pokemonSpecies, name: String(id)), provider: provider) }
-        let host = NSHostingView(rootView: OnlineBattleScreen(model: model, l: L(.ko), artwork: false, readInvitationClipboard: { nil },
-                                                             speciesNameProvider: provider, speciesNameStore: names, onClose: {})
-            .background(Color.white).environment(\.colorScheme, .light))
-        host.frame = NSRect(x: 0, y: 0, width: 360, height: 900)
-        let window = NSWindow(contentRect: NSRect(x: -10000, y: -10000, width: 360, height: 900),
-                              styleMask: .borderless, backing: .buffered, defer: false)
+    private func publish(_ bitmapData: Data, _ name: String) throws {
+        guard let path = ProcessInfo.processInfo.environment["PTB_SNAPSHOT_SCREENSHOT_DIR"] else { return }
+        let tag = ProcessInfo.processInfo.environment["PTB_ROOM_GUIDE_TAG"] ?? "after"
+        let directory = URL(fileURLWithPath: path)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try bitmapData.write(to: directory.appendingPathComponent("\(tag)-\(name).png"))
+    }
+
+    /// Lays out `root` at the popover width with unconstrained height and writes a 2x PNG.
+    private func capture<Content: View>(_ root: Content, named name: String) async throws {
+        let host = NSHostingView(rootView: root.background(Color.white).environment(\.colorScheme, .light))
+        host.frame = NSRect(x: 0, y: 0, width: 360, height: 1400)
+        let window = NSWindow(contentRect: host.frame, styleMask: .borderless, backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false; window.appearance = NSAppearance(named: .aqua)
         window.contentView = host; window.orderFront(nil); self.window?.close(); self.window = window
         try await Task.sleep(for: .milliseconds(120))
@@ -87,20 +97,33 @@ final class OnlineBattleRoomGuideRenderingTests: XCTestCase {
         let bitmap = try PracticeScreenRenderingTests.capture2x(host)
         let data = try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
         XCTAssertGreaterThan(data.count, 8000, "A blank hosting view must not pass as a rendered screen")
-        if let path = ProcessInfo.processInfo.environment["PTB_SNAPSHOT_SCREENSHOT_DIR"] {
-            let tag = ProcessInfo.processInfo.environment["PTB_ROOM_GUIDE_TAG"] ?? "after"
-            let directory = URL(fileURLWithPath: path)
-            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            try data.write(to: directory.appendingPathComponent("\(tag)-\(name).png"))
-        }
-        return fit
+        try publish(data, name)
     }
 
     func testRoomAndLobbyScenariosRenderAtPopoverWidth() async throws {
-        for scenario in Self.baseScenarios + Self.guideScenarios {
+        let provider = OnlineBattleSyntheticNameProvider()
+        let names = PokemonNameDisplayStore()
+        for id in [25, 129] { _ = await names.load(.init(kind: .pokemonSpecies, name: String(id)), provider: provider) }
+        let l = L(.ko)
+        for scenario in Self.allScenarios {
             let model = OnlineBattleScreenRenderingTests.model()
             scenario.setup(model)
-            _ = try await render(model, named: scenario.name)
+            // Full content as it lays out inside the popover scroll view (width minus the scroller lane).
+            let content = Group {
+                if model.phase == .room {
+                    OnlineBattleRoom(model: model, l: l, artwork: false, speciesNameProvider: provider, speciesNameStore: names)
+                } else {
+                    OnlineBattleLobby(model: model, l: l, artwork: false)
+                }
+            }
+            .frame(width: PopoverMetrics.scrollContentWidth, alignment: .leading)
+            .padding(.leading, PopoverMetrics.padding)
+            .frame(width: PopoverMetrics.width, alignment: .leading)
+            try await capture(content, named: scenario.name)
+            guard Self.viewportScenarios.contains(scenario.name) else { continue }
+            try await capture(OnlineBattleScreen(model: model, l: l, artwork: false, readInvitationClipboard: { nil },
+                                                 speciesNameProvider: provider, speciesNameStore: names, onClose: {}),
+                              named: "viewport-" + scenario.name)
         }
     }
 }
