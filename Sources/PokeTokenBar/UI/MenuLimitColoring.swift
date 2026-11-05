@@ -14,3 +14,10 @@ enum MenuLimitColoring {
         }
     }
 }
+
+/// Colors the online mark at the end of the menu bar's first line. An ongoing room keeps the system text color.
+enum MenuOnlineMarkColoring {
+    static func color(for tone: OnlineMenuMark.Tone) -> NSColor? { nil }
+
+    static func apply(_ mark: OnlineMenuMark?, to string: NSMutableAttributedString) {}
+}
