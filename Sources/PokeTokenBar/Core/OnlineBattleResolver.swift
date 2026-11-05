@@ -204,8 +204,11 @@ final class OnlineBattleResolver {
         roundLogEnds.append(logs.count)
         // Reveals use their own cursor and never touch the battle log, so the log hash cannot see this. It is
         // display data: if it ever failed, the round must still count.
-        let reveals: [BattleLogReveal]? = capturesReveals ? (try? BattleJSON.decode(call(.drainEvents, side: localSide))) : nil
-        roundReveals.append(reveals ?? [])
+        var reveals: [BattleLogReveal] = []
+        if capturesReveals {
+            do { reveals = try BattleJSON.decode(call(.drainEvents, side: localSide)) } catch { reveals = [] }
+        }
+        roundReveals.append(reveals)
     }
     private func call(_ method: BattleEngine.Method, side: OnlineBattleSide? = nil, extra: [String] = []) throws -> String {
         guard let engineID else { throw Failure.needsRefetch }

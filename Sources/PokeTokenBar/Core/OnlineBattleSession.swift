@@ -724,10 +724,10 @@ final class OnlineBattleSession {
     /// Moves the beat on screen; the driver calls it every 100 ms and tests call it directly. It also catches
     /// an overlay opened since the last publish. When the last beat ends, a held phase moves on.
     func tickStage() {
-        let wasPlaying = stagings.values.contains(where: \.isPlaying)
+        let wasPlaying = stagings.values.contains { $0.isPlaying }
         syncStages()
         displayedRoom().flatMap { stagings[$0.battleId] }?.advance()
-        if wasPlaying, !stagings.values.contains(where: \.isPlaying) { refreshStageVisibility() }
+        if wasPlaying, !stagings.values.contains(where: { $0.isPlaying }) { refreshStageVisibility() }
     }
     private func publishDisclosedNames(_ room: OnlineBattleView) {
         guard let view = presentation.arena else { return }
