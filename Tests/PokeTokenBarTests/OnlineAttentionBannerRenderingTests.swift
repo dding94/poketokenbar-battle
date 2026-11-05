@@ -165,7 +165,7 @@ final class OnlineAttentionBannerRenderingTests: XCTestCase {
     func testARematchOverAnOpenResultShowsTheBannerAndAnEndedRequestToo() async throws {
         let old = room("synthetic-old", .completed, mine: .p2)
         let result = model([old, incoming("synthetic-new", createdAt: 2, rematchOf: "synthetic-old")], displayed: old, phase: .result)
-        result.result = .init(title: "승리", detail: "경험치를 얻었어요.", xpAwarded: 10, hpApplied: true, isVoid: false)
+        result.result = .init(kind: .win, effects: .init(instanceID: "synthetic-pikachu", xp: 10, hpShare: 1))
         let onResult = try await bandHeight(result, setUp: { $0.showingOnlineBattle = true }, named: "F2-banner-rematch-over-result.png")
         XCTAssertGreaterThan(onResult, 0)
 
@@ -233,7 +233,7 @@ final class OnlineAttentionBannerRenderingTests: XCTestCase {
     func testTheHomeRowGoesToTheEventNotTheOldResult() async throws {
         let old = room("synthetic-old", .completed, mine: .p2)
         let model = model([old, incoming("synthetic-new", createdAt: 2, rematchOf: "synthetic-old")], displayed: old, phase: .result)
-        model.result = .init(title: "승리", detail: "경험치를 얻었어요.", xpAwarded: 10, hpApplied: true, isVoid: false)
+        model.result = .init(kind: .win, effects: .init(instanceID: "synthetic-pikachu", xp: 10, hpShare: 1))
         let nav = PopoverNavigation()
         let source = OnlineAttentionSource(presentation: model)
         XCTAssertEqual(source.openRoute()?.battleId, "synthetic-new")

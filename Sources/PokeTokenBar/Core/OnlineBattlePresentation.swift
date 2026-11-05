@@ -151,6 +151,8 @@ final class OnlineBattlePresentation {
         firstSteps = .init(copiedRecoveryCode: copied)
     }
     var result: OnlineBattleUIResult?
+    /// Rematch requests the person put off from the result screen. Memory only; the request itself stays open.
+    var deferredRematchIDs: Set<String> = []
     var onAction: (OnlineBattleUIAction) -> Void = { _ in }
 
     var selectedEntry: PracticeCandidate? { roster.first { $0.id == selectedEntryID } }
@@ -252,6 +254,8 @@ final class OnlineBattlePresentation {
             // Pure presentation, like dismissNotice.
             dismissEnded(id)
             return
+        case .deferRematch:
+            return
         case .dismissNotice:
             // Pure presentation: closing a banner never reaches the session or the server.
             notice = nil; stickyNotice = nil
@@ -335,14 +339,6 @@ struct OnlineBattleFirstSteps: Equatable, Sendable {
     let copiedRecoveryCode: Bool
 }
 
-struct OnlineBattleUIResult {
-    let title: String
-    let detail: String
-    let xpAwarded: Int64
-    let hpApplied: Bool
-    let isVoid: Bool
-}
-
 enum OnlineBattleUIAction {
     case configureServer(String)
     indirect case applyingServer(String, OnlineBattleUIAction)
@@ -363,6 +359,8 @@ enum OnlineBattleUIAction {
     case chooseMove(Int), dismissResult, backToLobby, dismissNotice, showSetupWhileRestoring
     /// The way to a room from an event (notification, banner, reopening, home row). Not a lobby row: overlays may be up.
     case followAttention(String)
+    /// "Later" on a rematch request shown over the result: hides that banner and nothing else. Pure presentation.
+    case deferRematch(String)
     /// Closes an ended-request banner without opening anything. Pure presentation.
     case dismissEnded(String)
     /// Host-only group care: invites, members, reconnect codes. Everything else about the host panel is in the state.

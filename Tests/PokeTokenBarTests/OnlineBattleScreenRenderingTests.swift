@@ -290,8 +290,7 @@ final class OnlineBattleScreenRenderingTests: XCTestCase {
         Self.arena(model)
         let arena = try await capture(host, named: "online-synthetic-arena.png")
         model.phase = .result
-        model.result = .init(title: "정식전 승리", detail: "양쪽 결과가 일치해 저장했어요.", xpAwarded: 10_000_000,
-                             hpApplied: true, isVoid: false)
+        model.result = .init(kind: .win, effects: .init(instanceID: "synthetic-pikachu", xp: 10_000_000, hpShare: 0.8))
         let result = try await capture(host, named: "online-synthetic-result.png")
         XCTAssertNotEqual(setup, lobby); XCTAssertNotEqual(lobby, arena); XCTAssertNotEqual(arena, result)
     }
@@ -303,8 +302,7 @@ final class OnlineBattleScreenRenderingTests: XCTestCase {
         model.phase = .verifying
         let verifying = try await capture(host, named: "online-synthetic-verifying.png")
         model.phase = .result
-        model.result = .init(title: "경기 무효", detail: "양쪽 결과를 확인할 수 없어 무효로 끝났어요.", xpAwarded: 0,
-                             hpApplied: false, isVoid: true)
+        model.result = .init(kind: .void, effects: nil)
         let void = try await capture(host, named: "online-synthetic-void.png")
         XCTAssertNotEqual(room, verifying); XCTAssertNotEqual(verifying, void)
     }
@@ -355,8 +353,7 @@ final class OnlineBattleScreenRenderingTests: XCTestCase {
     func testSyntheticRematchPreparationIsDistinctFromCompletedResult() async throws {
         let model = Self.model(); model.phase = .result
         model.room = Self.room(state: .completed)
-        model.result = .init(title: "정식전 승리", detail: "결과가 저장됐어요.", xpAwarded: 10_000_000,
-                             hpApplied: true, isVoid: false)
+        model.result = .init(kind: .win, effects: .init(instanceID: "synthetic-pikachu", xp: 10_000_000, hpShare: 0.8))
         let host = await host(model)
         let result = try await capture(host, named: "online-synthetic-before-rematch.png")
         model.rematchSourceID = "synthetic-battle"
@@ -721,7 +718,7 @@ final class OnlineBattleScreenRenderingTests: XCTestCase {
         _ = try await capture(await host(arena), named: "f3-arena-round-passed.png")
 
         let record = Self.model(); record.phase = .result; record.room = Self.room(state: .completed)
-        record.result = .init(title: l.onlineOtherSaveResultTitle, detail: l.onlineOtherSaveResultDetail, xpAwarded: 0, hpApplied: false, isVoid: false)
+        record.result = .init(kind: .record, effects: nil)
         _ = try await capture(await host(record), named: "f3-result-other-save-record.png")
     }
 }

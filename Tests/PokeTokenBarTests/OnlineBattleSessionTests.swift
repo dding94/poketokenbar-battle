@@ -1073,7 +1073,7 @@ final class OnlineBattleSessionTests: XCTestCase {
         await session.bootstrap(); await session.refresh(); await session.perform(.openBattle(room.battleId))
         XCTAssertEqual(effects.applications, 1)
         XCTAssertEqual(effects.state.onlineBattleReceipts.first?.localInstanceID, "instance-one")
-        XCTAssertEqual(session.presentation.result?.xpAwarded, 0, "no current growth recipient")
+        XCTAssertEqual(session.presentation.result?.effects?.xp, 0, "no current growth recipient")
     }
     func testUnverifiedCompletedNeverWritesEffects() async throws {
         var object = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(battle())) as? [String: Any])
@@ -1799,8 +1799,8 @@ final class OnlineBattleSessionTests: XCTestCase {
     func testSelectingCompletedRoomsShowsEachRoomsOwnResult() async throws {
         let win = try battle(), loss = try battle(1)
         let (session, _, _, _) = try await setup([win, loss]); await session.bootstrap()
-        await session.perform(.openBattle(win.battleId)); XCTAssertEqual(session.presentation.result?.title, "승리")
-        await session.perform(.openBattle(loss.battleId)); XCTAssertEqual(session.presentation.result?.title, "패배")
+        await session.perform(.openBattle(win.battleId)); XCTAssertEqual(session.presentation.result?.kind, .win)
+        await session.perform(.openBattle(loss.battleId)); XCTAssertEqual(session.presentation.result?.kind, .loss)
     }
     func testDismissedResultStaysInLobbyAfterRefresh() async throws {
         let (session, _, _, _) = try await setup([battle()]); await session.bootstrap()
@@ -1886,7 +1886,7 @@ final class OnlineBattleSessionTests: XCTestCase {
         XCTAssertEqual(effects.applications, 1)
         await http.resume(try response(reported)); await choice.value
         XCTAssertEqual(session.presentation.room?.state, .completed)
-        XCTAssertEqual(session.presentation.result?.title, "승리")
+        XCTAssertEqual(session.presentation.result?.kind, .win)
         XCTAssertEqual(effects.applications, 1)
         XCTAssertTrue(effects.state.onlineBattleHolds.isEmpty)
     }
@@ -2000,7 +2000,7 @@ final class OnlineBattleSessionTests: XCTestCase {
         await session.refresh()
         await http.resume(try response(running)); await choice.value
         XCTAssertEqual(session.presentation.room?.state, .completed)
-        XCTAssertEqual(session.presentation.result?.title, "승리")
+        XCTAssertEqual(session.presentation.result?.kind, .win)
         XCTAssertEqual(effects.applications, 1)
         XCTAssertTrue(effects.state.onlineBattleHolds.isEmpty)
         XCTAssertNil(session.presentation.notice)
@@ -2625,7 +2625,7 @@ final class OnlineBattleSessionTests: XCTestCase {
         try await list(http, [final])
         await session.refresh()
         XCTAssertEqual(session.presentation.phase, .result)
-        XCTAssertEqual(session.presentation.result?.title, "승리")
+        XCTAssertEqual(session.presentation.result?.kind, .win)
         XCTAssertEqual(attention(session), .resultReady)
     }
     func testMatchThatEndsInsideTheFirstReadStillEndsOnItsResult() async throws {
@@ -3194,11 +3194,121 @@ extension OnlineBattleSessionTests {
         let (session, _, _, effects) = try await setup([final], rosterOverride: [])
         await session.bootstrap()
         await session.perform(.openBattle(final.battleId))
-        XCTAssertEqual(session.presentation.result?.title, copy.onlineOtherSaveResultTitle)
-        XCTAssertEqual(session.presentation.result?.detail, copy.onlineOtherSaveResultDetail)
-        XCTAssertEqual(session.presentation.result?.hpApplied, false)
-        XCTAssertEqual(session.presentation.result?.xpAwarded, 0)
+        XCTAssertEqual(session.presentation.result?.kind, .record)
+        XCTAssertNil(session.presentation.result?.effects, "no receipt, so no effect is claimed")
         XCTAssertEqual(effects.effectCalls, 0)
+    }
+
+    // MARK: T19 result screen and the rematch beside it
+
+    func testSettledResultsCarryTheReceiptNotAGuess() async throws {
+        let win = try battle(), loss = try battle(1)
+        let (session, _, _, effects) = try await setup([win, loss]); await session.bootstrap()
+        for (room, kind) in [(win, OnlineBattleUIResult.Kind.win), (loss, .loss)] {
+            await session.perform(.openBattle(room.battleId))
+            let receipt = try XCTUnwrap(effects.state.onlineBattleReceipts.first { $0.key.battleID == room.battleId })
+            let result = try XCTUnwrap(session.presentation.result)
+            XCTAssertEqual(result.kind, kind)
+            XCTAssertEqual(result.effects, .init(instanceID: receipt.localInstanceID, xp: Int64(receipt.grantedXP), hpShare: receipt.appliedHPShare))
+            XCTAssertEqual(result.effects?.fainted, kind == .loss, "a loss is fainted because the receipt says 0 HP")
+        }
+    }
+    func testAVoidedRoomShowsNoEffectsAndCarriesNoReceipt() async throws {
+        let voided = try changed(battle(), ["state": "VOID", "result": NSNull()])
+        let (session, _, _, effects) = try await setup([voided]); await session.bootstrap()
+        await session.perform(.openBattle(voided.battleId))
+        XCTAssertEqual(session.presentation.result, .init(kind: .void, effects: nil))
+        XCTAssertEqual(effects.effectCalls, 0)
+    }
+
+    private func openRematchDraft(_ session: OnlineBattleSession, from source: OnlineBattleView) async {
+        await session.perform(.openBattle(source.battleId)); await session.perform(.prepareRematch(source.battleId))
+        session.presentation.selectedEntryID = "instance-one"
+    }
+    func testARematchSentFromTheResultKeepsTheResultAndWaitsThere() async throws {
+        let source = try battle(), pending = try rematchPending(source)
+        let (session, http, _, effects) = try await setup([source])
+        try await activeOpponent(http)
+        await session.bootstrap(); await openRematchDraft(session, from: source)
+        await http.route("/v1/battles/\(source.battleId)/rematch", try JSONEncoder().encode(pending))
+        await session.perform(.submitRematch)
+        XCTAssertNil(session.presentation.rematchSourceID)
+        XCTAssertEqual(session.presentation.room?.battleId, source.battleId, "the person is still looking at the result")
+        XCTAssertEqual(session.presentation.phase, .result)
+        XCTAssertNotNil(session.presentation.result)
+        XCTAssertEqual(session.presentation.rematchOffer(for: source), .sent(pending))
+        XCTAssertEqual(effects.state.onlineBattleHolds.map(\.key.battleID), ["bt_rematch"])
+        // Cancelling names the rematch room, and the result stays where it is.
+        let cancelled = try changed(pending, ["state": "CANCELLED"])
+        await http.route("/v1/battles/bt_rematch/cancel", try JSONEncoder().encode(cancelled))
+        await http.route("/v1/battles", try JSONEncoder().encode(OnlineBattlePage(battles: [source, pending], before: nil)))
+        await session.perform(.cancel("bt_rematch"))
+        let cancels = await http.count("/v1/battles/bt_rematch/cancel"); XCTAssertEqual(cancels, 1)
+        XCTAssertEqual(session.presentation.room?.battleId, source.battleId)
+        XCTAssertEqual(session.presentation.phase, .result)
+        XCTAssertNil(session.presentation.rematchOffer(for: source))
+        XCTAssertTrue(effects.state.onlineBattleHolds.isEmpty, "the cancelled room let go of the Pokémon")
+        XCTAssertNil(session.presentation.notice)
+    }
+    func testARematchSentFromHistoryStillOpensTheNewRoom() async throws {
+        let source = try battle(), pending = try rematchPending(source)
+        let (session, http, _, _) = try await setup([source])
+        try await activeOpponent(http)
+        await session.bootstrap(); await session.perform(.openReplay(source.battleId)); await session.perform(.prepareRematch(source.battleId))
+        session.presentation.selectedEntryID = "instance-one"
+        await http.route("/v1/battles/\(source.battleId)/rematch", try JSONEncoder().encode(pending))
+        await session.perform(.submitRematch)
+        XCTAssertEqual(session.presentation.room?.battleId, "bt_rematch")
+        XCTAssertEqual(session.presentation.phase, .room)
+    }
+    func testARematchRequestAnsweredFromTheResultMovesToItsRoomOnlyWhenAccepted() async throws {
+        let source = try battle(), pending = try rematchPending(source)
+        let (session, http, _, _) = try await setup([source], trainer: "trainer-two")
+        await session.bootstrap(); await session.perform(.openBattle(source.battleId))
+        session.presentation.selectedEntryID = "instance-two"
+        await http.route("/v1/battles", try JSONEncoder().encode(OnlineBattlePage(battles: [source, pending], before: nil)))
+        await session.refresh()
+        XCTAssertEqual(session.presentation.room?.battleId, source.battleId)
+        XCTAssertEqual(session.presentation.rematchOffer(for: source), .received(pending))
+        await http.route("/v1/battles/bt_rematch/decline", try JSONEncoder().encode(changed(pending, ["state": "DECLINED"])))
+        await session.perform(.decline("bt_rematch"))
+        let declines = await http.count("/v1/battles/bt_rematch/decline"); XCTAssertEqual(declines, 1)
+        XCTAssertEqual(session.presentation.room?.battleId, source.battleId, "declining leaves the result in place")
+        XCTAssertNil(session.presentation.rematchOffer(for: source))
+
+        let again = try changed(pending, ["battleId": "bt_rematch_two", "createdAt": pending.createdAt + 1000])
+        await http.route("/v1/battles", try JSONEncoder().encode(OnlineBattlePage(battles: [source, again], before: nil)))
+        await http.route("/v1/battles/bt_rematch_two/accept", try JSONEncoder().encode(changed(again, ["state": "ACCEPTED"])))
+        await session.refresh()
+        await session.perform(.accept("bt_rematch_two"))
+        let accepts = await http.count("/v1/battles/bt_rematch_two/accept"); XCTAssertEqual(accepts, 1)
+        XCTAssertEqual(session.presentation.room?.battleId, "bt_rematch_two")
+        XCTAssertEqual(session.presentation.phase, .room)
+    }
+    func testAcceptingARematchTheOtherSideAlreadyWithdrewExplainsAndSendsNothing() async throws {
+        let source = try battle(), pending = try rematchPending(source)
+        let (session, http, _, _) = try await setup([source], trainer: "trainer-two")
+        await session.bootstrap(); await session.perform(.openBattle(source.battleId))
+        session.presentation.selectedEntryID = "instance-two"
+        await http.route("/v1/battles", try JSONEncoder().encode(OnlineBattlePage(battles: [source, pending], before: nil)))
+        await session.refresh()
+        XCTAssertEqual(session.presentation.rematchOffer(for: source), .received(pending))
+        await http.route("/v1/battles", try JSONEncoder().encode(OnlineBattlePage(battles: [source, changed(pending, ["state": "CANCELLED"])], before: nil)))
+        await session.perform(.accept("bt_rematch"))
+        let accepts = await http.count("/v1/battles/bt_rematch/accept"); XCTAssertEqual(accepts, 0)
+        XCTAssertTrue(session.presentation.notice?.contains("취소") == true, session.presentation.notice ?? "<nil>")
+        XCTAssertEqual(session.presentation.room?.battleId, source.battleId)
+    }
+    func testAPressOnARoomBesideTheResultThatIsNotItsRematchIsNotSent() async throws {
+        let source = try battle(), stranger = try changed(pendingRoom(), ["battleId": "bt_stranger", "createdAt": source.createdAt + 1000])
+        let (session, http, _, _) = try await setup([source, stranger])
+        await session.bootstrap(); await session.perform(.openBattle(source.battleId))
+        for action in [OnlineBattleUIAction.cancel(stranger.battleId), .accept(stranger.battleId), .decline(stranger.battleId)] {
+            await session.perform(action)
+        }
+        let sent = await http.requests.filter { $0.httpMethod == "POST" && $0.url?.path.contains("bt_stranger") == true }.count
+        XCTAssertEqual(sent, 0)
+        XCTAssertEqual(session.presentation.room?.battleId, source.battleId)
     }
 }
 

@@ -141,32 +141,7 @@ struct OnlineBattleScreen: View {
                 Button(l.onlineRefresh) { model.send(.refresh) }
                     .buttonStyle(.borderless).font(.caption).disabled(model.isBusy)
             }.frame(maxWidth: .infinity, alignment: .leading).practiceCard()
-        case .result:
-            VStack(alignment: .leading, spacing: 12) {
-                Image(systemName: model.result?.isVoid == true ? "minus.circle" : "flag.checkered")
-                    .font(.largeTitle).foregroundStyle(.secondary)
-                Text(model.result?.title ?? l.onlineResult).font(.title3.bold())
-                if let result = model.result {
-                    Text(result.detail).font(.callout).fixedSize(horizontal: false, vertical: true)
-                    if result.xpAwarded > 0 { Text(l.onlineXP(result.xpAwarded)).font(.headline).foregroundStyle(.green) }
-                    Label(result.hpApplied ? l.onlineHPApplied : l.onlineNoEffects,
-                          systemImage: result.hpApplied ? "heart.fill" : "shield")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-                if let room = model.room, room.state == .completed,
-                   room.side(for: model.account?.trainer.trainerId ?? "") != nil {
-                    Button(l.onlineRematch) { model.send(.prepareRematch(room.battleId)) }
-                        .disabled(!model.canRematch(room))
-                        .accessibilityIdentifier("online.result.rematch")
-                    if !model.canRematch(room) {
-                        Text(l.onlineRematchUnavailable).font(.caption).foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-                Button(l.onlineDone) { model.send(.dismissResult) }
-                    .buttonStyle(.borderedProminent).disabled(model.isBusy)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading).practiceCard()
+        case .result: OnlineBattleResultView(model: model, l: l, artwork: artwork)
         }
         }
     }

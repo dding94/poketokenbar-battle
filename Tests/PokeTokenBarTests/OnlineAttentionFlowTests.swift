@@ -28,7 +28,7 @@ final class OnlineAttentionFlowTests: XCTestCase {
         model.members = [.init(trainerId: "synthetic-foe", displayEmail: Self.foeName, role: .host, status: .active, joinedAt: 0, online: true)]
         model.battles = battles; model.phase = phase; model.room = displayed
         model.connectionStatus = .connection(.connected)
-        if result { model.result = .init(title: "승리", detail: "경험치를 얻었어요.", xpAwarded: 10, hpApplied: true, isVoid: false) }
+        if result { model.result = .init(kind: .win, effects: .init(instanceID: "synthetic-pikachu", xp: 10, hpShare: 1)) }
         return model
     }
     private func input(_ model: OnlineBattlePresentation, screen: Bool = false, noChoice: Set<String> = []) -> OnlineAttentionInput {

@@ -42,7 +42,7 @@ final class OnlineBattleAttentionTests: XCTestCase {
     /// Mirrors what publish() produces for a selected room.
     private func display(_ model: OnlineBattlePresentation, _ room: OnlineBattleView, phase: OnlineBattlePresentation.Phase, result: Bool = false) {
         model.battles = [room]; model.room = room; model.phase = phase
-        model.result = result ? .init(title: "승리", detail: "경험치를 얻었어요.", xpAwarded: 10, hpApplied: true, isVoid: false) : nil
+        model.result = result ? .init(kind: .win, effects: .init(instanceID: "synthetic-pikachu", xp: 10, hpShare: 1)) : nil
     }
 
     // MARK: Which state is which event
@@ -334,7 +334,7 @@ final class OnlineBattleAttentionTests: XCTestCase {
         let model = presentation([battle("bt-old", .completed, confirmed: true), battle("bt-void", .void)])
         XCTAssertNil(current(model))
         model.room = battle("bt-live", .running, confirmed: true, roundSeq: 1); model.phase = .arena
-        model.result = .init(title: "승리", detail: "", xpAwarded: 0, hpApplied: true, isVoid: false)
+        model.result = .init(kind: .win, effects: .init(instanceID: "synthetic-pikachu", xp: 0, hpShare: 1))
         XCTAssertNil(current(model), "A running room with a stale result object is not a result")
     }
 

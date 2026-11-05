@@ -607,7 +607,7 @@ final class OnlineBattleSession {
                 presentation.announceEnded(room, previous: previousView?.state, l: localization())
                 stagings.removeValue(forKey: room.battleId)?.skipToEnd()
                 if room.state == .void {
-                    resultByBattleID[room.battleId] = .init(title: "경기 무효", detail: "체력과 경험치는 바뀌지 않았어요.", xpAwarded: 0, hpApplied: false, isVoid: true)
+                    resultByBattleID[room.battleId] = .init(kind: .void, effects: nil)
                 }
                 publish(); return
             }
@@ -749,9 +749,7 @@ final class OnlineBattleSession {
         let own = battle.side(for: account.trainer.trainerId) == .p1 ? battle.p1.snapshot : battle.p2.snapshot
         if let own, !presentation.roster.contains(where: { $0.id == own.instanceId }) {
             try effects.releaseOnlineBattle(key: key)
-            let l = localization()
-            resultByBattleID[battle.battleId] = .init(title: l.onlineOtherSaveResultTitle, detail: l.onlineOtherSaveResultDetail,
-                                                      xpAwarded: 0, hpApplied: false, isVoid: false)
+            resultByBattleID[battle.battleId] = .init(kind: .record, effects: nil)
             return
         }
         guard let hash = battle.config?.engineHash else { throw OnlineBattleFailure.invalidResponse }
@@ -765,8 +763,9 @@ final class OnlineBattleSession {
         showResult(receipt, outcome: outcome)
     }
     private func showResult(_ receipt: OnlineBattleEffectReceipt, outcome: OnlineBattleOutcome) {
-        resultByBattleID[receipt.key.battleID] = .init(title: outcome == .win ? "승리" : outcome == .loss ? "패배" : "무승부",
-            detail: "양쪽의 전투 결과가 일치해 반영했어요.", xpAwarded: Int64(receipt.grantedXP), hpApplied: true, isVoid: false)
+        resultByBattleID[receipt.key.battleID] = .init(
+            kind: outcome == .win ? .win : outcome == .loss ? .loss : .draw,
+            effects: .init(instanceID: receipt.localInstanceID, xp: Int64(receipt.grantedXP), hpShare: receipt.appliedHPShare))
     }
     private func rebuildRoster() throws {
         if let rosterProvider { presentation.roster = try rosterProvider() }
