@@ -113,7 +113,8 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.env={k:v for k,v in os.environ.items() if not k.startswith(('PTB_', 'CODESIGN_'))}
         self.env.update(PATH=str(self.bin)+os.pathsep+self.env['PATH'], CALLS=str(self.repo/'calls'),
                         PTB_EXPECTED_LEAF=LEAF, PTB_NOTES_FILE=str(self.repo/'notes.md'),
-                        PTB_CONTRIBUTORS_FILE=str(self.repo/'contributors.txt'))
+                        PTB_CONTRIBUTORS_FILE=str(self.repo/'contributors.txt'),
+                        PTB_BATTLE_SERVER_URL='https://league.example.invalid')
         self.ci_run={'id':12345,'head_sha':'1'*40,'name':'CI','path':'.github/workflows/ci.yml',
                      'status':'completed','conclusion':'success','run_attempt':1,
                      'repository':{'full_name':'dding94/poketokenbar-battle'},
@@ -164,6 +165,7 @@ app=pathlib.Path('build/PokeTokenBattle.app/Contents')
 (app/'MacOS').mkdir(parents=True,exist_ok=True)
 (app/'MacOS/PokeTokenBarBattle').write_text('fixture binary')
 plist={'CFBundleIdentifier':'io.github.dding94.poketokenbar-battle','CFBundleName':'PokeTokenBattle', 'CFBundleExecutable':'PokeTokenBarBattle','CFBundleShortVersionString':os.environ['PTB_RELEASE_VERSION'],'LSMinimumSystemVersion':'15.0'}
+if os.environ.get('PTB_BATTLE_SERVER_URL') and not os.environ.get('DROP_SERVER_URL'): plist['PTBBattleServerURL']=os.environ['PTB_BATTLE_SERVER_URL']
 (app/'Info.plist').write_bytes(plistlib.dumps(plist))
 (app/'Resources').mkdir(exist_ok=True)
 (app/'Library/LaunchAgents').mkdir(parents=True,exist_ok=True)
@@ -251,6 +253,21 @@ bash scripts/package-battle-engines.sh "build/PokeTokenBattle.app/Contents/Resou
         result=self.run_release('--prepare-build','3.0.0',ACTUAL_LEAF='F'*40)
         self.assertNotEqual(result.returncode,0)
         self.assertNotIn('build:',self.calls())
+
+    def test_a_release_needs_the_server_address_before_anything_is_built(self):
+        self.fake_build()
+        env=dict(self.env); env.pop('PTB_BATTLE_SERVER_URL',None)
+        result=subprocess.run(['bash',str(self.repo/'scripts/release.sh'),'--prepare-build','3.0.0'],env=env,text=True,capture_output=True)
+        self.assertNotEqual(result.returncode,0)
+        self.assertIn('PTB_BATTLE_SERVER_URL',result.stderr)
+        self.assertNotIn('build:',self.calls())
+
+    def test_a_bundle_without_the_server_address_prevents_zip_preview(self):
+        self.fake_build()
+        result=self.run_release('--prepare-build','3.0.0',DROP_SERVER_URL='1')
+        self.assertNotEqual(result.returncode,0,result.stdout+result.stderr)
+        self.assertIn('no embedded server address',result.stderr)
+        self.assertFalse((self.repo/'build/release/poke-token-bar-battle.rb').exists())
 
     def test_invalid_bundle_prevents_zip_preview(self):
         for injection, expected in (({'BAD_ARCH':'1'}, 'lipo'), ({'MINOS':'14.0'}, 'deployment target'),

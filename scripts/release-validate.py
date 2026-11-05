@@ -131,9 +131,10 @@ def bundle_check(root, app, target_version, leaf):
         field = 'minos' if command.strip() == 'LC_BUILD_VERSION' else 'version'
         minima = [value.strip() for value in re.findall(rf'^\s*{field}\b([^\n]*)$', body, re.M)]
         require(len(minima) == 1 and minima[0] in ('15.0','15.0.0'), f'{arch} deployment target must be macOS 15.0')
-    if 'PTBBattleServerURL' in info:  # embedded by build-app.sh; absent in builds that keep manual entry
-        require(isinstance(info['PTBBattleServerURL'], str) and server_url(info['PTBBattleServerURL']) == info['PTBBattleServerURL'],
-                'Embedded server URL is not a normalized https origin')
+    # Only release builds reach this check, and a release must carry the address (build-app.sh embeds it).
+    require('PTBBattleServerURL' in info, 'Release bundle has no embedded server address (PTB_BATTLE_SERVER_URL)')
+    require(isinstance(info['PTBBattleServerURL'], str) and server_url(info['PTBBattleServerURL']) == info['PTBBattleServerURL'],
+            'Embedded server URL is not a normalized https origin')
     run('codesign', '--verify', '--deep', '--strict', str(app))
     entitlement_output = run('codesign', '-d', '--entitlements', ':-', str(app))
     xml = re.search(rb'<\?xml.*?</plist>', entitlement_output, re.S)

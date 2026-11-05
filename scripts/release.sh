@@ -18,6 +18,10 @@ case "$MODE" in
     [[ $# == 1 ]] || { echo 'Use release.sh VERSION' >&2; exit 1; }
     MODE=publish; VERSION="$1" ;;
 esac
+# A public build without the address silently falls back to manual entry, and every later check would pass.
+if [[ "$MODE" == --prepare-build || "$MODE" == publish ]]; then
+  [[ -n "${PTB_BATTLE_SERVER_URL:-}" ]] || { echo 'PTB_BATTLE_SERVER_URL is required: a release embeds the server address.' >&2; exit 1; }
+fi
 
 doc_check() {
   local warn=0
