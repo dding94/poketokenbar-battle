@@ -57,6 +57,8 @@ jobs:
       # About 210 s of the 480 s suite on 2026-10-30 (SnapshotHistory ~175 s, DexBack ~35 s). They
       # leave the coverage gate; PracticeScreenRenderingTests stays in `rest` for the practice files.
       RENDERING_TESTS: "SnapshotHistoryRenderingTests|DexBackNavigationTests"
+      # XCTest block-buffers when piped, so a hung test would hide behind the last flush (2026-11-05).
+      NSUnbufferedIO: "YES"
     steps:
       - uses: actions/checkout@v5
 
