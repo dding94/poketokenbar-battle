@@ -26,6 +26,8 @@ final class OnlineBattleResolver {
     private(set) var request = BattleRequest(kind: "none", moves: [])
     private(set) var result: BattleResult?
     private(set) var logs: [String] = []
+    private(set) var roundLogEnds: [Int] = []
+    private(set) var roundReveals: [[BattleLogReveal]] = []
     private(set) var journal: [OnlineBattlePair] = []
     var processedRoundSeq: Int { journal.count }
     private let initial: OnlineBattleView
