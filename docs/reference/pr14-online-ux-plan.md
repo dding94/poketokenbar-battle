@@ -87,6 +87,8 @@ MIT가 주지 않는 것: 이름은 라이선스와 별개의 상표 문제입�
 - 기능 변경은 RED(단언 실패) → GREEN → REFACTOR로 커밋을 나눈다. 새 가드는 결함을 일부러 넣어 실패하는지 한 번 확인하고, 가드에 실제로 도달하는 전제 조건을 갖춘다.
 - 커밋은 영어 Conventional Commits이며 co-author trailer를 넣지 않는다.
 - 로컬 Swift 테스트: `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer PTB_STATE_DIR=<임시 폴더> swift test --filter …`. `xcode-select`는 바꾸지 않는다. 통과 기준은 CI(macOS 15, Swift 6.1)다. 로컬 Swift 6.4가 통과시켜도 CI의 6.1은 막을 수 있고, 관련 테스트만 고르면 소스 검사 테스트를 놓치므로 필터에 항상 `LocalizedUILiteralTests`를 넣는다(2026-11-05 CI 실패).
+- 테스트 판정: XCTest의 `N failures (0 unexpected)`는 예외가 없다는 뜻일 뿐 **단언 실패가 N건 있다는 뜻**이다. `Test Suite ... failed`가 보이면 실패다. 파이프로 넘긴 명령의 종료 코드는 `swift test`의 것이 아닐 수 있으니 `set -o pipefail`이나 파일 저장으로 확인한다. 실패를 추정으로 넘기지 않는다.
+- 결함 주입은 작업당 다시 빌드 약 10회까지만 한다. 함께 넣을 수 있는 결함은 묶는다.
 - CI는 작업이 모두 끝난 뒤 한 번만 돌린다(2026-11-05 사용자 결정, 한 번에 약 15분). 통합할 때는 로컬 테스트로 판단하고 푸시하지 않는다. Swift 6.1과 macOS 15에서 나오는 문제는 마지막 CI에서 한꺼번에 고친다. 머지와 릴리스 전 CI 통과는 그대로 필수다.
 - 합성 클릭: `window.sendEvent`로 기본 스타일 버튼을 누르면 CI의 macOS 15에서 테스트가 끝없이 멈출 수 있다. NSButton이면 `performClick`을 쓴다(defect-log). 필터에 `SwiftUIIsolationTests`도 항상 넣는다.
 - 서버 테스트: `npm ci --prefix server`, `npm run typecheck --prefix server`, `npm test --prefix server`.

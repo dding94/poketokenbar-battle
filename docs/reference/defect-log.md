@@ -1683,3 +1683,5 @@ read_when:
 - **요약 수치는 모든 라운드가 화면을 거쳤을 때만 보인다.** 로그를 다시 만들면(`markResync`) 박자를 만들지 않아 기록이 비고, 닫힌 팝오버는 박자를 건너뛴다. 마지막 박자의 턴이 서버 보고의 `terminalSeq`에 못 미치면 피해 합계가 모자라므로 타일을 숨긴다. `testTotalsAppearOnlyWhenEveryRoundReachedTheScreen`이 한 라운드 모자란 경우와 resync 뒤 빈 기록을 모두 밟는다.
 - **방 액션은 화면에 있는 방이나 그 끝난 방의 열린 재대결만 가리킬 수 있다.** 결과 위에서 수락·취소를 하려면 재대결 방의 id를 달고 가야 하는데, 리뷰 A의 "화면에 없는 방은 누르지 않는다"를 풀면 안 된다. `actionRoom`이 둘 외에는 nil이고(`testARoomActionMayNameTheShownRoomOrItsOpenRematchAndNothingElse`), 재대결을 끝내는 액션(취소·거절)은 결과 화면을 새 방으로 옮기지 않는다.
 - **SwiftUI의 bordered 버튼은 AppKit 트리에 NSButton으로 없다.** macOS 27에서 `.bordered`·`.borderedProminent` 버튼을 찾으면 0개였고, 위치로 버튼을 고르던 단언은 통째로 실패했다. 화면 상태(`OnlineBattleResultScreen`)가 문구와 각 버튼이 보내는 액션을 먼저 정하고 뷰는 그대로 그리게 해서, 단언은 그 구조체와 액션 매핑을 읽고 렌더링 테스트는 그림이 그려지고 상태마다 다르고 맞는지만 본다.
+
+- **`1 failure (0 unexpected)`는 통과가 아니다.** T18 에이전트가 이 줄을 기대된 실패로 추정하고 종료 코드 0으로 보고했는데, 실제로는 `testArenaKeepsOneHeightInEveryStateAndFitsTheScrollArea`가 실패하고 있었다(닉네임·전적 줄이 더해진 상대 카드가 기술 선택을 보드 아래로 밀었다). `unexpected`는 던져진 오류 수일 뿐이다. 종료 코드 0은 파이프 뒤 명령의 것이었던 것으로 보인다. 운영자가 로그를 읽어 찾았고 로그 카드가 더 줄어들도록 고쳤다. 판정 규칙을 `pr14-online-ux-plan.md` §4에 넣었다.
