@@ -4275,4 +4275,15 @@ extension OnlineBattleSessionTests {
         XCTAssertGreaterThan(try XCTUnwrap(model.entryHP[entry.id]), 0, "the screen shows the HP the save has now")
         XCTAssertTrue(model.entryIsEligible(entry), "and the revived individual can be picked")
     }
+
+    /// The same opening with a saved key and no account yet (server down, first read in flight): showing the HP must not
+    /// publish an empty lobby over the wait screen and its way to another code.
+    func testOpeningTheOnlineScreenLeavesAnAccountStillBeingRestored() async throws {
+        let (session, http, _, _) = try await setup()
+        await http.route("/v1/me", Data(), status: 503)
+        await session.bootstrap()
+        await session.perform(.setOnlineScreenVisible(true))
+        XCTAssertEqual(session.presentation.phase, .setup)
+        XCTAssertTrue(session.presentation.showsRestoringAccount)
+    }
 }

@@ -336,6 +336,23 @@ final class PracticeStakesStoreTests: XCTestCase {
         XCTAssertEqual(store.itemTargets(.potion).first?.healthShare, 0.5)
     }
 
+    /// A battle holding someone at full HP is no reason a Potion waits: nobody needs one, whatever the battle does next
+    /// is the battle's to settle. A held individual who is hurt still shows, so the row explains the wait.
+    func testAHeldIndividualAtFullHPIsNotWaitingForAHealingItem() throws {
+        let folder = try stakesFolder(); defer { try? FileManager.default.removeItem(at: folder) }
+        var state = makeState(items: [.potion: 1, .revive: 1, .mint: 1], active: false)
+        state.dex = [graduate("full"), graduate("fine")]
+        let store = try makeStore(state, at: folder.appendingPathComponent("s.json"))
+        store.setInBattle("full")
+        XCTAssertEqual(store.itemVerdict(.potion, on: "full"), .inBattle, "using it stays refused")
+        XCTAssertEqual(store.itemTargets(.potion).map(\.id), [])
+        XCTAssertEqual(store.itemTargets(.revive).map(\.id), [])
+        XCTAssertEqual(store.itemTargets(.mint).map(\.id), ["fine", "full"], "a Mint does not depend on HP: the row says why not")
+        store.setInBattle(nil); store.setHealthShare(0.5, of: "full"); store.setInBattle("full")
+        XCTAssertEqual(store.itemTargets(.potion).map(\.id), ["full"])
+        XCTAssertEqual(store.itemTargets(.potion).map(\.verdict), [.inBattle])
+    }
+
     /// A reroll and a Mint on a graduate write to that dex entry, spend one, and leave the current Pokémon alone; a
     /// released entry and an unknown ID spend nothing.
     func testARerollAndAMintOnAGraduateChangeOnlyThatEntry() throws {

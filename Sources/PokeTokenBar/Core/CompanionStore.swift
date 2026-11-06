@@ -2298,12 +2298,15 @@ extension CompanionStore: PracticeBattleEffects {
     }
 
     /// The rows to offer for `kind`: those it works on first, then those a reason keeps from it. Someone at full HP or
-    /// not fainted is not waiting for this item, so they stay out of the list instead of burying who is.
+    /// not fainted is not waiting for this item, so they stay out of the list instead of burying who is. That includes
+    /// someone a battle holds at full HP: the hold refuses the item (`itemVerdict`), but it is not why nobody needs it.
     func itemTargets(_ kind: ItemKind) -> [ItemTarget] {
         let rows = ownedIndividuals.compactMap { individual -> ItemTarget? in
             let verdict = itemVerdict(kind, on: individual.id)
-            guard verdict == .usable || verdict == .inBattle || verdict == .needsRevive else { return nil }
-            return ItemTarget(individual: individual, healthShare: healthShare(of: individual.id), verdict: verdict)
+            let share = healthShare(of: individual.id)
+            guard verdict == .usable || verdict == .inBattle || verdict == .needsRevive,
+                  !(verdict == .inBattle && share >= 1 && [ItemKind.potion, .hyperPotion, .revive].contains(kind)) else { return nil }
+            return ItemTarget(individual: individual, healthShare: share, verdict: verdict)
         }
         return rows.filter { $0.verdict == .usable } + rows.filter { $0.verdict != .usable }
     }

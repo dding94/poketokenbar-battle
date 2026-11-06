@@ -1181,6 +1181,10 @@ final class PracticeScreenRenderingTests: XCTestCase {
         let full = try battleItemStore(language: .en, graduates: [("down", 0)])
         XCTAssertNil(BagView.battleItemReason(.revive, store: full), "the current Pokémon is fine, the graduate is not")
         XCTAssertEqual(BagView.battleItemReason(.potion, store: full), "Fainted · needs a Revive", "a Potion helps nobody here")
+        let idle = try battleItemStore(language: .en, graduates: [("fine", 1)])
+        idle.setInBattle("fine")
+        XCTAssertEqual(BagView.battleItemReason(.potion, store: idle), "HP is full", "the battle is not why nobody needs a Potion")
+        XCTAssertEqual(BagView.battleItemReason(.revive, store: idle), "Only for a fainted Pokémon")
     }
 
     /// The bag says why a battle item does not work on the current Pokémon from the store's own verdict

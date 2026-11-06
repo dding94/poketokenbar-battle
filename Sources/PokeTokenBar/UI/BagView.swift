@@ -52,10 +52,11 @@ struct BagView: View {
         let l = store.l
         let individuals = store.ownedIndividuals
         guard !individuals.isEmpty else { return store.isEgg ? l.useAfterHatch : l.useNeedsPokemon }
-        let verdicts = individuals.map { store.itemVerdict(kind, on: $0.id) }
+        let verdicts = store.itemTargets(kind).map(\.verdict)
         if verdicts.contains(.usable) { return nil }
-        let first = [HealingItemVerdict.inBattle, .needsRevive, .hpFull, .notFainted].first(where: verdicts.contains)
-        return first?.reason(l)
+        if let first = [HealingItemVerdict.inBattle, .needsRevive].first(where: verdicts.contains) { return first.reason(l) }
+        // 목록이 비었다 = 이 아이템을 기다리는 포켓몬이 없다(`itemTargets`). 민트·재추첨은 여기까지 오지 않는다.
+        return (kind == .revive ? HealingItemVerdict.notFainted : .hpFull).reason(l)
     }
 
     /// 대상 목록에서 고른 개체에게 아이템을 쓴다(재추첨은 확인 패널을 거쳐 `IVRerollPanel` 쪽에서).
