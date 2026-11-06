@@ -20,7 +20,7 @@ final class OnlineBattleReplayTests: XCTestCase {
         for fixture in try fixtures() {
             for (trainer, side) in [("trainer-one", OnlineBattleSide.p1), ("trainer-two", .p2)] {
                 do {
-                    let replay = try OnlineBattleReplay(battle: fixture.battle, localTrainerID: trainer, engineFactory: engine)
+                    let replay = try OnlineBattleReplay(battle: fixture.battle, localTrainerID: trainer, l: L(.ko), engineFactory: engine)
                     XCTAssertTrue(replay.verified)
                     XCTAssertEqual(replay.battleID, fixture.battle.battleId)
                     XCTAssertEqual(replay.localSide, side)
@@ -39,10 +39,23 @@ final class OnlineBattleReplayTests: XCTestCase {
             }
         }
     }
+    /// The language words the frames and nothing else: both replays verify the same record frame for frame.
+    @MainActor func testFramesFollowTheAppLanguageAndTheLanguageChangesNothingElse() throws {
+        for fixture in try fixtures() {
+            let english = try OnlineBattleReplay(battle: fixture.battle, localTrainerID: "trainer-two", l: L(.en), engineFactory: engine)
+            let korean = try OnlineBattleReplay(battle: fixture.battle, localTrainerID: "trainer-two", l: L(.ko), engineFactory: engine)
+            XCTAssertTrue(english.verified); XCTAssertTrue(korean.verified)
+            XCTAssertEqual(english.frames.map(\.roundSeq), korean.frames.map(\.roundSeq))
+            XCTAssertEqual(english.frames.map(\.logs.count), korean.frames.map(\.logs.count))
+            let text = try XCTUnwrap(english.frames.last).logs.joined(separator: "\n")
+            XCTAssertFalse(text.unicodeScalars.contains { (0xAC00...0xD7A3).contains($0.value) }, text)
+            XCTAssertFalse(text.isEmpty)
+        }
+    }
     @MainActor func testFramesRevealOnlyTheInformationVisibleAtThatTimeFromP2() throws {
         let battle = try fixtures()[0].battle
         do {
-            let replay = try OnlineBattleReplay(battle: battle, localTrainerID: "trainer-two", engineFactory: engine)
+            let replay = try OnlineBattleReplay(battle: battle, localTrainerID: "trainer-two", l: L(.ko), engineFactory: engine)
             let first = replay.frames[0], next = replay.frames[1]
             XCTAssertEqual(first.view.p1.moves, [])
             XCTAssertNil(first.view.p1.ability)
@@ -59,29 +72,29 @@ final class OnlineBattleReplayTests: XCTestCase {
         let battle = try changed(fixtures()[0].battle) {
             $0["createdAt"] = 1; $0["startedAt"] = 2; $0["expiresAt"] = 3; $0["reportedAt"] = 4
         }
-        XCTAssertNoThrow(try OnlineBattleReplay(battle: battle, localTrainerID: "trainer-one", engineFactory: engine))
+        XCTAssertNoThrow(try OnlineBattleReplay(battle: battle, localTrainerID: "trainer-one", l: L(.ko), engineFactory: engine))
     }
     @MainActor func testVoidStartlessMissingAndForgedResultsNeverProduceReplay() throws {
         let battle = try fixtures()[0].battle
         for state in ["VOID", "CANCELLED", "DECLINED", "EXPIRED", "RUNNING"] {
-            XCTAssertThrowsError(try OnlineBattleReplay(battle: changed(battle) { $0["state"] = state }, localTrainerID: "trainer-one", engineFactory: engine))
+            XCTAssertThrowsError(try OnlineBattleReplay(battle: changed(battle) { $0["state"] = state }, localTrainerID: "trainer-one", l: L(.ko), engineFactory: engine))
         }
         for key in ["config", "result", "startedAt"] {
-            XCTAssertThrowsError(try OnlineBattleReplay(battle: changed(battle) { $0[key] = NSNull() }, localTrainerID: "trainer-one", engineFactory: engine))
+            XCTAssertThrowsError(try OnlineBattleReplay(battle: changed(battle) { $0[key] = NSNull() }, localTrainerID: "trainer-one", l: L(.ko), engineFactory: engine))
         }
         for key in ["logHash", "journalHash", "engineHash"] {
             let bad = try changed(battle) { var report = $0["result"] as! [String: Any]; report[key] = String(repeating: "a", count: 64); $0["result"] = report }
-            XCTAssertThrowsError(try OnlineBattleReplay(battle: bad, localTrainerID: "trainer-one", engineFactory: engine))
+            XCTAssertThrowsError(try OnlineBattleReplay(battle: bad, localTrainerID: "trainer-one", l: L(.ko), engineFactory: engine))
         }
-        XCTAssertThrowsError(try OnlineBattleReplay(battle: changed(battle) { $0["journal"] = [] }, localTrainerID: "trainer-one", engineFactory: engine))
-        XCTAssertThrowsError(try OnlineBattleReplay(battle: battle, localTrainerID: "outsider", engineFactory: engine))
+        XCTAssertThrowsError(try OnlineBattleReplay(battle: changed(battle) { $0["journal"] = [] }, localTrainerID: "trainer-one", l: L(.ko), engineFactory: engine))
+        XCTAssertThrowsError(try OnlineBattleReplay(battle: battle, localTrainerID: "outsider", l: L(.ko), engineFactory: engine))
     }
     @MainActor func testUnknownEngineAndUnsupportedVersionRefuseCurrentEngineFallback() throws {
         let battle = try fixtures()[0].battle
         var factoryCalls = 0
         for (key, value) in [("engineHash", String(repeating: "0", count: 64)), ("rulesVersion", "future"), ("policyVersion", "future"), ("relayVersion", "future")] {
             let bad = try changed(battle) { var config = $0["config"] as! [String: Any]; config[key] = value; $0["config"] = config }
-            XCTAssertThrowsError(try OnlineBattleReplay(battle: bad, localTrainerID: "trainer-one", engineFactory: { hash in factoryCalls += 1; return try self.engine(hash) }))
+            XCTAssertThrowsError(try OnlineBattleReplay(battle: bad, localTrainerID: "trainer-one", l: L(.ko), engineFactory: { hash in factoryCalls += 1; return try self.engine(hash) }))
         }
         XCTAssertEqual(factoryCalls, 0)
     }
@@ -94,20 +107,20 @@ final class OnlineBattleReplayTests: XCTestCase {
         try data.write(to: url)
         let hash = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
         let untrusted = try BattleEngine(url: url, expectedHash: hash)
-        XCTAssertThrowsError(try OnlineBattleReplay(battle: battle, localTrainerID: "trainer-one", engineFactory: { _ in untrusted }))
+        XCTAssertThrowsError(try OnlineBattleReplay(battle: battle, localTrainerID: "trainer-one", l: L(.ko), engineFactory: { _ in untrusted }))
         XCTAssertThrowsError(try OnlineBattleResolver(battle: battle, localTrainerID: "trainer-one", engine: untrusted))
     }
 
     @MainActor func testReplayFailureReasonsSeparateUnavailableMissingAndUnverifiedData() throws {
         let battle = try fixtures()[0].battle
         let missing = try changed(battle) { $0["result"] = NSNull() }
-        XCTAssertThrowsError(try OnlineBattleReplay(battle: missing, localTrainerID: "trainer-one", engineFactory: engine)) {
+        XCTAssertThrowsError(try OnlineBattleReplay(battle: missing, localTrainerID: "trainer-one", l: L(.ko), engineFactory: engine)) {
             XCTAssertEqual($0 as? OnlineBattleReplay.Failure, .incompleteRecord)
         }
-        XCTAssertThrowsError(try OnlineBattleReplay(battle: battle, localTrainerID: "trainer-one", engineFactory: { _ in throw BattleEngine.Failure.missingBundle })) {
+        XCTAssertThrowsError(try OnlineBattleReplay(battle: battle, localTrainerID: "trainer-one", l: L(.ko), engineFactory: { _ in throw BattleEngine.Failure.missingBundle })) {
             XCTAssertEqual($0 as? OnlineBattleReplay.Failure, .unavailableEngine)
         }
-        XCTAssertThrowsError(try OnlineBattleReplay(battle: battle, localTrainerID: "trainer-one", engineFactory: { _ in throw BattleEngine.Failure.checksumMismatch })) {
+        XCTAssertThrowsError(try OnlineBattleReplay(battle: battle, localTrainerID: "trainer-one", l: L(.ko), engineFactory: { _ in throw BattleEngine.Failure.checksumMismatch })) {
             XCTAssertEqual($0 as? OnlineBattleReplay.Failure, .verificationFailed)
         }
     }
@@ -117,7 +130,7 @@ final class OnlineBattleReplayTests: XCTestCase {
         let battle = try fixtures()[0].battle
         let hash = try XCTUnwrap(battle.config?.engineHash)
         let archived = try BattleEngine(url: root.appendingPathComponent("engine/archive/\(hash).js"), expectedHash: hash)
-        XCTAssertNoThrow(try OnlineBattleReplay(battle: battle, localTrainerID: "trainer-two", engineFactory: { _ in archived }))
+        XCTAssertNoThrow(try OnlineBattleReplay(battle: battle, localTrainerID: "trainer-two", l: L(.ko), engineFactory: { _ in archived }))
         let completed = try OnlineBattleResolver.completedResolver(battle: battle, localTrainerID: "trainer-two", engine: archived)
         defer { completed.close() }
         XCTAssertNoThrow(try completed.verifyCompleted(battle))
@@ -131,7 +144,7 @@ final class OnlineBattleReplayTests: XCTestCase {
         let row = try XCTUnwrap((JSONSerialization.jsonObject(with: BattleJSON.encoder().encode(source.journal)) as? [Any])?.first)
         let oversized = try changed(source) { $0["journal"] = Array(repeating: row, count: 201) }
         var loads = 0
-        XCTAssertThrowsError(try OnlineBattleReplay(battle: oversized, localTrainerID: "trainer-one", engineFactory: { hash in
+        XCTAssertThrowsError(try OnlineBattleReplay(battle: oversized, localTrainerID: "trainer-one", l: L(.ko), engineFactory: { hash in
             loads += 1
             return try self.engine(hash)
         })) { XCTAssertEqual($0 as? OnlineBattleReplay.Failure, .verificationFailed) }

@@ -182,7 +182,7 @@ struct PracticeResultView: View {
 
     /// The four newest lines, newest first.
     private var log: some View {
-        let lines = Array(battle.messages.filter { !$0.hasPrefix("──") }.suffix(4).reversed())
+        let lines = battle.recentMessages(l, limit: 4)
         return VStack(alignment: .leading, spacing: 3) {
             Text(l.practiceLog).font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
             ForEach(Array(lines.enumerated()), id: \.offset) { index, line in

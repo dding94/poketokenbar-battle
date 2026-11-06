@@ -326,7 +326,7 @@ final class PracticeSession {
         guard battle?.phase != .running else { return }
         let engine: BattleEngine
         do { engine = try self.engine ?? BattleEngine(url: engineURL) }
-        catch { loadError = PracticeText.failure(error); roster = nil; return }
+        catch { loadError = PracticeText.failure(error, l: L(state.language)); roster = nil; return }
         self.engine = engine; loadError = nil
         let roster = PracticeRoster(state: state, activeName: activeName, engine: engine)
         self.roster = roster

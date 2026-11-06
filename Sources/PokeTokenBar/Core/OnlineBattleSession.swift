@@ -886,7 +886,7 @@ final class OnlineBattleSession {
         presentation.request = resolvers[room.battleId]?.request ?? staging?.lastRequest
         // Hints belong to the resolver's live request; a staged request that outlived its resolver has none.
         presentation.moveHints = resolvers[room.battleId]?.moveHints() ?? [:]
-        presentation.liveLogs = OnlineBattleHistoryText.logs(resolvers[room.battleId]?.logs ?? [], localSide: presentation.localSide)
+        presentation.liveLogs = OnlineBattleHistoryText.logs(resolvers[room.battleId]?.logs ?? [], localSide: presentation.localSide, l: localization())
         publishDisclosedNames(room)
         if room.state == .running { readOpponentStreakOnce(room, account: account) }
         switch room.state {
@@ -1148,7 +1148,7 @@ final class OnlineBattleSession {
                     guard self.standingsVisible, self.standingsRevision == revision, self.generation == epoch,
                           !(error is CancellationError), error as? OnlineBattleFailure != .staleGeneration else { return }
                     if error as? OnlineBattleFailure == .unauthorized { await self.handle(error, epoch: epoch); return }
-                    self.presentation.standingsError = "그룹 전적을 불러오지 못했어요. 서버 지원 여부와 연결을 확인하고 다시 시도해 주세요."
+                    self.presentation.standingsError = self.localization().onlineStandingsLoadFailed
                 }
             } while self.standingsAgain && self.standingsVisible && self.standingsRevision == revision && self.generation == epoch
             if self.standingsRevision == revision, self.generation == epoch {
@@ -1231,23 +1231,22 @@ final class OnlineBattleSession {
         clearHistory(keepOpen: true)
         presentation.selectedHistoryBattle = room
         guard room.state == .completed else {
-            presentation.historyError = room.state == .void
-                ? "무효로 끝난 경기예요. 확정된 승패나 보상은 없어요."
-                : "시작 전에 종료되어 다시보기 자료가 없어요."
+            let l = localization()
+            presentation.historyError = room.state == .void ? l.onlineHistoryVoid : l.onlineHistoryNotStarted
             return
         }
         // Synchronous replay has no network or state-store dependencies. Future historical versions
         // use only the archive allowlist; a missing old engine never falls back to the current one.
         do {
-            presentation.replay = try OnlineBattleReplay(battle: room, localTrainerID: account.trainer.trainerId) { hash in
+            presentation.replay = try OnlineBattleReplay(battle: room, localTrainerID: account.trainer.trainerId, l: localization()) { hash in
                 try self.completedEngine(hash: hash)
             }
         } catch OnlineBattleReplay.Failure.unavailableEngine {
-            presentation.historyError = "이 경기의 전투 엔진이 앱에 없어 다시 볼 수 없어요. 경기 요약은 유지돼요."
+            presentation.historyError = localization().onlineReplayEngineMissing
         } catch OnlineBattleReplay.Failure.incompleteRecord {
-            presentation.historyError = "다시보기에 필요한 경기 자료가 없어요. 경기 요약은 유지돼요."
+            presentation.historyError = localization().onlineReplayRecordMissing
         } catch {
-            presentation.historyError = "기록을 검증하지 못해 다시보기를 열 수 없어요. 경기 결과는 바꾸지 않았어요."
+            presentation.historyError = localization().onlineReplayUnverified
         }
     }
 

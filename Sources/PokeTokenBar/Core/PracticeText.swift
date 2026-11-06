@@ -1,52 +1,78 @@
 import Foundation
 
-/// Korean framing with the engine identifier retained when a translation is unavailable.
-enum PracticeText {
-    static func failure(_ error: Error) -> String {
-        switch error {
-        case BattleSnapshot.Failure.missingProfile: return "개체 정보가 아직 준비되지 않았습니다. 잠시 후 연습전을 다시 열어 주세요."
-        case BattleSnapshot.Failure.missingNature: return "성격 정보가 없습니다."
-        case BattleSnapshot.Failure.missingGender: return "성별 정보가 없습니다."
-        case BattleSnapshot.Failure.missingAbility: return "특성 정보가 아직 없습니다."
-        case BattleSnapshot.Failure.missingMoves: return "배운 기술 정보가 아직 없습니다."
-        case BattleEngine.Failure.engine(let code):
-            if code == "same_individual" { return "상대는 내 다른 개체를 골라 주세요." }
-            return "전투를 진행할 수 없습니다 (\(code)). 개체 정보는 바꾸지 않았습니다."
-        case BattleEngine.Failure.missingBundle: return "전투 엔진이 없습니다. 완성된 앱 번들로 실행해 주세요."
-        case BattleEngine.Failure.checksumMismatch: return "전투 엔진 검증에 실패했습니다. 앱을 다시 빌드해 주세요."
-        default: return "전투 정보를 확인할 수 없습니다. 연습전을 다시 열어 주세요."
+/// One line of the battle log, kept typed and worded when it is read (`PracticeEvent` does the same for staging). The
+/// app language is therefore no input of the battle: it can change while one runs and never reaches the engine.
+enum PracticeLogEntry {
+    case opening(hasStakes: Bool)
+    case timedOut
+    case engine(String)
+    case abilityRevealed(name: String, ability: String)
+}
+
+/// What the battle board says in place of its prompt, worded when it is read, like the log.
+enum PracticeNotice {
+    case moveUnavailable
+    case failure(Error)
+
+    func text(_ l: L) -> String {
+        switch self {
+        case .moveUnavailable: return l.practiceMoveUnavailable
+        case .failure(let error): return PracticeText.failure(error, l: l)
         }
     }
-    static func log(_ line: String, names: [String: String]) -> String? {
+}
+
+/// Words engine output and failures in the app language (`L`), keeping an engine identifier that has no wording.
+enum PracticeText {
+    static func failure(_ error: Error, l: L) -> String {
+        switch error {
+        case BattleSnapshot.Failure.missingProfile: return l.practiceFailureProfile
+        case BattleSnapshot.Failure.missingNature: return l.practiceFailureNature
+        case BattleSnapshot.Failure.missingGender: return l.practiceFailureGender
+        case BattleSnapshot.Failure.missingAbility: return l.practiceFailureAbility
+        case BattleSnapshot.Failure.missingMoves: return l.practiceFailureMoves
+        case BattleEngine.Failure.engine(let code):
+            return code == "same_individual" ? l.practiceFailureSameIndividual : l.practiceFailureEngine(code)
+        case BattleEngine.Failure.missingBundle: return l.practiceFailureMissingBundle
+        case BattleEngine.Failure.checksumMismatch: return l.practiceFailureChecksum
+        default: return l.practiceFailureUnknown
+        }
+    }
+    static func line(_ entry: PracticeLogEntry, names: [String: String], l: L) -> String? {
+        switch entry {
+        case .opening(let hasStakes): return l.practiceLogOpening(hasStakes: hasStakes)
+        case .timedOut: return l.practiceLogTimedOut
+        case .engine(let line): return log(line, names: names, l: l)
+        case .abilityRevealed(let name, let ability): return l.practiceLogAbilityRevealed(name, ability)
+        }
+    }
+    static func log(_ line: String, names: [String: String], l: L) -> String? {
         let p = line.components(separatedBy: "|")
         guard p.count > 2 else { return nil }
         let actor = names[String(p[2].prefix(2))] ?? p[2]
         let detail = p.count > 3 ? p[3] : ""
         switch p[1] {
-        case "turn": return "── \(p[2])턴 ──"
-        case "move": return "\(actor) · \(detail) 사용"
-        case "-damage": return "\(actor) · 피해를 입었습니다 (HP \(detail))."
-        case "-heal": return "\(actor) · 체력을 회복했습니다 (HP \(detail))."
-        case "-miss": return "\(actor) · 공격이 빗나갔습니다."
-        case "-immune": return "\(actor) · 효과가 없습니다."
-        case "-fail": return "\(actor) · 기술이 실패했습니다."
-        case "-status": return "\(actor) · \(status(detail)) 상태가 되었습니다."
-        case "-curestatus": return "\(actor) · 상태이상이 회복됐습니다."
-        case "cant": return "\(actor) · 행동할 수 없습니다 (\(detail))."
-        case "-boost", "-unboost": return "\(actor) · 능력치 \(detail) \(p[1] == "-boost" ? "상승" : "하락")"
-        case "-supereffective": return "효과가 굉장합니다!"
-        case "-resisted": return "효과가 별로입니다."
-        case "-crit": return "급소에 맞았습니다!"
-        case "faint": return "\(actor) · 쓰러졌습니다."
-        case "win": return "\(names[p[2]] ?? p[2]) 승리 · 연습전을 마쳤습니다."
-        case "tie": return "무승부 · 연습전을 마쳤습니다."
-        case "-weather": return "날씨 · \(p[2])"
-        case "-start", "-end", "-activate": return "\(actor) · \(detail) \(p[1] == "-end" ? "종료" : "발동")"
+        case "turn": return l.practiceLogTurn(p[2])
+        case "move": return l.practiceLogMove(actor, detail)
+        case "-damage": return l.practiceLogDamage(actor, detail)
+        case "-heal": return l.practiceLogHeal(actor, detail)
+        case "-miss": return l.practiceLogMiss(actor)
+        case "-immune": return l.practiceLogImmune(actor)
+        case "-fail": return l.practiceLogFail(actor)
+        case "-status": return l.practiceLogStatus(actor, detail)
+        case "-curestatus": return l.practiceLogCured(actor)
+        case "cant": return l.practiceLogCant(actor, detail)
+        case "-boost", "-unboost": return l.practiceLogStat(actor, detail, raised: p[1] == "-boost")
+        case "-supereffective": return l.practiceLogSuperEffective
+        case "-resisted": return l.practiceLogResisted
+        case "-crit": return l.practiceLogCritical
+        case "faint": return l.practiceLogFaint(actor)
+        case "win": return l.practiceLogWin(names[p[2]] ?? p[2])
+        case "tie": return l.practiceLogTie
+        case "-weather": return l.practiceLogWeather(p[2])
+        case "-start", "-end", "-activate": return l.practiceLogEffect(actor, detail, ended: p[1] == "-end")
         default:
-            return p[1].hasPrefix("-") ? "전투 기록 · \(p.dropFirst(2).joined(separator: " · "))" : nil
+            return p[1].hasPrefix("-") ? "\(l.practiceLog) · \(p.dropFirst(2).joined(separator: " · "))" : nil
         }
-    }
-    static func status(_ value: String) -> String {
-        ["par": "마비", "brn": "화상", "psn": "독", "tox": "맹독", "slp": "잠듦", "frz": "얼음"][value] ?? value
     }
 }

@@ -29,7 +29,7 @@ enum OnlineBattleArenaFixture {
             model.arena = resolver.view ?? staging.lastView
             model.request = resolver.request
             model.moveHints = resolver.moveHints()
-            model.liveLogs = OnlineBattleHistoryText.logs(resolver.logs, localSide: model.localSide)
+            model.liveLogs = OnlineBattleHistoryText.logs(resolver.logs, localSide: model.localSide, l: L(.ko))
         }
     }
 

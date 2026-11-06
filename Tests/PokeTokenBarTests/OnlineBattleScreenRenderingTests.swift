@@ -367,7 +367,7 @@ final class OnlineBattleScreenRenderingTests: XCTestCase {
         json["createdAt"] = 1_793_683_500_000
         let battle = try JSONDecoder().decode(OnlineBattleView.self, from: JSONSerialization.data(withJSONObject: json))
         let sourceRoot = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-        let replay = try OnlineBattleReplay(battle: battle, localTrainerID: "trainer-two", engineFactory: { _ in
+        let replay = try OnlineBattleReplay(battle: battle, localTrainerID: "trainer-two", l: L(.ko), engineFactory: { _ in
             try BattleEngine(url: sourceRoot.appendingPathComponent("engine/dist/battle-engine.js"))
         })
         let model = Self.model()

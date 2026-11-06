@@ -151,14 +151,14 @@ final class OnlineBattleSessionTests: XCTestCase {
             .init(id: value.instanceId, name: value.publicInfo.species, snapshot: .init(schemaVersion: 1, instanceID: value.instanceId, engineHash: BattleEngineManifest.sha256, rulesVersion: BattleSnapshot.rules, policyVersion: BattleSnapshot.policy, set: value.set, publicInfo: value.publicInfo), blockedReason: nil)
         }
     }
-    private func setup(_ battles: [OnlineBattleView] = [], credential: SessionCredentials = .init(), effects: SessionEffects = .init(), trainer: String = "trainer-one", rosterOverride: [PracticeCandidate]? = nil, connection: SessionConnection = .init(), observer: SessionObserver? = nil, access: SessionAccess? = nil, enabled: Bool = true, clock: OnlineBattleConnectionClock = .init(), automaticTicks: Bool = false, embeddedServer: String? = nil) async throws -> (OnlineBattleSession, SessionHTTP, SessionCredentials, SessionEffects) {
+    private func setup(_ battles: [OnlineBattleView] = [], language: AppLanguage = .ko, credential: SessionCredentials = .init(), effects: SessionEffects = .init(), trainer: String = "trainer-one", rosterOverride: [PracticeCandidate]? = nil, connection: SessionConnection = .init(), observer: SessionObserver? = nil, access: SessionAccess? = nil, enabled: Bool = true, clock: OnlineBattleConnectionClock = .init(), automaticTicks: Bool = false, embeddedServer: String? = nil) async throws -> (OnlineBattleSession, SessionHTTP, SessionCredentials, SessionEffects) {
         let http = SessionHTTP(), room = try battle()
         await connection.setTrainer(trainer)
         let localAccount = OnlineBattleAccount(trainer: .init(trainerId: trainer, displayEmail: account.trainer.displayEmail, role: .member, status: .active), group: account.group)
         await http.route("/v1/me", try JSONEncoder().encode(localAccount))
         await http.route("/v1/group", try JSONEncoder().encode(OnlineBattleGroupMembers(group: account.group, members: [])))
         await http.route("/v1/battles", try JSONEncoder().encode(OnlineBattlePage(battles: battles, before: nil)))
-        let session = OnlineBattleSession(settings: .init(profileID: UUID().uuidString, serverURL: "https://battle.example.invalid", embeddedServerURL: embeddedServer), credentials: credential, transport: http, effects: effects, engineFactory: { try BattleEngine(url: self.engineURL) }, connectionFactory: { callback in observer?.callback = callback; return connection }, rosterProvider: { rosterOverride ?? self.roster(room) }, clock: clock, automaticTicks: automaticTicks, enabled: enabled, accessAllowed: { access?.allowed ?? true })
+        let session = OnlineBattleSession(settings: .init(profileID: UUID().uuidString, serverURL: "https://battle.example.invalid", embeddedServerURL: embeddedServer), credentials: credential, transport: http, effects: effects, engineFactory: { try BattleEngine(url: self.engineURL) }, connectionFactory: { callback in observer?.callback = callback; return connection }, rosterProvider: { rosterOverride ?? self.roster(room) }, clock: clock, automaticTicks: automaticTicks, enabled: enabled, accessAllowed: { access?.allowed ?? true }, localization: { L(language) })
         return (session, http, credential, effects)
     }
     func testStandingsOpenIsReadOnlyAndFailureStaysInsideOverlay() async throws {
@@ -857,6 +857,56 @@ final class OnlineBattleSessionTests: XCTestCase {
         XCTAssertNil(session.presentation.replay)
         XCTAssertNil(session.presentation.selectedHistoryBattle)
         XCTAssertFalse(session.presentation.showsHistory)
+    }
+    /// The session's own error lines read the app language, and so does the replay it opens.
+    func testHistoryAndStandingsMessagesFollowTheAppLanguage() async throws {
+        let hasHangul = { (text: String?) in text?.unicodeScalars.contains { (0xAC00...0xD7A3).contains($0.value) } == true }
+        let expected = [("CANCELLED", "This battle ended before it started, so it has no replay data."),
+                        ("VOID", "This battle ended as void. It has no confirmed result or reward.")]
+        for (state, line) in expected {
+            let room = try changed(battle(), ["state": state, "result": NSNull()])
+            let (session, _, _, _) = try await setup([room], language: .en)
+            await session.bootstrap()
+            await session.perform(.openReplay(room.battleId))
+            XCTAssertEqual(session.presentation.historyError, line)
+        }
+        let valid = try battle()
+        var report = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(valid.result)) as? [String: Any])
+        report["logHash"] = "tampered"
+        for (room, line) in [(try changed(valid, ["config": NSNull()]), "The data needed for a replay is missing. The summary stays."),
+                             (try changed(valid, ["result": report]), "The record couldn't be verified, so the replay can't open. The battle result wasn't changed.")] {
+            let (session, _, _, _) = try await setup([room], language: .en)
+            await session.bootstrap()
+            await session.perform(.openReplay(room.battleId))
+            XCTAssertEqual(session.presentation.historyError, line)
+        }
+        let (session, http, _, _) = try await setup(language: .en)
+        await session.bootstrap()
+        await session.perform(.setPopoverVisible(true))
+        await http.route("/v1/standings", Data(#"{"error":{"code":"not_found"}}"#.utf8), status: 404)
+        await session.perform(.showStandings)
+        XCTAssertEqual(session.presentation.standingsError, L(.en).onlineStandingsLoadFailed)
+        XCTAssertFalse(hasHangul(session.presentation.standingsError))
+    }
+    /// The session words the live log and the replay it opens in the app language, read when it publishes them.
+    func testLiveLogAndReplayFollowTheAppLanguage() async throws {
+        let isKorean = { (line: String) in line.unicodeScalars.contains { (0xAC00...0xD7A3).contains($0.value) } }
+        let finished = try battle()
+        let (history, _, _, _) = try await setup([finished], language: .en)
+        await history.bootstrap()
+        await history.perform(.openReplay(finished.battleId))
+        let frames = try XCTUnwrap(history.presentation.replay).frames
+        XCTAssertFalse(try XCTUnwrap(frames.last).logs.isEmpty)
+        XCTAssertEqual(frames.flatMap(\.logs).filter(isKorean), [])
+
+        let running = try changed(battle(), ["state": "RUNNING", "result": NSNull(), "roundSeq": 1, "journal": []])
+        for (language, korean) in [(AppLanguage.en, false), (.ko, true)] {
+            let (live, _, _, _) = try await setup([running], language: language)
+            await live.bootstrap()
+            XCTAssertEqual(live.presentation.phase, .arena)
+            XCTAssertFalse(live.presentation.liveLogs.isEmpty)
+            XCTAssertEqual(live.presentation.liveLogs.contains(where: isKorean), korean, "\(live.presentation.liveLogs)")
+        }
     }
     func testHistoryCancelledDeclinedAndExpiredRoomsHaveSummaryWithoutReplay() async throws {
         for state in ["CANCELLED", "DECLINED", "EXPIRED"] {

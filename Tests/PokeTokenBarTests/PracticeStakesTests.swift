@@ -824,7 +824,7 @@ final class PracticeStakesSessionTests: XCTestCase {
         XCTAssertEqual(session.battle?.result?.winner, "p1")
         XCTAssertNil(session.lastStakes); XCTAssertNil(session.records.xpDay)
         XCTAssertNil(session.startBlock)
-        XCTAssertEqual(session.battle?.messages.first, stakesSparringOpening, "nothing changes, so it says so")
+        XCTAssertEqual(session.battle?.messages(L(.ko)).first, stakesSparringOpening, "nothing changes, so it says so")
     }
 
     // MARK: Starting HP
@@ -845,7 +845,7 @@ final class PracticeStakesSessionTests: XCTestCase {
         let view = try XCTUnwrap(session.battle?.view, "the battle started")
         XCTAssertEqual([view.p1.hp, view.p1.maxhp], [41, maxHP], "40.6 HP rounds to 41")
         XCTAssertEqual([view.p2.hp, view.p2.maxhp], [100, 100], "the opponent starts full")
-        XCTAssertEqual(session.battle?.messages.first, stakesOpening)
+        XCTAssertEqual(session.battle?.messages(L(.ko)).first, stakesOpening)
         session.skipToResult()
         let config = try XCTUnwrap(session.battle?.result?.inputLog.config)
         XCTAssertEqual(config.p1.hp, 41, "the input log keeps the starting HP")
@@ -889,7 +889,7 @@ final class PracticeStakesSessionTests: XCTestCase {
         let view = try XCTUnwrap(session.battle?.view, "the battle started")
         XCTAssertEqual(view.p1.hp, view.p1.maxhp, "sparring starts full")
         XCTAssertEqual([view.p2.hp, view.p2.maxhp], [100, 100])
-        XCTAssertEqual(session.battle?.messages.first, stakesSparringOpening)
+        XCTAssertEqual(session.battle?.messages(L(.ko)).first, stakesSparringOpening)
         session.skipToResult()
         let config = try XCTUnwrap(session.battle?.result?.inputLog.config)
         XCTAssertNil(config.p1.hp); XCTAssertNil(config.p2.hp)

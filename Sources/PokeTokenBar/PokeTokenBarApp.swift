@@ -304,7 +304,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
             onlineReconnectSignals = signals
             Task { await session.bootstrap() }
         } catch {
-            onlinePresentation.notice = "온라인 설정을 읽지 못했어요. 저장 폴더를 확인해 주세요."
+            onlinePresentation.notice = companion.l.onlineSettingsUnreadable
         }
     }
 

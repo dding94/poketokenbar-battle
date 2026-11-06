@@ -37,7 +37,7 @@ final class PracticeSessionTests: XCTestCase {
         for _ in 0..<300 where session.battle?.phase == .running { clock.now += 1; session.tick() }
     }
     private func timedOut(_ session: PracticeSession) -> Bool {
-        session.battle?.messages.contains { $0.contains("시간 초과") } == true
+        session.battle?.messages(L(.ko)).contains { $0.contains("시간 초과") } == true
     }
 
     func testPrepareBuildsRosterDefaultSelectionAndKeepsOrDropsIt() throws {
