@@ -255,9 +255,11 @@ final class CompanionStore {
     private(set) var isHatchRetryDelayed = false
 
     var displayName: String {
-        guard let a = state.active, let line = currentLine else { return "Token Egg" }
-        return formDisplayName(line.localizedName(a.currentID, state.language),
-                               speciesID: a.currentID, form: currentForm)
+        guard let a = state.active else { return "Token Egg" }
+        // The line is not saved and takes the network to load, so a hatched Pokémon can stay without one for as long
+        // as a relaunch stays offline. It is still not an egg.
+        let name = currentLine?.localizedName(a.currentID, state.language) ?? "#\(a.currentID)"
+        return formDisplayName(name, speciesID: a.currentID, form: currentForm)
     }
     var currentSpeciesID: Int? { state.active?.currentID }
     var currentForm: PokemonForm? {
@@ -1493,7 +1495,7 @@ final class CompanionStore {
 
     /// 부화가 폐기된 뒤 남은 개체(대개 방금 불러온 개체)의 진화 라인을 다시 로드한다.
     /// `loadCurrentLine` 은 `!isHatching` 을 요구하므로 부화 중에 걸린 로드는 조용히 실패한다 —
-    /// 아무도 재시도하지 않으면 다음 update 틱(기본 120초)까지 이름이 "Token Egg" 로 남는다.
+    /// 아무도 재시도하지 않으면 다음 update 틱(기본 120초)까지 이름이 `#도감번호` 로 남는다.
     /// Task 본문은 현재 동기 실행(= defer 로 isHatching 해제)이 끝난 뒤 돌므로 락이 이미 풀려 있다.
     private func kickLineLoadIfNeeded() {
         guard state.active != nil, currentLine == nil else { return }
@@ -2256,9 +2258,8 @@ extension CompanionStore: PracticeBattleEffects {
     var ownedIndividuals: [OwnedIndividual] {
         var rows: [OwnedIndividual] = []
         if let active = state.active, let profile = active.profile {
-            let name = currentLine == nil ? "#\(active.currentID)" : displayName
             rows.append(OwnedIndividual(id: profile.instanceID, speciesID: active.currentID, form: currentForm,
-                                        shiny: active.displaysShiny, name: name, level: profile.level,
+                                        shiny: active.displaysShiny, name: displayName, level: profile.level,
                                         nature: active.nature, ivs: profile.ivs, isCurrent: true))
         }
         for entry in state.dex where !entry.isReleased {
