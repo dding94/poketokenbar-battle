@@ -55,11 +55,14 @@ final class SessionKeySettingsRenderingTests: XCTestCase {
     }
 
     /// Reads the growth and shop rows off the pixels, one screenful at a time: linked against the macOS 27 SDK
-    /// a SwiftUI slider has no `NSSlider` to count (defect log).
+    /// a SwiftUI slider has no `NSSlider` to count (defect log). The faint section title is left out because
+    /// Vision on macOS 15 does not read that caption style.
     private func assertDifficultyControlsAreDrawn(l: L, around field: NSView, in host: NSView) async throws {
         let scroll = try XCTUnwrap(field.enclosingScrollView)
         let clip = scroll.contentView
         let height = try XCTUnwrap(scroll.documentView).frame.height
+        let labels = [l.difficultyGrowthLabel, l.difficultyShopLabel, l.difficultyGrowthLowLabel, l.difficultyShopLowLabel]
+        let compact = { (text: String) in text.filter { !$0.isWhitespace }.lowercased() }
         var seen = ""
         for y in stride(from: 0, to: height, by: clip.bounds.height * 0.75) {
             clip.scroll(to: NSPoint(x: 0, y: clip.isFlipped ? y : height - clip.bounds.height - y))
@@ -70,10 +73,9 @@ final class SessionKeySettingsRenderingTests: XCTestCase {
             request.recognitionLevel = .accurate; request.recognitionLanguages = ["en-US"]
             try VisionOCR.perform(request, on: image)
             seen += (request.results ?? []).flatMap { $0.topCandidates(3).map(\.string) }.joined(separator: " ") + " "
+            if labels.allSatisfy({ compact(seen).contains(compact($0)) }) { break }
         }
-        let compact = { (text: String) in text.filter { !$0.isWhitespace }.lowercased() }
-        for label in [l.difficultySectionTitle, l.difficultyGrowthLabel, l.difficultyShopLabel,
-                      l.difficultyGrowthLowLabel, l.difficultyShopLowLabel] {
+        for label in labels {
             XCTAssertTrue(compact(seen).contains(compact(label)),
                           "\(label): growth and shop difficulty controls must survive the Settings merge. Seen: \(seen)")
         }
