@@ -452,7 +452,7 @@ final class SaveTransferTests: XCTestCase {
 
         XCTAssertNotNil(s.currentLine, "부화가 폐기됐으면 불러온 개체의 라인을 다시 로드해야 한다")
         XCTAssertEqual(s.currentLine?.baseID, 403)
-        XCTAssertNotEqual(s.displayName, "Token Egg", "이름이 알 표기로 남으면 안 된다")
+        XCTAssertEqual(s.displayName, evo.localizedName(403, s.state.language), "라인이 로드됐으면 이름이 번호나 알 표기로 남으면 안 된다")
     }
 
     /// [회귀·딥리뷰 H1] 새 Mac 에서 AI CLI 를 아직 안 쓴 시점(hasUsageData=false)에 불러오면,

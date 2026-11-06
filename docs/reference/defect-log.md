@@ -1727,3 +1727,13 @@ read_when:
 - **필터 클래스 이름 오타가 다시 나왔다.** `CompanionTests`·`PracticeBattleRenderingTests`라는 클래스는 없어서 해당 묶음이 조용히 안 돌았다. `scripts/check-test-filter.sh`를 돌려서 잡았다. 필터를 쓰면 이 검사까지 한 번에 돌린다.
 - **결함 주입 8종을 모두 잡았다.** 목록이 다시 `ko`를 읽음, 폼 표시 누락, 막힌 줄의 한국어 대체값, 야생이 다시 `ko`를 읽음, 언어가 바뀌어도 옛 상대 유지, 세션이 저장 언어를 받지 않음, 이전 단계 대체 제거, 먼 단계부터 읽음. 각각 해당 테스트가 실패했다. 마지막 둘은 `llvm-cov --show-regions`에서 `localizedName`의 이전 단계 분기가 `^0`으로 나와 테스트를 더한 뒤 주입한 것이다. 도감에서 옮겨 온 분기도 이번 변경으로 처음 테스트됐다.
 - **Vision OCR 호출은 시간 제한 없이 멈출 수 있다.** `DexBackNavigationTests.words(in:)`가 `VNImageRequestHandler.performRequests` 안의 `semaphore_wait_trap`에서 돌아오지 않아 `xctest`가 CPU 없이 1시간 넘게 남았다. 깨끗한 HEAD에서도 같고, 이 테스트의 대기 도우미는 호출 사이에서만 시간을 재므로 끝나지 않는다. 검증 스크립트의 단계마다 시간 제한을 둔다. `swift test`를 죽여도 `xctest`는 자기 프로세스 그룹에 남으므로 따로 찾아 끝낸다. 환경 문제인지 macOS 27 문제인지는 아직 가리지 못했다.
+
+## 라인이 없는 현재 포켓몬의 이름 (2026-11-06)
+
+- **부화한 포켓몬이 "Token Egg"로 불렸다.** `displayName`은 `state.active`와 `currentLine` 중 하나만 없어도 알의 이름을 돌려줬다. 재현 경로는 재실행 뒤의 오프라인이다. `currentLine`은 저장되지 않고, `PokeAPIClient.line`의 캐시는 메모리뿐이며, `loadCurrentLine`은 실패를 `try?`로 삼킨다. 반면 `BattleSnapshot.from`은 저장된 상태와 번들 엔진만 쓰므로, 그 포켓몬은 싸울 수 있는 채로 연습 선택 화면·온라인 출전 목록에 "Token Egg"로 나왔다. 네트워크가 있어도 첫 로드가 끝날 때까지 같은 창이 잠깐 열린다. 오프라인 제공자로 저장을 다시 열고 `update` 틱과 실제 엔진까지 거치는 테스트로 재현했다(`ActiveNameWithoutLineTests`).
+- **두 조건을 한 `guard`에 묶으면 "개체 없음"과 "표시 데이터 아직 없음"이 같은 답이 된다.** 같은 이름을 읽는 곳은 헤더, 가방, 상점의 알 구매 확인, 메뉴바 툴팁, 두 배틀 목록이다. 그래서 호출부가 아니라 `displayName`에서 고쳤고, 라인이 없으면 `#도감번호`를 폼 표시와 함께 돌려준다. 번호는 `dexEntryName`·`EvoLine.localizedName`의 대체값과 같고 언어를 타지 않는다.
+- **호출부 우회가 원인을 가렸다.** PR #4(`2deca3e`)의 `ownedIndividuals`는 같은 증상을 만나 `currentLine == nil ? "#id" : displayName`으로 자기 줄만 고쳤다. 같은 개체가 가방에서는 `#25`, 목록에서는 "Token Egg"가 됐다. 공유 값이 틀렸음을 알게 되면 그 값을 고친다. 우회는 이번에 지웠다.
+- **테스트가 다른 경로로 통과했다.** 연습·온라인 테스트는 모두 `activeName: nil`을 넘겨 엔진의 종 이름을 받았으므로, 스토어의 이름이 목록까지 간 적이 없다. `testImportDuringHatchStillLoadsTheImportedLine`은 라인 로드 뒤의 이름만 봤고 `NotEqual "Token Egg"`라 `#403`도 통과했을 단언이어서, 실제 이름과 비교하도록 조였다.
+- **부류 스윕.** `grep -n 'currentLine?\.\|currentLine\.map\|line\.localizedName' CompanionStore.swift`: 진화·졸업 알림은 `line`이 있는 경로에서만 불린다. 메타몽 공개는 `#id`로 대체한다. 놓아준 기록·`activeDexEntry`의 이름은 `nil`로 남아 `dexEntryName`이 `#id`로 표시한다. `Sources` 전체에서 `currentLine`을 직접 읽는 UI는 없다. 라인을 받았는데 그 종의 이름이 없는 경우는 원래 `#id`였으므로(`localizedName`) 마이그레이션으로 이름이 빠지는 입력은 이 결함의 트리거가 아니다.
+- **결함 주입 6종을 모두 잡았다.** 라인 없으면 알 이름, 번호에서 폼 표시 누락, 가방이 자기 규칙 유지, 알을 번호로 표시, 라인이 있어도 항상 번호, 라인 없으면 빈 문자열. 각각 해당 테스트가 실패했다.
+- **아직 남은 것.** 목록은 값 복사라, 선택 화면이 열린 동안 라인이 도착하면 그 줄은 화면을 다시 열거나(`prepare`) 전투 보상으로 목록을 다시 만들 때까지 `#25`로 남는다. 이름만 늦을 뿐 개체 식별은 ID로 하므로 그대로 둔다.
