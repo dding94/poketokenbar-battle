@@ -122,7 +122,7 @@ struct PracticeBattleBoard: View {
 
     /// Without a playback: the three newest log lines, newest first. Turn separators are left out.
     private var legacyTicker: some View {
-        let lines = Array(battle.messages.filter { !$0.hasPrefix("──") }.suffix(3).reversed())
+        let lines = battle.recentMessages(l, limit: 3)
         return VStack(alignment: .leading, spacing: 3) {
             ForEach(Array(lines.enumerated()), id: \.offset) { index, line in
                 Text(line)
@@ -143,7 +143,7 @@ struct PracticeBattleBoard: View {
             if playing {
                 Text(l.practicePlayingTurn).font(.callout.weight(.semibold)).foregroundStyle(.secondary)
             } else if let notice = battle.notice {
-                Label(notice, systemImage: "exclamationmark.circle")
+                Label(notice.text(l), systemImage: "exclamationmark.circle")
                     .font(.caption).foregroundStyle(.orange)
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
@@ -249,7 +249,7 @@ struct PracticeBattleBoard: View {
             Label(l.practiceBattleFailed, systemImage: "exclamationmark.triangle.fill")
                 .font(.callout.weight(.semibold)).foregroundStyle(.orange)
             if let notice = battle.notice {
-                Text(notice).font(.caption).foregroundStyle(.secondary)
+                Text(notice.text(l)).font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
             Button(l.practiceBackToSelection) { session.forfeit() }

@@ -1832,13 +1832,69 @@ extension L {
     }
     /// Engine status codes (`par`, `brn`, …) as a short chip label.
     func practiceStatusName(_ code: String) -> String {
-        if lang == .ko { return PracticeText.status(code) }
+        if lang == .ko { return practiceStatusWord(code) ?? code }
         return ["par": "PAR", "brn": "BRN", "psn": "PSN", "tox": "TOX", "slp": "SLP", "frz": "FRZ"][code] ?? code.uppercased()
     }
     func practiceBlocked(_ count: Int) -> String { lang == .ko ? "출전 보류 · \(count)마리" : "Unavailable · \(count)" }
     func practiceTurn(_ turn: Int) -> String { lang == .ko ? "\(turn)턴" : "Turn \(turn)" }
     func practiceSeconds(_ seconds: Int) -> String { lang == .ko ? "\(seconds)초" : "\(seconds)s" }
     func practiceMoveLabel(_ slot: Int, _ name: String) -> String { "\(practiceMoves) \(slot): \(name)" }
+    /// A status as a word for the log. Nil for a code with no word; each log has its own fallback.
+    func practiceStatusWord(_ code: String) -> String? {
+        (lang == .ko ? ["par": "마비", "brn": "화상", "psn": "독", "tox": "맹독", "slp": "잠듦", "frz": "얼음"]
+                     : ["par": "paralyzed", "brn": "burned", "psn": "poisoned", "tox": "badly poisoned", "slp": "asleep", "frz": "frozen"])[code]
+    }
+    // Why a battle cannot run (`PracticeText.failure`): blocked rows, the load error and the failure card.
+    var practiceFailureProfile: String { lang == .ko ? "개체 정보가 아직 준비되지 않았습니다. 잠시 후 연습전을 다시 열어 주세요." : "This Pokémon's details aren't ready yet. Reopen practice in a moment." }
+    var practiceFailureNature: String { lang == .ko ? "성격 정보가 없습니다." : "Nature data is missing." }
+    var practiceFailureGender: String { lang == .ko ? "성별 정보가 없습니다." : "Gender data is missing." }
+    var practiceFailureAbility: String { lang == .ko ? "특성 정보가 아직 없습니다." : "Ability data isn't ready yet." }
+    var practiceFailureMoves: String { lang == .ko ? "배운 기술 정보가 아직 없습니다." : "Learned-move data isn't ready yet." }
+    var practiceFailureSameIndividual: String { lang == .ko ? "상대는 내 다른 개체를 골라 주세요." : "Pick a different Pokémon as the opponent." }
+    func practiceFailureEngine(_ code: String) -> String {
+        lang == .ko ? "전투를 진행할 수 없습니다 (\(code)). 개체 정보는 바꾸지 않았습니다." : "The battle can't continue (\(code)). Your Pokémon wasn't changed."
+    }
+    var practiceFailureMissingBundle: String { lang == .ko ? "전투 엔진이 없습니다. 완성된 앱 번들로 실행해 주세요." : "The battle engine is missing. Run the complete app bundle." }
+    var practiceFailureChecksum: String { lang == .ko ? "전투 엔진 검증에 실패했습니다. 앱을 다시 빌드해 주세요." : "The battle engine failed verification. Rebuild the app." }
+    var practiceFailureUnknown: String { lang == .ko ? "전투 정보를 확인할 수 없습니다. 연습전을 다시 열어 주세요." : "Couldn't read the battle data. Reopen practice." }
+    var practiceMoveUnavailable: String { lang == .ko ? "지금은 사용할 수 없는 기술입니다. 다른 기술을 골라 주세요." : "That move can't be used right now. Pick another." }
+    // The battle log (`PracticeText.log`). Engine ids and names stay as the engine gives them.
+    func practiceLogOpening(hasStakes: Bool) -> String {
+        if hasStakes { return lang == .ko ? "연습전을 시작합니다. 깎인 체력은 배틀이 끝나도 남습니다." : "Practice battle started. HP lost stays after the battle." }
+        return lang == .ko ? "연습전을 시작합니다. 성장과 보유 상태는 바뀌지 않습니다." : "Practice battle started. Growth and ownership stay as they are."
+    }
+    var practiceLogTimedOut: String { lang == .ko ? "시간 초과 · 이번 턴은 자동으로 선택합니다." : "Time's up · a move is picked for you this turn." }
+    func practiceLogAbilityRevealed(_ name: String, _ ability: String) -> String {
+        lang == .ko ? "\(name) · 특성 공개: \(ability)" : "\(name) · ability revealed: \(ability)"
+    }
+    func practiceLogTurn(_ turn: String) -> String { lang == .ko ? "── \(turn)턴 ──" : "── Turn \(turn) ──" }
+    func practiceLogMove(_ actor: String, _ move: String) -> String { lang == .ko ? "\(actor) · \(move) 사용" : "\(actor) · used \(move)" }
+    func practiceLogDamage(_ actor: String, _ hp: String) -> String { lang == .ko ? "\(actor) · 피해를 입었습니다 (HP \(hp))." : "\(actor) · took damage (HP \(hp))." }
+    func practiceLogHeal(_ actor: String, _ hp: String) -> String { lang == .ko ? "\(actor) · 체력을 회복했습니다 (HP \(hp))." : "\(actor) · recovered HP (HP \(hp))." }
+    func practiceLogMiss(_ actor: String) -> String { lang == .ko ? "\(actor) · 공격이 빗나갔습니다." : "\(actor) · missed." }
+    func practiceLogImmune(_ actor: String) -> String { lang == .ko ? "\(actor) · 효과가 없습니다." : "\(actor) · no effect." }
+    func practiceLogFail(_ actor: String) -> String { lang == .ko ? "\(actor) · 기술이 실패했습니다." : "\(actor) · the move failed." }
+    func practiceLogStatus(_ actor: String, _ code: String) -> String {
+        let word = practiceStatusWord(code) ?? code
+        return lang == .ko ? "\(actor) · \(word) 상태가 되었습니다." : "\(actor) · is now \(word)."
+    }
+    func practiceLogCured(_ actor: String) -> String { lang == .ko ? "\(actor) · 상태이상이 회복됐습니다." : "\(actor) · status cured." }
+    func practiceLogCant(_ actor: String, _ reason: String) -> String { lang == .ko ? "\(actor) · 행동할 수 없습니다 (\(reason))." : "\(actor) · can't act (\(reason))." }
+    func practiceLogStat(_ actor: String, _ stat: String, raised: Bool) -> String {
+        if lang == .ko { return "\(actor) · 능력치 \(stat) \(raised ? "상승" : "하락")" }
+        return "\(actor) · \(stat) \(raised ? "up" : "down")"
+    }
+    var practiceLogSuperEffective: String { lang == .ko ? "효과가 굉장합니다!" : "Super effective!" }
+    var practiceLogResisted: String { lang == .ko ? "효과가 별로입니다." : "Not very effective." }
+    var practiceLogCritical: String { lang == .ko ? "급소에 맞았습니다!" : "Critical hit!" }
+    func practiceLogFaint(_ actor: String) -> String { lang == .ko ? "\(actor) · 쓰러졌습니다." : "\(actor) · fainted." }
+    func practiceLogWin(_ name: String) -> String { lang == .ko ? "\(name) 승리 · 연습전을 마쳤습니다." : "\(name) won · practice is over." }
+    var practiceLogTie: String { lang == .ko ? "무승부 · 연습전을 마쳤습니다." : "Draw · practice is over." }
+    func practiceLogWeather(_ weather: String) -> String { lang == .ko ? "날씨 · \(weather)" : "Weather · \(weather)" }
+    func practiceLogEffect(_ actor: String, _ effect: String, ended: Bool) -> String {
+        if lang == .ko { return "\(actor) · \(effect) \(ended ? "종료" : "발동")" }
+        return "\(actor) · \(effect) \(ended ? "ended" : "activated")"
+    }
     // Staged turns (`PracticePlayback`): callouts, the beat line, the ticker and the result card.
     // Our own short wording, not the games' battle text.
     var practiceCalloutSuperEffective: String { lang == .ko ? "약점!" : "Super effective" }

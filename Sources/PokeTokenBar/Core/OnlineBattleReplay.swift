@@ -14,7 +14,7 @@ struct OnlineBattleReplay {
     let frames: [Frame]
     let verified: Bool
 
-    init(battle: OnlineBattleView, localTrainerID: String,
+    init(battle: OnlineBattleView, localTrainerID: String, l: L,
          engineFactory: ((String) throws -> BattleEngine)? = nil) throws {
         guard battle.state == .completed, let config = battle.config, battle.result != nil, battle.startedAt != nil,
               !battle.journal.isEmpty, battle.p1.snapshot != nil, battle.p2.snapshot != nil else {
@@ -40,7 +40,7 @@ struct OnlineBattleReplay {
             var frames: [Frame] = []
             func appendFrame() throws {
                 guard let view = resolver.view else { throw Failure.verificationFailed }
-                frames.append(Frame(view: view, logs: OnlineBattleHistoryText.logs(resolver.logs, localSide: resolver.localSide),
+                frames.append(Frame(view: view, logs: OnlineBattleHistoryText.logs(resolver.logs, localSide: resolver.localSide, l: l),
                                     roundSeq: resolver.processedRoundSeq))
             }
             try appendFrame()

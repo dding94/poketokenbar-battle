@@ -38,6 +38,7 @@ final class PracticeBattleTests: XCTestCase {
     }
     func testRosterExplainsMissingMovesAndAbilityWithoutRepairingSave() throws {
         var state = CompanionState()
+        state.language = .ko
         var p = profile("missing"); p.abilityName = nil
         state.dex = [p, profile("no-moves", moves: [])].map {
             DexEntry(baseID: 25, finalID: 25, chainOrder: [25], rarity: .common, caughtAt: nil, nature: .hardy, profile: $0)
@@ -151,7 +152,7 @@ final class PracticeBattleTests: XCTestCase {
         now = 14.9; model.tick(); XCTAssertEqual(model.view?.turn, 1); XCTAssertEqual(model.remainingSeconds, 1)
         now = 15; model.tick(); XCTAssertEqual(model.view?.turn, 2); XCTAssertEqual(model.remainingSeconds, 15)
         model.tick(); XCTAssertEqual(model.view?.turn, 2)
-        XCTAssertTrue(model.messages.contains { $0.contains("시간 초과") })
+        XCTAssertTrue(model.messages(L(.ko)).contains { $0.contains("시간 초과") })
         // The next turn gets the full limit again, from the moment it began.
         now = 29.9; model.tick(); XCTAssertEqual(model.view?.turn, 2)
         now = 30; model.tick(); XCTAssertEqual(model.view?.turn, 3)
@@ -241,12 +242,12 @@ final class PracticeBattleTests: XCTestCase {
         let blocked = PracticeCandidate(id: "missing", name: "미완성", snapshot: nil, blockedReason: "특성 없음")
         model.start(player: blocked, opponent: try candidate("b", engine: engine), mode: .manual)
         XCTAssertEqual(model.phase, .failed); XCTAssertNil(model.result)
-        XCTAssertTrue(model.notice?.contains("정보") == true)
-        XCTAssertEqual(PracticeText.log("|-status|p1a: Test|par", names: ["p1": "내 개체"]), "내 개체 · 마비 상태가 되었습니다.")
-        XCTAssertEqual(PracticeText.log("|move|p1a: Test|Untranslated Move", names: ["p1": "내 개체"]), "내 개체 · Untranslated Move 사용")
-        XCTAssertEqual(PracticeText.log("|-weather|RainDance", names: [:]), "날씨 · RainDance")
-        XCTAssertNotNil(PracticeText.log("|-future-event|p1a: Test|new effect", names: [:]))
-        XCTAssertNil(PracticeText.log("", names: [:]))
+        XCTAssertTrue(model.notice?.text(L(.ko)).contains("정보") == true)
+        XCTAssertEqual(PracticeText.log("|-status|p1a: Test|par", names: ["p1": "내 개체"], l: L(.ko)), "내 개체 · 마비 상태가 되었습니다.")
+        XCTAssertEqual(PracticeText.log("|move|p1a: Test|Untranslated Move", names: ["p1": "내 개체"], l: L(.ko)), "내 개체 · Untranslated Move 사용")
+        XCTAssertEqual(PracticeText.log("|-weather|RainDance", names: [:], l: L(.ko)), "날씨 · RainDance")
+        XCTAssertNotNil(PracticeText.log("|-future-event|p1a: Test|new effect", names: [:], l: L(.ko)))
+        XCTAssertNil(PracticeText.log("", names: [:], l: L(.ko)))
     }
 
     func testPauseFreezesManualDeadlineAndAutomaticStepUntilResume() throws {
@@ -257,12 +258,12 @@ final class PracticeBattleTests: XCTestCase {
         XCTAssertTrue(model.isPaused); XCTAssertEqual(model.remainingSeconds, 10)
         now = 500; model.tick(); model.choose(slot: 1)
         XCTAssertEqual(model.view?.turn, 1); XCTAssertEqual(model.remainingSeconds, 10)
-        XCTAssertFalse(model.messages.contains { $0.contains("시간 초과") })
+        XCTAssertFalse(model.messages(L(.ko)).contains { $0.contains("시간 초과") })
         model.resume()
         XCTAssertFalse(model.isPaused)
         now = 509.9; model.tick(); XCTAssertEqual(model.view?.turn, 1)
         now = 510; model.tick(); XCTAssertEqual(model.view?.turn, 2)
-        XCTAssertTrue(model.messages.contains { $0.contains("시간 초과") })
+        XCTAssertTrue(model.messages(L(.ko)).contains { $0.contains("시간 초과") })
         // The automatic step (due at 510.6) keeps its remaining 0.4 s across a pause.
         model.mode = .automatic; now = 510.2; model.pause()
         now = 900; model.tick(); XCTAssertEqual(model.view?.turn, 2)
@@ -279,7 +280,7 @@ final class PracticeBattleTests: XCTestCase {
         model.choose(slot: 1); XCTAssertEqual(model.phase, .finished)
         model.prepareSelection()
         XCTAssertEqual(model.phase, .ready); XCTAssertNil(model.view); XCTAssertNil(model.result)
-        XCTAssertTrue(model.messages.isEmpty); XCTAssertTrue(model.request.moves.isEmpty)
+        XCTAssertTrue(model.messages(L(.ko)).isEmpty); XCTAssertTrue(model.request.moves.isEmpty)
     }
 
     func testEventsMirrorTheLogAndLeaveTheTextMessagesAlone() throws {
@@ -293,14 +294,14 @@ final class PracticeBattleTests: XCTestCase {
               case .turn(1) = opening[2] else { return XCTFail("\(opening)") }
         XCTAssertTrue(opening.contains(.abilityRevealed(.player, abilityID: "pressure")), "\(opening)")
         XCTAssertTrue(opening.contains(.abilityRevealed(.opponent, abilityID: "pressure")))
-        XCTAssertTrue(model.messages.contains { $0.contains("특성 공개: pressure") })
-        let messageCount = model.messages.count
+        XCTAssertTrue(model.messages(L(.ko)).contains { $0.contains("특성 공개: pressure") })
+        let messageCount = model.messages(L(.ko)).count
         now = 1; model.tick()
         XCTAssertEqual(model.phase, .finished)
         XCTAssertTrue(model.events.starts(with: opening))
         XCTAssertTrue(model.events.contains(.faint(.opponent)))
         XCTAssertEqual(model.events.first { if case .end = $0 { true } else { false } }, .end(winner: .player))
-        XCTAssertGreaterThan(model.messages.count, messageCount)
+        XCTAssertGreaterThan(model.messages(L(.ko)).count, messageCount)
     }
     func testTimeoutAppendsOneTimedOutEventBeforeTheTurnItPicked() throws {
         let engine = try engine(); var now = 0.0

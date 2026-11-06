@@ -20,7 +20,7 @@ struct PracticeRoster {
                                               snapshot: snapshot, blockedReason: nil))
             } catch {
                 rows.append(PracticeCandidate(id: fallback, name: name ?? "#\(speciesID)", snapshot: nil,
-                                              blockedReason: PracticeText.failure(error)))
+                                              blockedReason: PracticeText.failure(error, l: L(state.language))))
             }
         }
         if let active = state.active {
@@ -116,10 +116,11 @@ final class PracticeBattle {
     private(set) var view: BattleView?
     private(set) var request = BattleRequest(kind: "none", moves: [])
     private(set) var result: BattleResult?
-    private(set) var messages: [String] = []
+    /// The battle log, worded when read (`messages`, `recentMessages`).
+    private var log: [PracticeLogEntry] = []
     /// Typed form of the same log for staging (`PracticePlayback`), plus reveals, timeouts and the end.
     private(set) var events: [PracticeEvent] = []
-    private(set) var notice: String?
+    private(set) var notice: PracticeNotice?
     private(set) var remainingSeconds = PracticeBattle.manualTurnSeconds
     /// True while `pause()` holds the battle; `tick()` and `choose` do nothing then.
     private(set) var isPaused = false
@@ -136,6 +137,13 @@ final class PracticeBattle {
     init(engine: BattleEngine, clock: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }) {
         self.engine = engine; self.clock = clock
     }
+    /// The whole log in `l`'s language.
+    func messages(_ l: L) -> [String] { log.compactMap { PracticeText.line($0, names: names, l: l) } }
+    /// The newest `limit` lines, newest first and without the turn separators. Words only what it returns.
+    func recentMessages(_ l: L, limit: Int) -> [String] {
+        Array(log.reversed().lazy.compactMap { PracticeText.line($0, names: self.names, l: l) }
+            .filter { !$0.hasPrefix("──") }.prefix(limit))
+    }
     /// A fresh battle seed: four values within the engine's 0…65535.
     nonisolated static func randomSeed() -> [UInt32] { (0..<4).map { _ in UInt32.random(in: 0...65535) } }
     /// `playerHealth` is the player's HP share in a battle with stakes (`PracticeStakes`), which the player starts
@@ -144,7 +152,7 @@ final class PracticeBattle {
                seed: [UInt32] = PracticeBattle.randomSeed()) {
         release()
         self.player = player; self.opponent = opponent
-        view = nil; result = nil; messages = []; events = []; parser = PracticeEventParser()
+        view = nil; result = nil; log = []; events = []; parser = PracticeEventParser()
         notice = nil; remainingSeconds = Self.manualTurnSeconds
         request = BattleRequest(kind: "none", moves: []); self.mode = mode
         do {
@@ -164,8 +172,7 @@ final class PracticeBattle {
             let created: Created = try BattleJSON.decode(engine.call(.createBattle, arguments: [BattleJSON.encode(config)]))
             battleID = created.id; phase = .running
             // Only a battle without stakes leaves everything as it was; one with stakes keeps the HP it costs.
-            messages = [playerHealth == nil ? "연습전을 시작합니다. 성장과 보유 상태는 바뀌지 않습니다."
-                                            : "연습전을 시작합니다. 깎인 체력은 배틀이 끝나도 남습니다."]
+            log = [.opening(hasStakes: playerHealth != nil)]
             try refresh()
         } catch { fail(error) }
     }
@@ -186,13 +193,13 @@ final class PracticeBattle {
         if mode == .automatic {
             if clock() >= nextAutomaticTurn { advance(slot: nil) }
         } else if clock() >= deadline {
-            messages.append("시간 초과 · 이번 턴은 자동으로 선택합니다.")
+            log.append(.timedOut)
             events.append(.timedOut)
             advance(slot: nil)
         }
     }
     func prepareSelection() {
-        release(); phase = .ready; view = nil; result = nil; messages = []; events = []; parser = PracticeEventParser()
+        release(); phase = .ready; view = nil; result = nil; log = []; events = []; parser = PracticeEventParser()
         notice = nil
         request = BattleRequest(kind: "none", moves: []); remainingSeconds = Self.manualTurnSeconds
     }
@@ -229,7 +236,7 @@ final class PracticeBattle {
             if let slot {
                 do { try submit("p1", choice: ["type": "move", "slot": slot]) }
                 catch BattleEngine.Failure.engine("rejected") {
-                    notice = "지금은 사용할 수 없는 기술입니다. 다른 기술을 골라 주세요."
+                    notice = .moveUnavailable
                     try refresh(); return
                 }
             } else { try automatic("p1") }
@@ -260,11 +267,11 @@ final class PracticeBattle {
         view = try BattleJSON.decode(engine.call(.state, arguments: [id, viewer]))
         request = try BattleJSON.decode(engine.call(.request, arguments: [id, viewer]))
         let lines: [String] = try BattleJSON.decode(engine.call(.drainLog, arguments: [id, viewer]))
-        messages += lines.compactMap { PracticeText.log($0, names: names) }
+        log += lines.map(PracticeLogEntry.engine)
         let parsed = parser.parse(lines)
         let reveals: [BattleLogReveal] = try BattleJSON.decode(engine.call(.drainEvents, arguments: [id, viewer]))
         for reveal in reveals where reveal.kind == "ability" {
-            messages.append("\(names[reveal.side] ?? reveal.side) · 특성 공개: \(reveal.id)")
+            log.append(.abilityRevealed(name: names[reveal.side] ?? reveal.side, ability: reveal.id))
         }
         events += parser.merging(reveals, into: parsed)
         if view?.ended == true {
@@ -281,6 +288,6 @@ final class PracticeBattle {
         battleID = nil
     }
     private func fail(_ error: Error) {
-        release(); phase = .failed; result = nil; notice = PracticeText.failure(error)
+        release(); phase = .failed; result = nil; notice = .failure(error)
     }
 }

@@ -9,7 +9,7 @@ final class OnlineBattleReplayVisibleNamesTests: XCTestCase {
         let url = try XCTUnwrap(Bundle.module.url(forResource: "golden", withExtension: "json", subdirectory: "OnlineBattle"))
         let battle = try XCTUnwrap(JSONDecoder().decode([Golden].self, from: Data(contentsOf: url)).first?.battle)
         let sourceRoot = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-        let replay = try OnlineBattleReplay(battle: battle, localTrainerID: "trainer-two", engineFactory: { _ in
+        let replay = try OnlineBattleReplay(battle: battle, localTrainerID: "trainer-two", l: L(.ko), engineFactory: { _ in
             try BattleEngine(url: sourceRoot.appendingPathComponent("engine/dist/battle-engine.js"))
         })
         XCTAssertEqual(replay.localSide, .p2)

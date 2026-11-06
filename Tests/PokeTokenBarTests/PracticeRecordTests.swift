@@ -265,7 +265,7 @@ final class PracticeRecordSessionTests: XCTestCase {
         // A timeout that ends it: the automatic choice plays the turn.
         session.start()
         clock.now += TimeInterval(PracticeBattle.manualTurnSeconds); session.tick()
-        XCTAssertTrue(session.battle?.messages.contains { $0.contains("시간 초과") } == true, "the turn timed out")
+        XCTAssertTrue(session.battle?.messages(L(.ko)).contains { $0.contains("시간 초과") } == true, "the turn timed out")
         XCTAssertEqual(session.battle?.phase, .finished)
         XCTAssertEqual(session.records, recordTotals(wins: 3, streak: 3, best: 3))
         XCTAssertEqual(session.lastRecord, recordUpdate(.win, streak: 3, best: 3))

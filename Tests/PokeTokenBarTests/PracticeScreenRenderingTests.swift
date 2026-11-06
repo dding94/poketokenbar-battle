@@ -229,6 +229,58 @@ final class PracticeScreenRenderingTests: XCTestCase {
         assertRendered(needles, in: onlineText)
     }
 
+    /// A rejected move's notice takes the board's prompt, in the app language.
+    func testMoveNoticeFollowsTheAppLanguage() async throws {
+        var state = Self.syntheticState()
+        state.language = .en
+        let session = makeSession(state)
+        session.mode = .manual
+        session.start()
+        try XCTUnwrap(session.playback).skipToEnd()
+        session.tick()
+        session.choose(slot: 4)
+        XCTAssertNotNil(session.battle?.notice, "an empty slot is rejected with a notice")
+        let view = host(session)
+        let needles = ["can't be used"]
+        let (text, bitmap) = try await waitForText(needles, in: view)
+        try save(bitmap, as: "battle-log-language-move-notice.png")
+        assertRendered(needles, in: text)
+    }
+
+    /// The online entry list shows why a Pokémon cannot fight, in the app language.
+    func testBlockedReasonFollowsTheAppLanguage() async throws {
+        var state = Self.syntheticState()
+        state.language = .en
+        var blocked = state.dex[0]
+        blocked.id = "blocked"
+        blocked.profile?.instanceID = "blocked"
+        blocked.profile?.abilityName = nil
+        state.dex.append(blocked)
+        let model = OnlineBattlePresentation()
+        model.roster = PracticeRoster(state: state, engine: try BattleEngine(url: Self.engineURL)).candidates
+        model.entryHP = Dictionary(uniqueKeysWithValues: model.roster.map { ($0.id, 100) })
+        model.selectedEntryID = model.roster.first?.id
+        XCTAssertEqual(model.roster.filter { $0.snapshot == nil }.count, 1)
+        let view = hostView(OnlineBattleRoster(model: model, l: L(.en), artwork: false).padding(PopoverMetrics.padding),
+                            width: PopoverMetrics.width, height: 260)
+        let needles = ["Ability data"]
+        let (text, bitmap) = try await waitForText(needles, in: view)
+        try save(bitmap, as: "battle-log-language-blocked-reason.png")
+        assertRendered(needles, in: text)
+    }
+
+    /// The online live log and replay read the same text helper; an English app reads them in English.
+    func testOnlineLogFollowsTheAppLanguage() async throws {
+        let raw = ["|turn|3", "|move|p1a: Pikachu|Thunderbolt|p2a: Magikarp", "|-supereffective|p2a: Magikarp",
+                   "|-damage|p2a: Magikarp|12/100", "|-status|p2a: Magikarp|par", "|faint|p2a: Magikarp", "|win|p1"]
+        let view = hostView(OnlineBattleLogCard(logs: OnlineBattleHistoryText.logs(raw, localSide: .p1, l: L(.en)), l: L(.en))
+            .padding(PopoverMetrics.padding), width: PopoverMetrics.width, height: 220)
+        let needles = ["used", "took damage", "fainted"]
+        let (text, bitmap) = try await waitForText(needles, in: view)
+        try save(bitmap, as: "battle-log-language-online-log.png")
+        assertRendered(needles, in: text)
+    }
+
     /// Manual battle: the turn clock in the top bar and a move card with its name and PP.
     func testManualBattleShowsMoveGridAndTurnClock() async throws {
         let session = makeSession()
