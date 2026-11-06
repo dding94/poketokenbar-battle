@@ -240,7 +240,7 @@ final class PracticeWordingTests: XCTestCase {
         XCTAssertEqual(L(.en).itemDescription(.hyperPotion), "Fully restores a Pokémon's HP.")
         XCTAssertEqual(L(.ko).itemDescription(.revive), "기절한 포켓몬을 체력 \(revive)로 되살려요.")
         XCTAssertEqual(L(.en).itemDescription(.revive), "Revives a fainted Pokémon with \(revive) of its HP.")
-        XCTAssertEqual(L(.ko).itemDescription(.ivReroll), "현재 포켓몬의 개체값 6개를 모두 다시 뽑아요. 더 낮아질 수도 있어요.")
+        XCTAssertEqual(L(.ko).itemDescription(.ivReroll), "고른 포켓몬의 개체값 6개를 모두 다시 뽑아요. 더 낮아질 수도 있어요.")
         XCTAssertEqual(L(.en).itemDescription(.ivReroll), "Re-rolls all six IVs of your Pokémon. They may get lower.")
         for language in AppLanguage.allCases {
             let l = L(language)

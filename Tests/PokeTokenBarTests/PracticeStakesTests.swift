@@ -275,6 +275,111 @@ final class PracticeStakesStoreTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: url.path), "a change is written")
     }
 
+    // MARK: Items for any owned individual
+
+    private func graduate(_ id: String, nature: PokemonNature? = .calm, released: Bool = false) -> DexEntry {
+        DexEntry(baseID: 7, finalID: 9, chainOrder: [7, 8, 9], rarity: .common, caughtAt: nil, nature: nature,
+                 profile: PokemonProfile.generate(seed: 5, instanceID: id), names: [9: ["en": id]],
+                 releasedAt: released ? stakesNow : nil)
+    }
+
+    /// The individuals are the fighters the roster lists: the current Pokémon first, graduates after, and not a released
+    /// entry. (An entry saved without a profile gets one when the store loads it.) The current Pokémon shows as it looks:
+    /// a disguised Ditto is not shiny yet.
+    func testOwnedIndividualsAreWhoCanFightAndDoNotUnmaskADitto() throws {
+        let folder = try stakesFolder(); defer { try? FileManager.default.removeItem(at: folder) }
+        var state = makeState()
+        state.dex = [graduate("kept"), graduate("gone", released: true)]
+        let store = try makeStore(state, at: folder.appendingPathComponent("s.json"))
+        XCTAssertEqual(store.ownedIndividuals.map(\.id), ["mon", "kept"])
+        XCTAssertEqual(store.ownedIndividuals.map(\.isCurrent), [true, false])
+        XCTAssertEqual(store.ownedIndividuals[0].shiny, false, "the disguise hides the shiny the save knows about")
+        XCTAssertEqual(store.ownedIndividuals[1].speciesID, 9)
+        state.active = nil
+        let egg = try makeStore(state, at: folder.appendingPathComponent("egg.json"))
+        XCTAssertEqual(egg.ownedIndividuals.map(\.id), ["kept"], "an egg does not take the graduates away")
+    }
+
+    /// A healing item goes to the chosen individual alone, and the item and the HP reach the disk in one write.
+    func testAHealingItemOnAGraduateChangesOnlyThatGraduateAndSavesTogether() throws {
+        let folder = try stakesFolder(); defer { try? FileManager.default.removeItem(at: folder) }
+        let url = folder.appendingPathComponent("s.json")
+        var state = makeState(items: [.potion: 1, .revive: 1], health: ["mon": 0.3, "hurt": 0.2, "down": 0])
+        state.dex = [graduate("hurt"), graduate("down")]
+        let store = try makeStore(state, at: url)
+        XCTAssertTrue(store.useHealingItem(.potion, on: "hurt"))
+        XCTAssertTrue(store.useHealingItem(.revive, on: "down"))
+        let saved = reopen(url)
+        XCTAssertEqual(saved.healthShare(of: "hurt"), 0.2 + BattleItem.potionHeal, accuracy: 1e-9)
+        XCTAssertEqual(saved.healthShare(of: "down"), BattleItem.reviveShare)
+        XCTAssertEqual(saved.healthShare(of: "mon"), 0.3, "the current Pokémon was not the target")
+        XCTAssertEqual(saved.itemCount(.potion), 0); XCTAssertEqual(saved.itemCount(.revive), 0)
+    }
+
+    /// Who the list offers: the item's rules per individual, the ones it works on first. Nobody is listed for an item
+    /// with no use on anyone, so a healthy party never shows a row that would waste it.
+    func testItemTargetsListWhoTheItemWorksOnFirst() throws {
+        let folder = try stakesFolder(); defer { try? FileManager.default.removeItem(at: folder) }
+        var state = makeState(items: [.potion: 1, .hyperPotion: 1, .revive: 1, .mint: 1, .ivReroll: 1, .rareCandy: 1, .shinyCharm: 1],
+                              health: ["down": 0, "hurt": 0.5])
+        state.dex = [graduate("down"), graduate("hurt"), graduate("fine")]
+        let store = try makeStore(state, at: folder.appendingPathComponent("s.json"))
+        for kind in [ItemKind.potion, .hyperPotion] {
+            XCTAssertEqual(store.itemTargets(kind).map(\.id), ["hurt", "down"], "\(kind): a Revive's case comes last, full HP not at all")
+            XCTAssertEqual(store.itemTargets(kind).map(\.verdict), [.usable, .needsRevive], "\(kind)")
+        }
+        XCTAssertEqual(store.itemTargets(.revive).map(\.id), ["down"])
+        XCTAssertEqual(store.itemTargets(.mint).map(\.id), ["mon", "down", "hurt", "fine"], "a fainted individual keeps its nature to change")
+        XCTAssertEqual(store.itemTargets(.ivReroll).map(\.id), ["mon", "down", "hurt", "fine"])
+        XCTAssertEqual(store.itemTargets(.rareCandy).map(\.id), [], "growth belongs to the current Pokémon")
+        XCTAssertEqual(store.itemTargets(.shinyCharm).map(\.id), [])
+        XCTAssertEqual(store.itemTargets(.potion).first?.healthShare, 0.5)
+    }
+
+    /// A reroll and a Mint on a graduate write to that dex entry, spend one, and leave the current Pokémon alone; a
+    /// released entry and an unknown ID spend nothing.
+    func testARerollAndAMintOnAGraduateChangeOnlyThatEntry() throws {
+        let folder = try stakesFolder(); defer { try? FileManager.default.removeItem(at: folder) }
+        let url = folder.appendingPathComponent("s.json")
+        var state = makeState(items: [.ivReroll: 3, .mint: 3])
+        state.dex = [graduate("kept"), graduate("gone", released: true)]
+        let store = try makeStore(state, at: url)
+        let active = try encoded(store.state.active), goneBefore = store.state.dex[1]
+        for id in ["gone", "nobody"] {
+            XCTAssertNil(store.useIVReroll(on: id), id); XCTAssertNil(store.useMint(on: id), id)
+            XCTAssertEqual(store.itemVerdict(.mint, on: id), .notHealing, id)
+        }
+        XCTAssertEqual(store.itemCount(.ivReroll), 3); XCTAssertEqual(store.itemCount(.mint), 3)
+        XCTAssertEqual(store.state.dex[1].profile, goneBefore.profile); XCTAssertEqual(store.state.dex[1].nature, goneBefore.nature)
+        let ivs = try XCTUnwrap(store.useIVReroll(on: "kept"))
+        let nature = try XCTUnwrap(store.useMint(on: "kept"))
+        XCTAssertNotEqual(nature, .calm, "a Mint always changes the nature")
+        XCTAssertNil(store.mintFeedbackNature, "Home's sparkle is about the current Pokémon")
+        XCTAssertEqual(try encoded(store.state.active), active, "the current Pokémon is untouched")
+        let saved = reopen(url)
+        XCTAssertEqual(saved.state.dex[0].profile?.ivs, ivs)
+        XCTAssertEqual(saved.state.dex[0].nature, nature)
+        XCTAssertEqual(saved.itemCount(.ivReroll), 2); XCTAssertEqual(saved.itemCount(.mint), 2)
+        // The current Pokémon, named or not, is still the same path.
+        XCTAssertNotNil(store.useIVReroll(on: "mon")); XCTAssertNotNil(store.useMint(on: "mon"))
+        XCTAssertNotNil(store.mintFeedbackNature)
+        XCTAssertNotNil(store.useIVReroll()); XCTAssertNotNil(store.useMint())
+        XCTAssertEqual(store.itemCount(.ivReroll), 0); XCTAssertEqual(store.itemCount(.mint), 0)
+    }
+
+    /// A graduate a running practice battle with stakes holds is as out of reach as the current Pokémon would be.
+    func testAGraduateInAPracticeBattleWithStakesTakesNoItem() throws {
+        let folder = try stakesFolder(); defer { try? FileManager.default.removeItem(at: folder) }
+        var state = makeState(items: [.potion: 1, .ivReroll: 1, .mint: 1], health: ["kept": 0.5])
+        state.dex = [graduate("kept")]
+        let store = try makeStore(state, at: folder.appendingPathComponent("s.json"))
+        store.setInBattle("kept")
+        for kind in [ItemKind.potion, .ivReroll, .mint] { XCTAssertEqual(store.itemVerdict(kind, on: "kept"), .inBattle, "\(kind)") }
+        XCTAssertEqual(store.itemVerdict(.mint, on: "mon"), .usable, "the current Pokémon is not the one in the battle")
+        store.setInBattle(nil)
+        XCTAssertEqual(store.itemVerdict(.potion, on: "kept"), .usable)
+    }
+
     // MARK: Healing items
 
     func testAPotionHealsHalfUpToFullAndOnlyAWoundedPokemon() throws {
@@ -962,6 +1067,17 @@ final class PracticeStakesLiveTests: XCTestCase {
         session.start()
         XCTAssertEqual(session.battle?.player?.snapshot?.set.level, after, "the rematch fights at the new level")
         XCTAssertEqual(session.battle?.view?.p1.level, after)
+    }
+
+    /// A reroll or a Mint on a graduate reaches its next battle: the roster reads that dex entry.
+    func testARerollOnAGraduateReachesItsSnapshot() throws {
+        let (store, session) = try live(pikaState(items: [.ivReroll: 1]))
+        let ownIVs = try XCTUnwrap(session.roster?.candidates.first { $0.id == "pika" }?.snapshot?.set.ivs)
+        let rerolled = try XCTUnwrap(store.useIVReroll(on: "m"))
+        session.prepare(state: store.state, activeName: nil)
+        let expected = Dictionary(uniqueKeysWithValues: PokemonStatCalculator.order.map { ($0, rerolled[$0]) })
+        XCTAssertEqual(session.roster?.candidates.first { $0.id == "m" }?.snapshot?.set.ivs, expected)
+        XCTAssertEqual(session.roster?.candidates.first { $0.id == "pika" }?.snapshot?.set.ivs, ownIVs)
     }
 
     /// An IV reroll used from the bag while a battle runs reaches the rematch even when nothing paid XP: the popover's

@@ -115,6 +115,51 @@ final class OnlineBattleEffectsTests: XCTestCase {
         XCTAssertFalse(store.isHeldForBattle(instanceID: "current"))
         XCTAssertTrue(store.useHealingItem(.potion, on: "current"))
     }
+    /// A reroll or a Mint changes the stats behind the snapshot this hold's room was consented with, so the room would
+    /// stop at the next confirm or ready with "entry changed". The hold exists from the request to the settlement.
+    func testAHeldIndividualKeepsItsIVsAndNatureUntilTheHoldEnds() throws {
+        var s = state(); s.inventory = [ItemKind.ivReroll.rawValue: 1, ItemKind.mint.rawValue: 1]
+        s.active?.nature = .hardy
+        let store = try make(s)
+        let ivs = store.state.active?.profile?.ivs
+        try store.holdOnlineBattle(key: key(), instanceID: "current")
+        XCTAssertNil(store.useIVReroll(), "the room's snapshot has these IVs")
+        XCTAssertNil(store.useMint(), "the room's snapshot has this nature")
+        XCTAssertEqual(store.state.active?.profile?.ivs, ivs)
+        XCTAssertEqual(store.state.active?.nature, .hardy)
+        XCTAssertEqual(store.itemCount(.ivReroll), 1, "a refused use spends nothing")
+        XCTAssertEqual(store.itemCount(.mint), 1, "a refused use spends nothing")
+        try store.releaseOnlineBattle(key: key())
+        XCTAssertNotNil(store.useIVReroll())
+        XCTAssertNotNil(store.useMint())
+    }
+    /// The boundary of healing someone other than the current Pokémon: a graduate in a room or waiting for its result
+    /// takes no item, and the settlement's HP is what a Potion then starts from. The Potion refused during the hold
+    /// stays in the bag rather than being overwritten by the settlement.
+    func testAGraduateHeldForAResultTakesNoItemUntilItSettles() throws {
+        var s = state(); s.inventory = [ItemKind.potion.rawValue: 1, ItemKind.mint.rawValue: 1, ItemKind.ivReroll.rawValue: 1]
+        s.battleHealth["entrant"] = 0.5
+        s.dex = [DexEntry(baseID: 7, finalID: 9, chainOrder: [7, 8, 9], rarity: .common, caughtAt: nil, nature: .calm,
+                          profile: PokemonProfile.generate(seed: 2, instanceID: "entrant"))]
+        let store = try make(s), before = store.state.dex[0]
+        try store.holdOnlineBattle(key: key(), instanceID: "entrant")
+        for kind in [ItemKind.potion, .mint, .ivReroll] {
+            XCTAssertEqual(store.itemVerdict(kind, on: "entrant"), .inBattle, "\(kind)")
+        }
+        XCTAssertEqual(store.itemTargets(.potion).map(\.verdict), [.inBattle], "the row says why instead of vanishing")
+        XCTAssertFalse(store.useHealingItem(.potion, on: "entrant"))
+        XCTAssertNil(store.useMint(on: "entrant")); XCTAssertNil(store.useIVReroll(on: "entrant"))
+        XCTAssertEqual(store.state.dex[0].nature, before.nature); XCTAssertEqual(store.state.dex[0].profile, before.profile)
+        XCTAssertEqual(store.state.inventory, s.inventory, "nothing spent")
+        XCTAssertNotNil(store.itemTargets(.mint).first { $0.id == "current" && $0.verdict == .usable }, "others stay reachable")
+        // The result arrives while the hold still stands, then the HP it set is what the bag works from.
+        _ = try store.applyVerifiedOnlineBattleEffect(effect(outcome: .win, hp: 0.2))
+        XCTAssertFalse(store.isHeldForBattle(instanceID: "entrant"))
+        XCTAssertEqual(store.healthShare(of: "entrant"), 0.2)
+        XCTAssertTrue(store.useHealingItem(.potion, on: "entrant"))
+        XCTAssertEqual(store.healthShare(of: "entrant"), 0.2 + BattleItem.potionHeal, accuracy: 1e-9)
+        XCTAssertEqual(open().state.battleHealth["entrant"] ?? -1, 0.2 + BattleItem.potionHeal, accuracy: 1e-9, "the save agrees after a restart")
+    }
     func testCorruptFallbackRemainsUntrustedAfterRestart() throws {
         try Data(#"{"onlineBattleReceipts":"damaged"}"#.utf8).write(to: folder.appendingPathComponent("save"))
         let store = open()

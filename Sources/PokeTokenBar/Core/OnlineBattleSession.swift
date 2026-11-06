@@ -984,6 +984,8 @@ final class OnlineBattleSession {
         case .setOnlineScreenVisible(let visible):
             onlineScreenVisible = visible
             presentation.screenShown = popoverOpen && onlineScreenVisible
+            // The bag sits one tab away and nothing reads the server on the way here: show the HP it just changed.
+            if visible, (try? rebuildRoster()) != nil { publish() }
             refreshStageVisibility(); return
         case .skipStage:
             presentation.stage?.skipToEnd()

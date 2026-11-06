@@ -184,7 +184,7 @@ enum ItemKind: String, Codable, Sendable, CaseIterable {
     case potion
     case hyperPotion
     case revive
-    /// PR 03C: re-rolls the current Pokémon's six IVs.
+    /// PR 03C: re-rolls one owned individual's six IVs.
     case ivReroll
 
     /// PokéAPI 아이템 스프라이트 파일명(.../sprites/items/{name}.png). nil = 스프라이트 없음(이모지 폴백만).
@@ -264,7 +264,7 @@ enum BattleItem {
     /// 기력의조각: 기절한 개체를 최대 체력의 50%로 되살린다.
     static let revivePrice = 400_000_000
     static let reviveShare = 0.5
-    /// 개체값 재추첨: 현재 포켓몬의 개체값 6개를 다시 뽑는다(더 낮아져도 그대로).
+    /// 개체값 재추첨: 고른 보유 포켓몬의 개체값 6개를 다시 뽑는다(더 낮아져도 그대로).
     static let ivRerollPrice = 400_000_000
 }
 
@@ -273,7 +273,8 @@ enum BattleItem {
 /// several reasons apply, the one listed first wins.
 enum HealingItemVerdict: Equatable, Sendable {
     case usable
-    /// Not a healing item: a Rare Candy, Mint, Shiny Charm or IV reroll.
+    /// Not a healing item: a Rare Candy, Mint, Shiny Charm or IV reroll. From `itemVerdict`: not an item for an owned
+    /// individual, or an individual this save does not own.
     case notHealing
     /// None of it in the bag.
     case noneLeft
@@ -285,6 +286,29 @@ enum HealingItemVerdict: Equatable, Sendable {
     case hpFull
     /// A Revive on an individual that isn't fainted.
     case notFainted
+}
+
+/// One individual the player owns, as a list of item targets shows it: the current Pokémon, then the graduates. Released
+/// entries stay in the Pokédex but are gone.
+struct OwnedIndividual: Identifiable, Equatable, Sendable {
+    /// `PokemonProfile.instanceID`: the one key HP, holds and items use, unchanged by evolution.
+    let id: String
+    let speciesID: Int
+    let form: PokemonForm?
+    let shiny: Bool
+    let name: String
+    let level: Int
+    let nature: PokemonNature?
+    let ivs: PokemonIVs
+    let isCurrent: Bool
+}
+
+/// An owned individual an item could be used on, with what the store says about it now (`CompanionStore.itemTargets`).
+struct ItemTarget: Identifiable, Equatable, Sendable {
+    let individual: OwnedIndividual
+    let healthShare: Double
+    let verdict: HealingItemVerdict
+    var id: String { individual.id }
 }
 
 /// 이로치 부적 밸런스 상수 — 보유형(1회 구매·영구, 소비 안 됨).

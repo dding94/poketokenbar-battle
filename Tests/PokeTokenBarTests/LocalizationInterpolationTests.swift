@@ -122,6 +122,8 @@ final class LocalizationInterpolationTests: XCTestCase {
 
             // Bag, shop, eggs / 가방 · 상점 · 알
             expect(lang, "useOnCurrent", l.useOnCurrent(a), a)
+            expect(lang, "itemTargetCount", l.itemTargetCount(4242), "4242")
+            expect(lang, "ivTotalLine", l.ivTotalLine(4242), "4242")
             expect(lang, "buyConfirm", l.buyConfirm(a), a)
             expect(lang, "ownedCount", l.ownedCount(4242), "4242")
             expect(lang, "eggConfirm", l.eggConfirm(a, b), a, b)

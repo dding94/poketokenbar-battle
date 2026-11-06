@@ -4255,3 +4255,24 @@ extension OnlineBattleSessionTests {
         let reads = await http.count("/v1/standings"); XCTAssertEqual(reads, 1)
     }
 }
+
+// MARK: - An item used from the bag reaches the online lobby
+
+extension OnlineBattleSessionTests {
+    /// The bag and the online screen sit on the same popover, and nothing reads the server on the way between them.
+    /// A Revive used on a fainted individual must make its row selectable when the screen opens, not at the next read.
+    func testOpeningTheOnlineScreenShowsWhatTheBagHealed() async throws {
+        let entry = try roster(battle())[0]
+        let (session, http, _, effects) = try await setup([], rosterOverride: [entry])
+        try await activeOpponent(http)
+        effects.state.battleHealth[entry.id] = 0
+        await session.bootstrap()
+        let model = session.presentation
+        XCTAssertEqual(model.entryHP[entry.id], 0, "fainted at the last read")
+        XCTAssertFalse(model.entryIsEligible(entry))
+        effects.state.battleHealth[entry.id] = BattleItem.reviveShare
+        await session.perform(.setOnlineScreenVisible(true))
+        XCTAssertGreaterThan(try XCTUnwrap(model.entryHP[entry.id]), 0, "the screen shows the HP the save has now")
+        XCTAssertTrue(model.entryIsEligible(entry), "and the revived individual can be picked")
+    }
+}

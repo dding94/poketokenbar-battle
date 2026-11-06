@@ -223,7 +223,8 @@ bash scripts/package-battle-engines.sh "build/PokeTokenBattle.app/Contents/Resou
         cask=(self.repo/'build/release/poke-token-bar-battle.rb').read_text()
         self.assertIn(hashlib.sha256(b'fixture zip bytes').hexdigest(),cask)
         self.assertIn('https://github.com/dding94/poketokenbar-battle/releases/download/v#{version}/PokeTokenBarBattle.zip',cask)
-        self.assertIn('depends_on macos: ">= :sequoia"',cask)
+        self.assertIn('depends_on macos: :sequoia',cask)
+        self.assertNotIn('">= :sequoia"',cask,'Homebrew warns about the comparison string')
         self.assertIn('app "PokeTokenBattle.app"',cask)
         self.assertIn('build:skip-install=1 version=3.0.0',self.calls())
         self.assertNotRegex(self.calls(),r'(?m)^gh release |^gh api -X |^pkill |^git (add|commit|push|tag) ')
@@ -361,7 +362,8 @@ bash scripts/package-battle-engines.sh "build/PokeTokenBattle.app/Contents/Resou
         result=subprocess.run(['python3',str(helper),'cask','2.5.6','a'*64],capture_output=True,text=True)
         self.assertEqual(result.returncode,0,result.stderr)
         for old,new in (('dding94/poketokenbar-battle','chattymin/PokeTokenBar'),
-                        ('a'*64,'no_check'), ('>= :sequoia','>= :sonoma'),
+                        ('a'*64,'no_check'), ('macos: :sequoia','macos: :sonoma'),
+                        ('macos: :sequoia','macos: ">= :sequoia"'),  # a new build never keeps the warned spelling
                         ('app "PokeTokenBattle.app"','app "PokeTokenBar.app"')):
             with self.subTest(old=old):
                 cask=self.repo/'invalid.rb';cask.write_text(result.stdout.replace(old,new))
@@ -393,7 +395,7 @@ bash scripts/package-battle-engines.sh "build/PokeTokenBattle.app/Contents/Resou
         """The cask text published with 2.6.0 (before the PokeTokenBattle rename)."""
         result=subprocess.run(['python3',str(self.repo/'scripts/release-validate.py'),'cask',version,sha],capture_output=True,text=True)
         self.assertEqual(result.returncode,0,result.stderr)
-        text=result.stdout.replace('name "PokeTokenBattle"','name "PokeTokenBar Battle"').replace('app "PokeTokenBattle.app"','app "PokeTokenBar Battle.app"')
+        text=result.stdout.replace('name "PokeTokenBattle"','name "PokeTokenBar Battle"').replace('app "PokeTokenBattle.app"','app "PokeTokenBar Battle.app"').replace('macos: :sequoia','macos: ">= :sequoia"')
         self.assertIn('app "PokeTokenBar Battle.app"',text)
         return text
 
@@ -422,6 +424,23 @@ bash scripts/package-battle-engines.sh "build/PokeTokenBattle.app/Contents/Resou
             with self.subTest(old=old):
                 tampered=self.repo/'tampered.rb';tampered.write_text(self.legacy_cask().replace(old,new))
                 check=subprocess.run(['python3',str(helper),'check-published-cask',str(tampered)],capture_output=True,text=True)
+                self.assertNotEqual(check.returncode,0)
+
+    def test_the_published_2_7_0_cask_can_be_updated_but_not_kept(self):
+        # The tap holds this spelling until the first release after it; refusing it would stop that release.
+        helper=self.repo/'scripts/release-validate.py'
+        result=subprocess.run(['python3',str(helper),'cask','2.7.0','a'*64],capture_output=True,text=True)
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertIn('depends_on macos: :sequoia\n',result.stdout)
+        cask=self.repo/'published.rb';cask.write_text(result.stdout.replace('macos: :sequoia','macos: ">= :sequoia"'))
+        published=subprocess.run(['python3',str(helper),'check-published-cask',str(cask)],capture_output=True,text=True)
+        self.assertEqual(published.returncode,0,published.stderr)
+        preview=subprocess.run(['python3',str(helper),'check-cask',str(cask)],capture_output=True,text=True)
+        self.assertNotEqual(preview.returncode,0)
+        for old,new in (('">= :sequoia"','">= :sonoma"'),('">= :sequoia"',':sonoma')):
+            with self.subTest(new=new):
+                cask.write_text(result.stdout.replace('macos: :sequoia',f'macos: ">= :sequoia"').replace(old,new))
+                check=subprocess.run(['python3',str(helper),'check-published-cask',str(cask)],capture_output=True,text=True)
                 self.assertNotEqual(check.returncode,0)
 
     def test_prepare_build_never_runs_local_test_gate_or_ocr(self):

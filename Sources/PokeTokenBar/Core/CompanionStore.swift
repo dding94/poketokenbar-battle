@@ -1162,18 +1162,32 @@ final class CompanionStore {
     /// (사탕과 달리 currentLine 조건 없음 — 재시작 직후·오프라인에도 사용 가능).
     var canUseMint: Bool { hasActive && itemCount(.mint) > 0 }
 
-    /// 민트 1개 사용 — 현재 포켓몬 성격을 '현재와 다른' 무작위 성격으로 교체(반드시 바뀐다). 성장·shiny·
-    /// 종·usedAtStage·통계 전부 무관(순수 코스메틱). 사용 불가면 nil(무소모). 바뀐 성격을 반환(피드백용).
+    /// 민트 1개 사용 — 고른 개체(`instanceID`, 없으면 현재 포켓몬)의 성격을 '현재와 다른' 무작위 성격으로 교체(반드시
+    /// 바뀐다). 성장·shiny·종·usedAtStage·통계는 그대로. 개체값과 함께 배틀 스냅샷에 들어가므로 출전이 잡힌 개체에는
+    /// 쓰지 않는다(`itemVerdict`). 사용 불가면 nil(무소모). 바뀐 성격을 반환(피드백용).
+    /// 홈의 반짝임 피드백은 현재 포켓몬에게 쓸 때만 — 다른 개체의 결과는 가방이 보여 준다.
     @discardableResult
-    func useMint() -> PokemonNature? {
-        guard canUseMint, state.active != nil else { return nil }
-        let cur = state.active!.nature
+    func useMint(on instanceID: String? = nil) -> PokemonNature? {
+        let activeID = state.active?.profile?.instanceID
+        // A current Pokémon without a profile has no instance ID but still has a nature to change.
+        if let target = instanceID ?? activeID {
+            guard itemVerdict(.mint, on: target) == .usable else { return nil }
+        } else {
+            guard canUseMint else { return nil }
+        }
+        let isCurrent = instanceID == nil || instanceID == activeID
+        let dexIndex = isCurrent ? nil : instanceID.flatMap(ownedDexIndex)
+        let cur = isCurrent ? state.active?.nature : dexIndex.flatMap { state.dex[$0].nature }
         let pool = PokemonNature.allCases.filter { $0 != cur }   // cur=nil(구버전 개체)이면 25종 전체
         let new = pool[Int(rng.next() % UInt64(pool.count))]
-        state.active!.nature = new
+        if isCurrent {
+            state.active?.nature = new
+            mintFeedbackNature = new
+            mintFeedbackSeq += 1
+        } else if let dexIndex {
+            state.dex[dexIndex].nature = new
+        }
         state.inventory[ItemKind.mint.rawValue] = itemCount(.mint) - 1
-        mintFeedbackNature = new
-        mintFeedbackSeq += 1
         save()
         return new
     }
@@ -2246,19 +2260,78 @@ extension CompanionStore: PracticeBattleEffects {
         save()
         return true
     }
-    /// Re-rolls the current Pokémon's six IVs with one IV reroll; the new IVs, or nil (nothing spent) without one.
-    /// The new values apply even when lower. Species, level, growth, nature, shiny and the Ditto state stay; the HP
-    /// share keeps its meaning because it is a share of whatever the max HP becomes.
+    /// The individuals a bag item can be used on, the current Pokémon first: the roster's rule (`PracticeRoster`) for who
+    /// can fight, so whoever a battle screen lists can be reached from the bag.
+    var ownedIndividuals: [OwnedIndividual] {
+        var rows: [OwnedIndividual] = []
+        if let active = state.active, let profile = active.profile {
+            let name = currentLine == nil ? "#\(active.currentID)" : displayName
+            rows.append(OwnedIndividual(id: profile.instanceID, speciesID: active.currentID, form: currentForm,
+                                        shiny: active.displaysShiny, name: name, level: profile.level,
+                                        nature: active.nature, ivs: profile.ivs, isCurrent: true))
+        }
+        for entry in state.dex where !entry.isReleased {
+            guard let profile = entry.profile else { continue }
+            let form = PokemonForm.resolved(speciesID: entry.finalID, form: entry.form)
+            rows.append(OwnedIndividual(id: profile.instanceID, speciesID: entry.finalID, form: form, shiny: entry.isShiny,
+                                        name: formDisplayName(dexEntryName(entry), speciesID: entry.finalID, form: form),
+                                        level: profile.level, nature: entry.nature, ivs: profile.ivs, isCurrent: false))
+        }
+        return rows
+    }
+
+    /// Whether `kind` works on one owned individual now: `healingItemVerdict` for the healing items, and for a Mint or an
+    /// IV reroll whether one is left and no battle holds the individual. A hold starts with the request that sends the
+    /// individual's snapshot, and both items change what that snapshot says, so the room would stop at its next consent
+    /// check. A Rare Candy feeds the current Pokémon's growth only: graduates have no growth to feed.
+    func itemVerdict(_ kind: ItemKind, on instanceID: String) -> HealingItemVerdict {
+        switch kind {
+        case .potion, .hyperPotion, .revive:
+            return healingItemVerdict(kind, on: instanceID)
+        case .mint, .ivReroll:
+            guard state.active?.profile?.instanceID == instanceID || ownedDexIndex(instanceID) != nil else { return .notHealing }
+            if itemCount(kind) <= 0 { return .noneLeft }
+            return isHeldForBattle(instanceID: instanceID) ? .inBattle : .usable
+        case .rareCandy, .shinyCharm:
+            return .notHealing
+        }
+    }
+
+    /// The rows to offer for `kind`: those it works on first, then those a reason keeps from it. Someone at full HP or
+    /// not fainted is not waiting for this item, so they stay out of the list instead of burying who is.
+    func itemTargets(_ kind: ItemKind) -> [ItemTarget] {
+        let rows = ownedIndividuals.compactMap { individual -> ItemTarget? in
+            let verdict = itemVerdict(kind, on: individual.id)
+            guard verdict == .usable || verdict == .inBattle || verdict == .needsRevive else { return nil }
+            return ItemTarget(individual: individual, healthShare: healthShare(of: individual.id), verdict: verdict)
+        }
+        return rows.filter { $0.verdict == .usable } + rows.filter { $0.verdict != .usable }
+    }
+
+    /// Re-rolls one owned individual's six IVs (`instanceID`, or the current Pokémon) with one IV reroll; the new IVs, or
+    /// nil (nothing spent) when `itemVerdict` refuses. The new values apply even when lower. Species, level, growth,
+    /// nature, shiny and the Ditto state stay; the HP share keeps its meaning because it is a share of whatever the max
+    /// HP becomes.
     @discardableResult
-    func useIVReroll() -> PokemonIVs? {
-        guard itemCount(.ivReroll) > 0, state.active?.profile != nil else { return nil }
+    func useIVReroll(on instanceID: String? = nil) -> PokemonIVs? {
+        guard let target = instanceID ?? state.active?.profile?.instanceID,
+              itemVerdict(.ivReroll, on: target) == .usable else { return nil }
         // Same draw as a hatch (`PokemonProfile.generate`): 0…31 per stat, in stat order, from the store's generator.
         let ivs = PokemonIVs(hp: rollIV(), attack: rollIV(), defense: rollIV(),
                              specialAttack: rollIV(), specialDefense: rollIV(), speed: rollIV())
-        state.active?.profile?.ivs = ivs
+        if state.active?.profile?.instanceID == target {
+            state.active?.profile?.ivs = ivs
+        } else if let index = ownedDexIndex(target) {
+            state.dex[index].profile?.ivs = ivs
+        }
         state.inventory[ItemKind.ivReroll.rawValue] = itemCount(.ivReroll) - 1
         save()
         return ivs
+    }
+
+    /// The graduate with this individual's profile. A released entry is a record, not an individual an item can reach.
+    private func ownedDexIndex(_ instanceID: String) -> Int? {
+        state.dex.firstIndex { !$0.isReleased && $0.profile?.instanceID == instanceID }
     }
 
     /// The HP share a usable healing item leaves (`healingItemVerdict` decides whether it is usable).
