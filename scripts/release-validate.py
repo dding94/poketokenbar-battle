@@ -18,6 +18,9 @@ LABEL = BUNDLE + '.login'
 CASK = 'poke-token-bar-battle'
 # Display name and app folder of the already published 2.6.0 cask (before the PokeTokenBattle rename).
 LEGACY_APP = 'PokeTokenBar Battle'
+MACOS_MINIMUM = ':sequoia'
+# Up to 2.7.0: same minimum, written as a comparison Homebrew now warns about.
+LEGACY_MACOS_MINIMUM = '">= :sequoia"'
 
 
 def require(condition, message):
@@ -154,7 +157,7 @@ def bundle_check(root, app, target_version, leaf):
         require(path.is_file() and hashlib.sha256(path.read_bytes()).hexdigest() == pin, f'Packaged engine hash mismatch: {pin}')
 
 
-def cask_text(target_version, sha, app=APP):
+def cask_text(target_version, sha, app=APP, macos=MACOS_MINIMUM):
     version(target_version)
     require(re.fullmatch(r'[0-9a-f]{64}', sha), 'Cask SHA256 must be 64 lowercase hex digits')
     return f'''cask "{CASK}" do
@@ -166,7 +169,7 @@ def cask_text(target_version, sha, app=APP):
   desc "Menu bar companion with local practice and online battles"
   homepage "https://github.com/{REPO}"
 
-  depends_on macos: ">= :sequoia"
+  depends_on macos: {macos}
   app "{app}.app"
 end
 '''
@@ -181,16 +184,18 @@ def check_cask(path):
 
 
 def check_published_cask(path):
-    """The cask already in the tap before publication: the current template, or the pre-rename 2.6.0 template.
+    """The cask already in the tap before publication: the current template, or one this repository published earlier.
 
-    The publication step rewrites it with the current template, so the first release across the rename must be able
-    to start from the old `app` folder. Everything else (URL, minimum macOS, checksum form) is still pinned."""
+    The publication step rewrites it with the current template, so the first release after a template change must be
+    able to start from the old form: 2.7.0's minimum-macOS spelling and 2.6.0's `app` folder with it. Everything else
+    (URL, what the minimum means, checksum form) is still pinned."""
     text = Path(path).read_text()
     ver = re.search(r'^  version "([^"]+)"$', text, re.M)
     sha = re.search(r'^  sha256 "([^"]+)"$', text, re.M)
     require(ver and sha, 'Missing cask version/SHA256')
-    require(text in (cask_text(ver[1], sha[1]), cask_text(ver[1], sha[1], LEGACY_APP)),
-            'Published cask must match the fork template (current or pre-rename) exactly')
+    require(text in (cask_text(ver[1], sha[1]), cask_text(ver[1], sha[1], macos=LEGACY_MACOS_MINIMUM),
+                     cask_text(ver[1], sha[1], LEGACY_APP, LEGACY_MACOS_MINIMUM)),
+            'Published cask must match a fork template (current, 2.7.0 or pre-rename) exactly')
 
 
 if __name__ == '__main__':

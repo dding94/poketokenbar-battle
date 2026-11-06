@@ -1078,7 +1078,8 @@ final class PracticeScreenRenderingTests: XCTestCase {
     /// A companion store on a temp file: Pikachu is the current Pokémon with known IVs, and the four battle items
     /// are in the bag. `health` is Pikachu's HP share in the save (`CompanionState.battleHealth`); full keeps no entry.
     /// Not `hatched`, the save holds an egg instead (no current Pokémon), with the same bag.
-    private func battleItemStore(language: AppLanguage, health: Double = 1, hatched: Bool = true) throws -> CompanionStore {
+    private func battleItemStore(language: AppLanguage, health: Double = 1, hatched: Bool = true,
+                                 graduates: [(id: String, health: Double)] = [], items: [ItemKind: Int]? = nil) throws -> CompanionStore {
         let suite = "PracticeBag-\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         let file = FileManager.default.temporaryDirectory.appendingPathComponent("\(suite).json")
@@ -1097,9 +1098,93 @@ final class PracticeScreenRenderingTests: XCTestCase {
                            ItemKind.ivReroll.rawValue: 1]
         if health < 1 { state.battleHealth = [profile.instanceID: health] }
         if !hatched { state.active = nil }
+        if let items { state.inventory = Dictionary(uniqueKeysWithValues: items.map { ($0.key.rawValue, $0.value) }) }
+        for graduate in graduates {
+            var theirs = PokemonProfile.generate(seed: 9, instanceID: graduate.id)
+            theirs.gender = .female; theirs.level = 50; theirs.abilityName = "torrent"
+            theirs.moves = [PokemonKnownMove(name: "surf", learnedAtLevel: 1)]
+            state.dex.append(DexEntry(baseID: 7, finalID: 9, chainOrder: [7, 8, 9], rarity: .common, caughtAt: nil,
+                                      nature: .calm, profile: theirs, names: [9: ["en": graduate.id, "ko": graduate.id]]))
+            if graduate.health < 1 { state.battleHealth[graduate.id] = graduate.health }
+        }
         state.language = language
         try JSONEncoder().encode(state).write(to: file)
         return CompanionStore(provider: OfflineWildProvider(), fileURL: file, defaults: defaults)
+    }
+
+    /// What an item does is reported about the individual it went to. Reading the current Pokémon's HP here, as the bag
+    /// did when that was the only target, shows 40% for a graduate just revived to 50%.
+    func testTheBagReportsTheIndividualItHealedNotTheCurrentOne() throws {
+        let store = try battleItemStore(language: .en, health: 0.4, graduates: [("down", 0), ("hurt", 0.2)])
+        let individuals = Dictionary(uniqueKeysWithValues: store.ownedIndividuals.map { ($0.id, $0) })
+        XCTAssertEqual(BagView.use(.revive, on: try XCTUnwrap(individuals["down"]), store: store),
+                       .healed(.revive, name: "down", share: BattleItem.reviveShare))
+        XCTAssertEqual(BagView.use(.potion, on: try XCTUnwrap(individuals["hurt"]), store: store),
+                       .healed(.potion, name: "hurt", share: 0.2 + BattleItem.potionHeal))
+        XCTAssertEqual(store.currentHealthShare, 0.4, "nobody touched the current Pokémon")
+        XCTAssertEqual(store.itemCount(.revive), 0, "each use spent one")
+        XCTAssertNil(BagView.use(.revive, on: try XCTUnwrap(individuals["down"]), store: store), "no Revive left: nothing to report")
+    }
+
+    /// A Mint on a graduate reports in the bag; on the current Pokémon Home plays its sparkle, so the bag says nothing.
+    func testAMintReportsInTheBagOnlyForSomeoneOtherThanTheCurrentPokemon() throws {
+        let store = try battleItemStore(language: .en, graduates: [("grad", 1)], items: [.mint: 2])
+        let individuals = Dictionary(uniqueKeysWithValues: store.ownedIndividuals.map { ($0.id, $0) })
+        guard case .natureChanged(let name, let nature)? = BagView.use(.mint, on: try XCTUnwrap(individuals["grad"]), store: store) else {
+            return XCTFail("a graduate's new nature shows in the bag")
+        }
+        XCTAssertEqual(name, "grad"); XCTAssertNotEqual(nature, .calm)
+        XCTAssertNil(store.mintFeedbackNature, "Home has nothing to play for a graduate")
+        XCTAssertNil(BagView.use(.mint, on: try XCTUnwrap(individuals["bag-pikachu"]), store: store))
+        XCTAssertNotNil(store.mintFeedbackNature, "the current Pokémon's goes to Home as before")
+        XCTAssertEqual(store.itemCount(.mint), 0)
+    }
+
+    /// The open list and the result card in the states they can be in: PNGs for the PR with `PTB_SNAPSHOT_SCREENSHOT_DIR`.
+    func testTheTargetListDrawsWhoCanTakeTheItem() throws {
+        func bag(_ store: CompanionStore, open: ItemKind? = nil) throws -> NSBitmapImageRep {
+            try Self.capture2x(hostView(BagView(store: store, nav: PopoverNavigation(), artwork: false, openPickerFor: open),
+                                        width: PopoverMetrics.contentWidth, height: 520))
+        }
+        for language in [AppLanguage.en, .ko] {
+            let store = try battleItemStore(language: language, graduates: [("Blastoise", 0), ("Venusaur", 0.6), ("Gengar", 0.3)],
+                                            items: [.potion: 2, .revive: 1, .mint: 1, .ivReroll: 1])
+            try store.holdOnlineBattle(key: .init(scope: .init(originHash: "origin", groupID: "group", trainerID: "trainer"), battleID: "battle"),
+                                       instanceID: "Gengar")
+            XCTAssertEqual(store.itemTargets(.potion).map(\.id), ["Venusaur", "Blastoise", "Gengar"],
+                           "who it works on, then who a reason keeps from it; full HP is not waiting for it")
+            let closed = try bag(store)
+            try save(closed, as: "bag-targets-closed-\(language.rawValue).png")
+            for kind in [ItemKind.potion, .revive, .mint, .ivReroll] {
+                let open = try bag(store, open: kind)
+                try save(open, as: "bag-targets-\(kind.rawValue)-open-\(language.rawValue).png")
+                XCTAssertNotEqual(Self.pixels(closed), Self.pixels(open), "\(kind): the list is drawn")
+            }
+        }
+        let l = L(.en), feedback: [(String, BattleItemFeedback)] = [
+            ("healed", .healed(.revive, name: "Blastoise", share: 0.5)),
+            ("nature", .natureChanged(name: "Venusaur", nature: .calm)),
+        ]
+        for (name, value) in feedback {
+            let card = BattleItemFeedbackCard(feedback: value, l: l, artwork: false, onClose: {})
+            try save(try Self.capture2x(hostView(card, width: PopoverMetrics.contentWidth, height: 70)), as: "bag-feedback-\(name).png")
+        }
+    }
+
+    /// The reported defect: the bag asked only about the current Pokémon, so a fainted graduate waited for a Revive it
+    /// could never get, and with an egg raised every battle item said "after hatching" whoever needed it.
+    func testTheBagOffersAnItemForAGraduateWhateverTheCurrentPokemonIs() throws {
+        let egg = try battleItemStore(language: .en, hatched: false, graduates: [("down", 0), ("hurt", 0.4)])
+        XCTAssertNil(BagView.battleItemReason(.revive, store: egg), "an egg does not stop a Revive for a fainted graduate")
+        XCTAssertNil(BagView.battleItemReason(.potion, store: egg))
+        XCTAssertNil(BagView.battleItemReason(.ivReroll, store: egg))
+        let full = try battleItemStore(language: .en, graduates: [("down", 0)])
+        XCTAssertNil(BagView.battleItemReason(.revive, store: full), "the current Pokémon is fine, the graduate is not")
+        XCTAssertEqual(BagView.battleItemReason(.potion, store: full), "Fainted · needs a Revive", "a Potion helps nobody here")
+        let idle = try battleItemStore(language: .en, graduates: [("fine", 1)])
+        idle.setInBattle("fine")
+        XCTAssertEqual(BagView.battleItemReason(.potion, store: idle), "HP is full", "the battle is not why nobody needs a Potion")
+        XCTAssertEqual(BagView.battleItemReason(.revive, store: idle), "Only for a fainted Pokémon")
     }
 
     /// The bag says why a battle item does not work on the current Pokémon from the store's own verdict
@@ -1338,14 +1423,14 @@ final class PracticeScreenRenderingTests: XCTestCase {
         }
     }
 
-    /// The bag lists the four battle items with their effect, and says why a healing item cannot be used on the
-    /// current Pokémon: a fresh save is at full HP, so Potions say so and the Revive waits for a faint. The reroll
+    /// The bag lists the four battle items with their effect, and says why a healing item cannot be used: a fresh save
+    /// with one Pokémon is at full HP, so Potions say so and the Revive waits for a faint. The reroll
     /// is ready to use. While a running battle with stakes holds the Pokémon, the healing items say so instead.
     func testBagShowsBattleItemsWithWhatTheyDoNow() async throws {
         for lang in [AppLanguage.en, .ko] {
             let store = try battleItemStore(language: lang)
             XCTAssertEqual(store.currentInstanceID, "bag-pikachu")
-            XCTAssertEqual(store.currentIVs?.speed, 18)
+            XCTAssertEqual(store.state.active?.profile?.ivs.speed, 18)
             XCTAssertEqual(store.currentHealthShare, 1, "a fresh save starts at full HP")
             // Artwork off: the item icons stay emoji, so the test never downloads a sprite.
             let host = hostView(BagView(store: store, nav: PopoverNavigation(), artwork: false),

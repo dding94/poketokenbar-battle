@@ -68,6 +68,9 @@ struct PokemonIVs: Codable, Sendable, Equatable {
     var specialDefense: Int
     var speed: Int
 
+    /// All six added up, 186 at most: how a list of individuals compares them at a glance.
+    var total: Int { hp + attack + defense + specialAttack + specialDefense + speed }
+
     subscript(stat: String) -> Int {
         switch stat {
         case "hp": return hp

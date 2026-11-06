@@ -31,8 +31,6 @@ extension HealingItemVerdict {
 extension CompanionStore: PracticeItemBag {
     /// The current Pokémon's individual; nil for an egg or before its profile exists.
     var currentInstanceID: String? { state.active?.profile?.instanceID }
-    /// The current Pokémon's six IVs, for the reroll's confirm; nil without a profile.
-    var currentIVs: PokemonIVs? { state.active?.profile?.ivs }
     /// The current Pokémon's HP share between battles (1 = full, 0 = fainted); nil without one.
     var currentHealthShare: Double? { currentInstanceID.map { healthShare(of: $0) } }
 }
@@ -137,10 +135,12 @@ struct IVGrid: View {
     }
 }
 
-/// What the last battle item used in the bag did: the HP it left the current Pokémon with, or the IVs a reroll drew.
+/// What the last item used from the bag's target list did, and to whom: the HP it left, the IVs a reroll drew, or the
+/// nature a Mint gave someone other than the current Pokémon (the current one shows that on Home).
 enum BattleItemFeedback: Equatable {
-    case healed(ItemKind, share: Double)
-    case rerolled(old: PokemonIVs, new: PokemonIVs)
+    case healed(ItemKind, name: String, share: Double)
+    case rerolled(name: String, old: PokemonIVs, new: PokemonIVs)
+    case natureChanged(name: String, nature: PokemonNature)
 }
 
 /// The bag's top card for `BattleItemFeedback` until it is closed. It sits outside the item cards because using the
@@ -154,25 +154,121 @@ struct BattleItemFeedbackCard: View {
 
     var body: some View {
         switch feedback {
-        case .healed(let kind, let share):
-            HStack(spacing: 8) {
-                ItemIconView(kind: kind, size: 22, artwork: artwork)
-                Text(l.itemName(kind)).font(.callout.weight(.semibold)).lineLimit(1)
-                Image(systemName: "arrow.right").font(.caption2.weight(.bold)).foregroundStyle(.secondary)
-                BattleHealthLine(share: share, l: l)
-                Spacer(minLength: 4)
-                Button(l.close, action: onClose).buttonStyle(.borderless).controlSize(.small)
+        case .healed(let kind, let name, let share):
+            row(kind, name: name) { BattleHealthLine(share: share, l: l) }
+        case .rerolled(let name, let old, let new):
+            IVRerollPanel(stage: .result(old: old, new: new), l: l, targetName: name, onReroll: {}, onCancel: {}, onDone: onClose)
+        case .natureChanged(let name, let nature):
+            row(.mint, name: name) {
+                Text(nature.name(l.lang)).font(.caption.weight(.semibold)).foregroundStyle(.secondary).lineLimit(1)
             }
-            .padding(10)
-            .background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
-        case .rerolled(let old, let new):
-            IVRerollPanel(stage: .result(old: old, new: new), l: l, onReroll: {}, onCancel: {}, onDone: onClose)
+        }
+    }
+
+    private func row(_ kind: ItemKind, name: String, @ViewBuilder result: () -> some View) -> some View {
+        HStack(spacing: 8) {
+            ItemIconView(kind: kind, size: 22, artwork: artwork)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(name).font(.callout.weight(.semibold)).lineLimit(1)
+                HStack(spacing: 6) {
+                    Text(l.itemName(kind)).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                    Image(systemName: "arrow.right").font(.caption2.weight(.bold)).foregroundStyle(.secondary)
+                    result()
+                }
+            }
+            Spacer(minLength: 4)
+            Button(l.close, action: onClose).buttonStyle(.borderless).controlSize(.small)
+        }
+        .padding(10)
+        .background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+    }
+}
+
+/// The owned individuals an item can go to: who it works on, each with a Use button, and below them who a reason keeps
+/// from it. The list scrolls past `visibleRows`, and its rows are lazy so a long dex loads only the sprites on screen.
+@MainActor
+struct ItemTargetPicker: View {
+    let kind: ItemKind
+    let targets: [ItemTarget]
+    let l: L
+    var artwork = true
+    let onUse: (ItemTarget) -> Void
+    let onCancel: () -> Void
+
+    static let rowHeight: CGFloat = 42
+    static let rowSpacing: CGFloat = 4
+    static let visibleRows = 5
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(l.itemChooseTarget).font(.caption.weight(.semibold)).foregroundStyle(.secondary).lineLimit(1)
+                Spacer(minLength: 4)
+                Button(l.cancel, action: onCancel).buttonStyle(.borderless).controlSize(.small)
+            }
+            if targets.count > Self.visibleRows {
+                ScrollView {
+                    LazyVStack(spacing: Self.rowSpacing) { rows }.reservesScrollerLane()
+                }
+                .frame(height: CGFloat(Self.visibleRows) * (Self.rowHeight + Self.rowSpacing) - Self.rowSpacing)
+            } else {
+                VStack(spacing: Self.rowSpacing) { rows }
+            }
+        }
+    }
+
+    private var rows: some View {
+        ForEach(targets) { target in
+            HStack(spacing: 8) {
+                icon(target.individual)
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 4) {
+                        PracticeNameLevel(name: target.individual.name, level: target.individual.level, font: .caption.weight(.semibold))
+                        if target.individual.isCurrent {
+                            Text(l.dexRaising).font(.caption2).foregroundStyle(.secondary).lineLimit(1).fixedSize()
+                        }
+                    }
+                    detail(target)
+                }
+                Spacer(minLength: 4)
+                if target.verdict == .usable {
+                    Button(l.use) { onUse(target) }
+                        .buttonStyle(.bordered).controlSize(.small)
+                } else if let reason = target.verdict.reason(l) {
+                    Text(reason).font(.caption2.weight(.medium)).foregroundStyle(.secondary)
+                        .multilineTextAlignment(.trailing).lineLimit(2)
+                }
+            }
+            .padding(.horizontal, 6)
+            .frame(height: Self.rowHeight)
+            .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
+        }
+    }
+
+    @ViewBuilder
+    private func icon(_ individual: OwnedIndividual) -> some View {
+        if artwork {
+            SpriteView(speciesID: individual.speciesID, size: 28, shiny: individual.shiny, form: individual.form)
+                .frame(width: 28, height: 28)
+        }
+    }
+
+    /// What this item is about for the row: HP for a healing item, the nature for a Mint, the IVs for a reroll.
+    @ViewBuilder
+    private func detail(_ target: ItemTarget) -> some View {
+        switch kind {
+        case .mint:
+            Text(target.individual.nature?.name(l.lang) ?? "—").font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+        case .ivReroll:
+            Text(l.ivTotalLine(target.individual.ivs.total)).font(.caption2).foregroundStyle(.secondary).monospacedDigit().lineLimit(1)
+        default:
+            BattleHealthLine(share: target.healthShare, l: l)
         }
     }
 }
 
 /// The IV reroll's two steps in the bag: the current six with a warning that they may drop, then the new six with
-/// how each moved. The bag owns the step and calls `useIVReroll()`.
+/// how each moved. The bag owns the step and calls `useIVReroll(on:)`.
 @MainActor
 struct IVRerollPanel: View {
     enum Stage: Equatable {
@@ -182,12 +278,17 @@ struct IVRerollPanel: View {
 
     let stage: Stage
     let l: L
+    /// Who the reroll is for, once it can be someone other than the current Pokémon; nil leaves the line out.
+    var targetName: String?
     let onReroll: () -> Void
     let onCancel: () -> Void
     let onDone: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
+            if let targetName {
+                Text(targetName).font(.callout.weight(.semibold)).lineLimit(1)
+            }
             switch stage {
             case .confirm(let current):
                 Text(l.ivRerollCurrent).font(.caption.weight(.semibold)).foregroundStyle(.secondary)

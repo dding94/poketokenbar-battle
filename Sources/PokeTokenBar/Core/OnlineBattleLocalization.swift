@@ -56,7 +56,7 @@ extension L {
     var onlineOwnEntry: String { online("출전 포켓몬", "Your entry") }
     var onlineNoEntries: String { online("출전할 수 있는 포켓몬이 없어요.", "No eligible Pokémon available.") }
     var onlineHeld: String { online("다른 정식전에 출전 중", "Reserved for another battle") }
-    var onlineFainted: String { online("기절 · 회복이 필요해요", "Fainted · healing required") }
+    var onlineFainted: String { online("기절 · 가방에서 회복할 수 있어요", "Fainted · heal it from the Bag") }
     var onlineManual: String { online("직접 조작", "Manual") }
     var onlineAuto: String { online("자동", "Auto") }
     var onlineMode: String { online("배틀 방식", "Battle mode") }

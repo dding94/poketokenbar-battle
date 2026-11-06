@@ -1462,6 +1462,15 @@ struct L {
     func useOnCurrent(_ name: String) -> String {
         t("\(name)에게 사용할까요?", "Use on \(name)?", "\(name) に使いますか？", "¿Usar en \(name)?", "Utiliser sur \(name) ?", "Usar em \(name)?", "Bei \(name) verwenden?", "Применить к \(name)?")
     }
+    /// 가방 아이템의 대상 고르기 — 현재 포켓몬이 아니라 보유 포켓몬 누구에게나 쓴다.
+    var itemChooseTarget: String { t("어느 포켓몬에게 쓸까요?", "Use on which Pokémon?", "どのポケモンに使いますか？", "¿En qué Pokémon usarlo?", "Sur quel Pokémon l'utiliser ?", "Usar em qual Pokémon?", "Bei welchem Pokémon verwenden?", "К какому покемону применить?") }
+    func itemTargetCount(_ count: Int) -> String {
+        t("쓸 수 있는 포켓몬 \(count)마리", "Usable on \(count) Pokémon", "\(count)匹に使えます", "Se puede usar en \(count) Pokémon", "Utilisable sur \(count) Pokémon", "Pode usar em \(count) Pokémon", "Für \(count) Pokémon verwendbar", "Подходит покемонов: \(count)")
+    }
+    /// 재추첨 대상 줄의 개체값 합계(6개 × 31 = 186).
+    func ivTotalLine(_ total: Int) -> String {
+        t("개체값 합 \(total)/186", "IV total \(total)/186", "個体値合計 \(total)/186", "IV total \(total)/186", "Total IV \(total)/186", "IVs totais \(total)/186", "IV-Summe \(total)/186", "Сумма IV \(total)/186")
+    }
     var useAfterHatch: String { t("부화 후 사용할 수 있어요", "Usable after hatching", "孵化後に使えます", "Se puede usar después de eclosionar", "Utilisable après l'éclosion", "Dá para usar depois que chocar", "Nach dem Schlüpfen verwendbar", "Можно применить после вылупления") }
     var useNeedsPokemon: String { t("사용할 포켓몬이 없어요", "No Pokémon to use it on", "使えるポケモンがいません", "No hay ningún Pokémon en quien usarlo", "Aucun Pokémon sur qui l'utiliser", "Nenhum Pokémon para usar o item", "Kein Pokémon, bei dem du es verwenden kannst", "Не к кому применить") }
 
@@ -1517,13 +1526,13 @@ struct L {
                      "Gibt deinem aktuellen Pokémon \(xp) EP.",
                      "Увеличивает опыт покемона на \(xp).")
         case .mint:
-            return t("현재 포켓몬의 성격을 랜덤으로 바꿔줘요.",
+            return t("고른 포켓몬의 성격을 랜덤으로 바꿔줘요.",
                      "Randomly changes your Pokémon's nature.",
                      "ポケモンのせいかくをランダムに変えます。",
                      "Cambia aleatoriamente la naturaleza de tu Pokémon.",
                      "Change aléatoirement la nature de ton Pokémon.",
                      "Muda a natureza do seu Pokémon aleatoriamente.",
-                     "Ändert das Wesen deines aktuellen Pokémon zufällig.",
+                     "Ändert das Wesen deines Pokémon zufällig.",
                      "Случайно меняет характер покемона.")
         case .shinyCharm:
             return t("보유하면 이로치 포켓몬이 태어날 확률이 올라가요.",
@@ -1564,7 +1573,7 @@ struct L {
                      "Belebt ein besiegtes Pokémon mit \(share) seiner KP wieder.",
                      "Возвращает покемона без сознания с \(share) ОЗ.")
         case .ivReroll:
-            return t("현재 포켓몬의 개체값 6개를 모두 다시 뽑아요. 더 낮아질 수도 있어요.",
+            return t("고른 포켓몬의 개체값 6개를 모두 다시 뽑아요. 더 낮아질 수도 있어요.",
                      "Re-rolls all six IVs of your Pokémon. They may get lower.",
                      "ポケモンの個体値6つをすべて引き直します。下がることもあります。",
                      "Vuelve a sortear los seis IV de tu Pokémon. Pueden bajar.",
