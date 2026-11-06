@@ -29,12 +29,12 @@ private actor UnreachableLineProvider: PokeProviding, PokemonDetailProviding {
 final class ActiveNameWithoutLineTests: XCTestCase {
     private var folder: URL!
 
-    override func setUpWithError() throws {
+    override func setUp() async throws {
         folder = FileManager.default.temporaryDirectory.appendingPathComponent("active-name-\(UUID().uuidString)",
                                                                                  isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
     }
-    override func tearDownWithError() throws { try FileManager.default.removeItem(at: folder) }
+    override func tearDown() async throws { try FileManager.default.removeItem(at: folder) }
 
     private func saved(speciesID: Int = 25, form: PokemonForm? = nil, active: Bool = true) -> CompanionState {
         var state = CompanionState()
