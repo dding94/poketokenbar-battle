@@ -43,6 +43,8 @@ if name=='git':
     if args[:2]==['remote','get-url']: print(os.environ.get('ORIGIN','https://github.com/dding94/poketokenbar-battle.git'))
     elif args[:1]==['describe']: print('v2.5.6')
     elif args[:1]==['diff']: print('Sources/PokeTokenBar/UI/New.swift' if (os.environ.get('DOC_FAIL') or os.environ.get('DOC_WARNING')) and 'Sources/PokeTokenBar/UI/' in args else '')
+    elif args[:1]==['var']: print(os.environ.get('IDENT_NAME','fork-owner')+' <'+os.environ.get('IDENT_EMAIL','fork-owner@example.test')+'> 1700000000 +0900')
+    elif args[:1]==['log'] and '--format=%an%x00%ae' in args: print('fork-owner\0fork-owner@example.test')
     elif args[:1]==['log']: print('feat: battle screen' if os.environ.get('DOC_FAIL') else '')
     elif args[:1]==['rev-parse']: print(os.environ.get('BRANCH','feat/release-fixture') if '--abbrev-ref' in args else '1'*40)
     elif args[:1]==['status']: print(' M source.swift' if os.environ.get('DIRTY') else '')
@@ -356,6 +358,17 @@ bash scripts/package-battle-engines.sh "build/PokeTokenBattle.app/Contents/Resou
         self.assertIn('Fork tap cask is missing',result.stderr)
         self.assertNotIn('build:',self.calls())
         self.assertNotRegex(self.calls(),r'(?m)^gh .* -X |^git (add|commit|push|tag) ')
+
+    def test_publication_refuses_an_identity_new_to_the_fork_before_any_change(self):
+        self.fake_build()
+        version_file=(self.repo/'scripts/build-app.sh').read_text()
+        result=self.run_release('3.0.0',PTB_FORK_RELEASE_READY='1',BRANCH='main',ALLOW_PUBLICATION_STUB='1',
+                                IDENT_NAME='Machine Global Name',IDENT_EMAIL='machine-global@corp.example')
+        self.assertNotEqual(result.returncode,0)
+        self.assertIn('Release commit identity',result.stderr)
+        self.assertNotIn('machine-global@corp.example',result.stdout+result.stderr)
+        self.assertNotRegex(self.calls(),r'(?m)^(security|codesign|gh) |^git (add|commit|push|tag) ')
+        self.assertEqual(version_file,(self.repo/'scripts/build-app.sh').read_text())
 
     def test_cask_rejects_upstream_url_sha_minimum_or_app(self):
         helper=self.repo/'scripts/release-validate.py'
