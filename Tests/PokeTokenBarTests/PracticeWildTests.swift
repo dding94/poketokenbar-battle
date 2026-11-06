@@ -416,8 +416,8 @@ final class PracticeWildStoreOracleTests: XCTestCase {
 @MainActor
 final class PracticeWildGeneratorTests: XCTestCase {
     private func engine() throws -> BattleEngine { try BattleEngine(url: engineURL) }
-    private func generator(_ stub: WildStub) throws -> PracticeWildGenerator {
-        PracticeWildGenerator(source: PracticeWildSource(provider: stub, details: stub), engine: try engine())
+    private func generator(_ stub: WildStub, language: AppLanguage = .ko) throws -> PracticeWildGenerator {
+        PracticeWildGenerator(source: PracticeWildSource(provider: stub, details: stub), engine: try engine(), language: language)
     }
     private func set(_ candidate: PracticeCandidate) throws -> BattleSet { try XCTUnwrap(candidate.snapshot).set }
     /// Path length of the stub line that contains `speciesID`, along the path that reaches it.
@@ -529,10 +529,21 @@ final class PracticeWildGeneratorTests: XCTestCase {
         }
     }
 
-    func testNameFallsBackToTheSnapshotSpeciesWithoutAKoreanName() async throws {
-        let stub = WildStub(lines: [1: evoLine(tree(1, [tree(2, [tree(3)])]), .common)], captureRates: [1: 45])
-        let made = try await generator(stub).make(count: 1, around: 8, seed: 3)
-        let candidate = try XCTUnwrap(made.first)
+    func testNameFollowsTheLanguageWithEnglishThenTheSnapshotSpeciesAsFallbacks() async throws {
+        let line = evoLine(tree(1, [tree(2, [tree(3)])]), .common, ko: [1: "이상해씨", 2: "이상해풀", 3: "이상해꽃"])
+        let stub = WildStub(lines: [1: line], captureRates: [1: 45])
+        let korean = try await generator(stub, language: .ko).make(count: 1, around: 8, seed: 3)
+        let species = try set(try XCTUnwrap(korean.first)).speciesNum
+        XCTAssertEqual(korean.first?.name, line.names[species]?["ko"])
+        let english = try await generator(stub, language: .en).make(count: 1, around: 8, seed: 3)
+        XCTAssertEqual(english.first?.name, "EN\(species)")
+        // No line name in the language: English, as everywhere `resolveName` is used.
+        let french = try await generator(stub, language: .fr).make(count: 1, around: 8, seed: 3)
+        XCTAssertEqual(french.first?.name, "EN\(species)")
+        // No stored name at all: the engine's species name.
+        let bare = WildStub(lines: [1: EvoLine(baseID: 1, tree: line.tree, rarity: .common, names: [:])], captureRates: [1: 45])
+        let unnamed = try await generator(bare, language: .ko).make(count: 1, around: 8, seed: 3)
+        let candidate = try XCTUnwrap(unnamed.first)
         XCTAssertEqual(candidate.name, candidate.snapshot?.publicInfo.species)
         XCTAssertFalse(candidate.name.isEmpty)
     }
@@ -620,7 +631,7 @@ final class PracticeWildGeneratorTests: XCTestCase {
     }
 
     private func timed(_ stub: WildStub, budget: TimeInterval, clock: FakeClock) throws -> PracticeWildGenerator {
-        PracticeWildGenerator(source: PracticeWildSource(provider: stub, details: stub), engine: try engine(),
+        PracticeWildGenerator(source: PracticeWildSource(provider: stub, details: stub), engine: try engine(), language: .ko,
                               clock: { clock.now }, budget: budget)
     }
 
@@ -730,6 +741,46 @@ final class PracticeWildSessionTests: XCTestCase {
             guard case .wild = candidate.origin else { XCTFail("origin"); continue }
         }
         XCTAssertEqual(session.wildCandidates.map(\.id), ["wild-11-0", "wild-11-1", "wild-11-2"])
+    }
+
+    /// Wild and today's opponents are named from the line in the app language (the line stores `en` and `ko`), and a
+    /// language change drops the ones already named so the selection screen searches again. Today's opponent comes
+    /// back the same: its seed is the day's.
+    func testWildAndDailyNamesFollowTheAppLanguage() async throws {
+        let session = makeSession(WildStub.standard())
+        var english = state(); english.language = .en
+        session.prepare(state: english, activeName: nil)
+        let searched = await search(session)
+        XCTAssertTrue(searched)
+        await session.dailyTask?.value
+        let daily = try XCTUnwrap(session.dailyCandidate)
+        for candidate in session.wildCandidates + [daily] {
+            let species = try XCTUnwrap(candidate.snapshot).set.speciesNum
+            XCTAssertEqual(candidate.name, "EN\(species)")
+        }
+        session.opponentID = session.wildCandidates.first?.id
+
+        var korean = english; korean.language = .ko
+        session.prepare(state: korean, activeName: nil)
+        XCTAssertTrue(session.wildCandidates.isEmpty); XCTAssertEqual(session.wildState, .idle)
+        XCTAssertNil(session.dailyCandidate)
+        XCTAssertTrue(session.roster?.eligible.contains { $0.id == session.opponentID } == true,
+                      "a dropped wild opponent gives the selection back to an own individual")
+
+        let again = await search(session)
+        XCTAssertTrue(again)
+        await session.dailyTask?.value
+        let line = WildStub.standard().lines.values
+        for candidate in session.wildCandidates {
+            let species = try XCTUnwrap(candidate.snapshot).set.speciesNum
+            let names = try XCTUnwrap(line.first { ids($0.tree).contains(species) }).names[species]
+            XCTAssertEqual(candidate.name, names?["ko"] ?? "EN\(species)")
+        }
+        XCTAssertEqual(session.dailyCandidate?.id, daily.id)
+        XCTAssertEqual(session.dailyCandidate?.snapshot?.set.speciesNum, daily.snapshot?.set.speciesNum)
+
+        session.prepare(state: korean, activeName: nil)
+        XCTAssertFalse(session.wildCandidates.isEmpty, "the same language keeps the batch")
     }
 
     func testSearchNeedsAPreparedEngineAndAPlayer() async throws {
@@ -1051,7 +1102,7 @@ final class PracticeDailySessionTests: XCTestCase {
         XCTAssertFalse(session.wildCandidates.contains { $0.id == daily.id })
         // The wild generator itself: one candidate around the player's level, on the day's seed.
         let generator = PracticeWildGenerator(source: PracticeWildSource(provider: stub, details: stub),
-                                              engine: try BattleEngine(url: engineURL))
+                                              engine: try BattleEngine(url: engineURL), language: CompanionState().language)
         let made = try await generator.make(count: 1, around: 50, seed: PracticeDaily.seed(dayKey: Self.day1))
         let expected = try XCTUnwrap(made.first)
         XCTAssertEqual(daily.snapshot, expected.snapshot)
@@ -1562,7 +1613,7 @@ final class PracticeTemperamentWildTests: XCTestCase {
         let stub = SplashStub(speciesID: 129)
         // The first seed whose wild Magikarp has an attack-raising nature (8 of 25 natures).
         let generator = PracticeWildGenerator(source: PracticeWildSource(provider: stub, details: stub),
-                                              engine: try BattleEngine(url: engineURL))
+                                              engine: try BattleEngine(url: engineURL), language: .ko)
         var found: UInt64?
         for seed in UInt64(1)...64 {
             let made = try await generator.make(count: 1, around: 50, seed: seed)

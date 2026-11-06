@@ -264,7 +264,7 @@ jobs:
         working-directory: engine
         run: npm test && npm run corpus && npm run compatibility
 
-  # The battle server (PR 04; contract in docs/BATTLE_PLAN.md, Appendix B), a Node project of its own.
+  # The battle server (PR 04), a Node project of its own.
   server:
     needs: changes
     if: ${{ needs.changes.outputs.server == 'true' || (github.event_name == 'workflow_dispatch' && inputs.scope == 'all') }}

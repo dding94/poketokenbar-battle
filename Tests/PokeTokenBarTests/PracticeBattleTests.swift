@@ -1,6 +1,13 @@
 import XCTest
 @testable import PokeTokenBar
 
+/// The store's PokéAPI for a save that only has graduates: nothing to load.
+private struct RosterNoLineProvider: PokeProviding {
+    func line(baseSpeciesID: Int) async throws -> EvoLine { throw URLError(.notConnectedToInternet) }
+    func baseSpeciesIndex() async throws -> [BaseSpecies] { [] }
+    func baseSpecies(id: Int) async throws -> BaseSpecies? { nil }
+}
+
 @MainActor
 final class PracticeBattleTests: XCTestCase {
     private func engine() throws -> BattleEngine {
@@ -41,6 +48,98 @@ final class PracticeBattleTests: XCTestCase {
         XCTAssertTrue(roster.candidates.first?.blockedReason?.contains("특성") == true)
         XCTAssertTrue(roster.candidates.last?.blockedReason?.contains("기술") == true)
         XCTAssertEqual(try BattleJSON.encode(state), before)
+    }
+    /// Names no engine species uses, so the engine's fallback can never pass as the stored name.
+    private static let storedNames = ["en": "English Name", "ko": "한국어 이름", "ja-Hrkt": "ニホンゴ"]
+    private func rosterState(_ language: AppLanguage, names: [Int: [String: String]]?, species: Int = 25,
+                             form: PokemonForm? = nil, profile entryProfile: PokemonProfile? = nil) -> CompanionState {
+        var state = CompanionState()
+        state.language = language
+        state.dex = [DexEntry(baseID: species, finalID: species, chainOrder: [species], rarity: .common, caughtAt: nil,
+                              nature: .hardy, profile: entryProfile ?? profile("graduate"), names: names, form: form)]
+        return state
+    }
+    func testRosterNamesAGraduateInTheAppLanguage() throws {
+        let engine = try engine()
+        let expected: [(AppLanguage, String)] = [(.en, "English Name"), (.ko, "한국어 이름"), (.ja, "ニホンゴ"),
+                                                 (.fr, "English Name")]   // no French name stored: `resolveName` falls back to English
+        for (language, name) in expected {
+            let roster = PracticeRoster(state: rosterState(language, names: [25: Self.storedNames]), engine: engine)
+            XCTAssertEqual(roster.eligible.map(\.name), [name], "\(language)")
+        }
+    }
+    /// Nothing the language can read: the engine's species name, as before. A name stored only in another language is
+    /// not shown in its place (the Korean name on an English app is this defect).
+    func testRosterUsesTheEngineSpeciesWhenNoStoredNameResolves() throws {
+        let engine = try engine()
+        for names in [nil, [25: ["ko": "한국어 이름"]]] as [[Int: [String: String]]?] {
+            let roster = PracticeRoster(state: rosterState(.en, names: names), engine: engine)
+            XCTAssertEqual(roster.eligible.map(\.name), ["Pikachu"])
+        }
+        XCTAssertEqual(PracticeRoster(state: rosterState(.ko, names: [25: ["ko": "한국어 이름"]]), engine: engine).eligible.map(\.name),
+                       ["한국어 이름"])
+    }
+    /// The final species has no name the language can read: the closest earlier stage that has one, as in the dex.
+    func testRosterFallsBackToTheClosestEarlierStageName() throws {
+        let engine = try engine()
+        func name(_ names: [Int: [String: String]]) -> String? {
+            var state = rosterState(.en, names: names)
+            state.dex[0].chainOrder = [172, 25, 26]
+            state.dex[0].finalID = 26
+            return PracticeRoster(state: state, engine: engine).eligible.first?.name
+        }
+        XCTAssertEqual(name([172: ["en": "First"], 25: ["en": "Middle"], 26: ["en": "Final"]]), "Final")
+        XCTAssertEqual(name([172: ["en": "First"], 25: ["en": "Middle"]]), "Middle")
+        XCTAssertEqual(name([172: ["en": "First"], 25: ["ko": "가운데"], 26: ["ko": "마지막"]]), "First")
+        XCTAssertEqual(name([172: ["ko": "처음"], 25: ["ko": "가운데"], 26: ["ko": "마지막"]]), "Raichu")
+    }
+    /// A graduate that cannot fight still gets a row: its stored name in the app language, else the dex's "#id",
+    /// never a Korean placeholder.
+    func testBlockedGraduateRowFollowsTheAppLanguage() throws {
+        let engine = try engine()
+        var noAbility = profile("blocked"); noAbility.abilityName = nil
+        let named = PracticeRoster(state: rosterState(.en, names: [25: Self.storedNames], profile: noAbility), engine: engine)
+        XCTAssertEqual(named.candidates.map(\.name), ["English Name"]); XCTAssertTrue(named.eligible.isEmpty)
+        let unnamed = PracticeRoster(state: rosterState(.en, names: nil, profile: noAbility), engine: engine)
+        XCTAssertEqual(unnamed.candidates.map(\.name), ["#25"]); XCTAssertTrue(unnamed.eligible.isEmpty)
+    }
+    /// The bag and the battle lists show the same individual under the same name, form tag included.
+    func testRosterNameMatchesTheBagRow() throws {
+        let engine = try engine()
+        let unownLetter = PokemonForm.forms(speciesID: PokemonForm.unownSpeciesID)[1]
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        for language in [AppLanguage.en, .ko] {
+            let state = rosterState(language, names: [201: Self.storedNames], species: PokemonForm.unownSpeciesID,
+                                    form: unownLetter)
+            let url = folder.appendingPathComponent("\(language.rawValue).json")
+            try JSONEncoder().encode(state).write(to: url)
+            let store = CompanionStore(provider: RosterNoLineProvider(), clock: { Date(timeIntervalSince1970: 0) }, fileURL: url,
+                                       dittoDisguiseRollingEnabled: false)
+            let roster = PracticeRoster(state: store.state, engine: engine)
+            XCTAssertEqual(roster.candidates.map(\.name), store.ownedIndividuals.map(\.name), "\(language)")
+            XCTAssertEqual(roster.candidates.first?.name, "\(language == .en ? "English Name" : "한국어 이름") [\(unownLetter.symbol)]")
+        }
+    }
+    /// The name is display only: what goes to the engine and to the online server is the same in every language, so
+    /// two players with different app languages still compute the same battle.
+    func testAppLanguageNeverReachesTheSnapshotOrTheBattleResult() throws {
+        let engine = try engine()
+        let opponent = try candidate("foe", species: 129, moves: ["splash"], engine: engine)
+        func outcome(_ language: AppLanguage) throws -> (payload: Data, logHash: String) {
+            let entry = try XCTUnwrap(PracticeRoster(state: rosterState(language, names: [25: Self.storedNames]), engine: engine).eligible.first)
+            let snapshot = try XCTUnwrap(entry.snapshot)
+            let battle = PracticeBattle(engine: engine)
+            battle.start(player: entry, opponent: opponent, mode: .manual, seed: [1, 2, 3, 4])
+            for _ in 0..<50 where battle.phase == .running { battle.choose(slot: 1) }
+            XCTAssertEqual(battle.phase, .finished)
+            return (try BattleJSON.encoder().encode(OnlineBattleSnapshot(snapshot: snapshot, hp: 1)), try XCTUnwrap(battle.result).logHash)
+        }
+        let english = try outcome(.en), korean = try outcome(.ko)
+        XCTAssertEqual(english.payload, korean.payload)
+        XCTAssertEqual(english.logHash, korean.logHash)
+        XCTAssertNil(String(data: english.payload, encoding: .utf8)?.range(of: "English Name"))
     }
     /// Practice turns are 15 s (03B-5); the 30 s proposal for online battles is separate.
     func testManualTimeoutActsOnceAtFifteenSeconds() throws {

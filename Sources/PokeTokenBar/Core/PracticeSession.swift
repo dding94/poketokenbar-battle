@@ -57,6 +57,8 @@ final class PracticeSession {
     /// How many of `battle.events` the playback has been given.
     private var stagedEvents = 0
     private let wildSource: PracticeWildSource
+    /// The save's language at the last `prepare`, which names the wild and today's opponents.
+    private var language = AppLanguage.systemDefault
     private let wildSeed: () -> UInt64
     /// Each battle's engine seed, drawn once per `start()`.
     private let battleSeed: () -> [UInt32]
@@ -143,7 +145,7 @@ final class PracticeSession {
         wildGeneration &+= 1
         let generation = wildGeneration
         wildState = .searching
-        let generator = PracticeWildGenerator(source: wildSource, engine: engine, clock: clock)
+        let generator = PracticeWildGenerator(source: wildSource, engine: engine, language: language, clock: clock)
         let seed = wildSeed()
         wildTask = Task { [weak self] in
             let result: Result<[PracticeCandidate], Error>
@@ -222,7 +224,7 @@ final class PracticeSession {
         let generation = dailyGeneration
         dailySearchDay = day
         dailyState = .searching
-        let generator = PracticeWildGenerator(source: wildSource, engine: engine, clock: clock)
+        let generator = PracticeWildGenerator(source: wildSource, engine: engine, language: language, clock: clock)
         let seed = PracticeDaily.seed(dayKey: day)
         dailyTask = Task { [weak self] in
             let result: Result<[PracticeCandidate], Error>
@@ -329,6 +331,9 @@ final class PracticeSession {
         let roster = PracticeRoster(state: state, activeName: activeName, engine: engine)
         self.roster = roster
         loadHints(engine: engine, roster: roster)
+        // Wild and today's opponents hold a name in the language they were made in: another language drops them and
+        // the selection screen searches again, as after another player. Today's seed brings the same one back.
+        if state.language != language { language = state.language; resetWild(); dropDaily() }
         let ids = roster.eligible.map(\.id)
         let player = playerID.flatMap { ids.contains($0) ? $0 : nil } ?? ids.first
         // A wild opponent, today's included, stays selected only while the player it was matched to does.

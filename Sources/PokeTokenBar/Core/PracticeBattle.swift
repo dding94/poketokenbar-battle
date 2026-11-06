@@ -13,23 +13,27 @@ struct PracticeRoster {
     var eligible: [PracticeCandidate] { candidates.filter { $0.snapshot != nil } }
     @MainActor init(state: CompanionState, activeName: String? = nil, engine: BattleEngine) {
         var rows: [PracticeCandidate] = []
-        func append(_ fallback: String, _ name: String?, _ build: () throws -> BattleSnapshot) {
+        func append(_ fallback: String, speciesID: Int, _ name: String?, _ build: () throws -> BattleSnapshot) {
             do {
                 let snapshot = try build()
                 rows.append(PracticeCandidate(id: snapshot.instanceID, name: name ?? snapshot.publicInfo.species,
                                               snapshot: snapshot, blockedReason: nil))
             } catch {
-                rows.append(PracticeCandidate(id: fallback, name: name ?? "개체", snapshot: nil,
+                rows.append(PracticeCandidate(id: fallback, name: name ?? "#\(speciesID)", snapshot: nil,
                                               blockedReason: PracticeText.failure(error)))
             }
         }
         if let active = state.active {
-            append("blocked-active", activeName) { try BattleSnapshot.from(active, using: engine) }
+            append("blocked-active", speciesID: active.currentID, activeName) { try BattleSnapshot.from(active, using: engine) }
         }
         for (index, entry) in state.dex.filter({ !$0.isReleased }).enumerated() {
-            append("blocked-\(index)", entry.names?[entry.finalID]?["ko"]) {
-                try BattleSnapshot.make(speciesID: entry.finalID,
-                                        form: PokemonForm.resolved(speciesID: entry.finalID, form: entry.form),
+            let form = PokemonForm.resolved(speciesID: entry.finalID, form: entry.form)
+            // Display only: the snapshot carries no name, so the language never reaches the engine or the server.
+            let name = entry.localizedName(state.language).map {
+                PokemonForm.displayName($0, speciesID: entry.finalID, form: form, language: state.language)
+            }
+            append("blocked-\(index)", speciesID: entry.finalID, name) {
+                try BattleSnapshot.make(speciesID: entry.finalID, form: form,
                                         shiny: entry.isShiny, nature: entry.nature, profile: entry.profile, using: engine)
             }
         }
