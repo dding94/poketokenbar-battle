@@ -37,7 +37,7 @@ Keep English `New / Fixed / Other / Contributors` sections and `Install / Upgrad
 
 If no external contributor exists, use exactly `No external contributors in this release.` Otherwise list verified `@handles` and thank them. `PTB_CONTRIBUTORS_FILE` is mandatory. The checker catches missing handles; completeness still requires the PR/commit review. Release commits have no automatic coauthor. An explicitly verified `PTB_COAUTHORS_FILE` may contain `Name <email>` lines for actual coauthors only.
 
-Update README.md/ko/ja, applicable fork screenshots, and any confirmed fork landing page consistently. New UI features need new assets; committed staleness/coverage checks do not replace visual review. Do not publish or create a landing page/tap merely to make a gate pass. Original license/author attribution and unofficial fan-project notices remain required.
+Update README.md/ja, applicable fork screenshots, and any confirmed fork landing page consistently. New UI features need new assets; committed staleness/coverage checks do not replace visual review. Do not publish or create a landing page/tap merely to make a gate pass. Original license/author attribution and unofficial fan-project notices remain required.
 
 ## Publication boundary and recovery
 

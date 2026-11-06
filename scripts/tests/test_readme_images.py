@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-READMES = ["README.md", "README.ko.md", "README.ja.md", "README.upstream.md"]
+READMES = ["README.md", "README.ja.md", "README.upstream.md"]
 EMBED = re.compile(r'<img[^>]*\ssrc="([^"]+)"|!\[[^\]]*\]\(([^)\s]+)')
 
 
