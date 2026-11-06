@@ -53,6 +53,30 @@ def server_url(value):
     return f'https://{host}' + (f':{port}' if port not in (None, 443) else '')
 
 
+# Commits after this tag are the fork's own; identities before it belong to upstream.
+FORK_BASE_TAG = 'v2.5.6'
+GITHUB_NOREPLY = re.compile(r'[^@\s]+@users\.noreply\.github\.com', re.I)
+
+
+def commit_identity_check(root):
+    """The release commit goes straight to public main. Without a repository identity, git falls back to the
+    machine's global one, so accept only an identity this fork has already made public. Values are never echoed."""
+    def git(*args):
+        result = subprocess.run(['git', *args], cwd=root, capture_output=True, text=True)
+        require(result.returncode == 0, f'Release commit identity cannot be verified: git {args[0]} failed')
+        return result.stdout
+    history = [line.split('\0') for line in git('log', f'{FORK_BASE_TAG}..HEAD', '--format=%an%x00%ae').splitlines() if line]
+    names = {entry[0] for entry in history}
+    emails = {entry[1] for entry in history}
+    for variable, role in (('GIT_AUTHOR_IDENT', 'author'), ('GIT_COMMITTER_IDENT', 'committer')):
+        match = re.fullmatch(r'(.*) <(.*)> \d+ [+-]\d{4}', git('var', variable).strip())
+        require(match, 'Release commit identity cannot be verified: unreadable git identity')
+        email_is_public = match[2] in emails or GITHUB_NOREPLY.fullmatch(match[2])
+        require(match[1] in names and email_is_public,
+                f'Release commit identity: the {role} is new to this fork. '
+                'Set user.name and user.email in this clone to the identity used in its history.')
+
+
 # Account labels that are documentation placeholders; any other <worker>.<account>.workers.dev is treated as real.
 PLACEHOLDER_ACCOUNTS = {b'example', b'secret-sub', b'subdomain'}
 WORKERS_DEV = re.compile(rb'[A-Za-z0-9][A-Za-z0-9-]*\.([A-Za-z0-9][A-Za-z0-9-]*)\.workers\.dev', re.I)
@@ -209,6 +233,7 @@ if __name__ == '__main__':
         elif mode == 'version' and len(args) == 1: version(*args)
         elif mode == 'server-url' and len(args) == 1: print(server_url(*args))
         elif mode == 'addresses' and len(args) == 1: address_check(*args)
-        else: raise ValueError('Use source ROOT | bundle ROOT APP VERSION LEAF | cask VERSION SHA | check-cask FILE | version VERSION')
+        elif mode == 'commit-identity' and len(args) == 1: commit_identity_check(*args)
+        else: raise ValueError('Use source ROOT | bundle ROOT APP VERSION LEAF | cask VERSION SHA | check-cask FILE | version VERSION | addresses ROOT | commit-identity ROOT')
     except (ValueError, OSError, subprocess.CalledProcessError, plistlib.InvalidFileException) as error:
         sys.exit(f'Release validation: {error}')

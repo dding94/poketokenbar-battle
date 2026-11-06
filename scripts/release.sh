@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Fork release preparation and separately authorized publication. See RELEASE.md.
+# Fork release preparation and separately authorized publication. AGENTS.md says where the procedure lives.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -46,7 +46,7 @@ doc_check() {
     if [[ -n "$ui_changed" && -z "$shot_changed" ]]; then
       echo "  ⚠ UI 소스가 $last_tag 이후 변경됐으나 스크린샷(assets/) 갱신 없음 — README 이미지 stale 가능:"
       echo "$ui_changed" | sed 's/^/       /'
-      echo "     → 변경된 화면이면 assets 스크린샷 재생성 (README.md/ko/ja 각 언어)."
+      echo "     → 변경된 화면이면 assets 스크린샷 재생성 (README.md/ja 각 언어)."
       warn=1
     fi
 
@@ -61,7 +61,7 @@ doc_check() {
     if [[ -n "$ui_feats" && -z "$new_assets" ]]; then
       echo "  ✗ UI 를 바꾼 신규 기능이 있는데 assets/ 에 **새로 추가된** 파일이 없습니다:"
       echo "$ui_feats" | sed 's/^/       /'
-      echo "     → 새 화면·새 표면이면 전용 스크린샷을 만들어 README(ko/ja 포함)와 랜딩에 넣으세요."
+      echo "     → 새 화면·새 표면이면 전용 스크린샷을 만들어 README(ja 포함)와 랜딩에 넣으세요."
       echo "     → 신규 화면의 실제 캡처나 명시적으로 표시한 합성 렌더 이미지를 추가하세요."
       # 예외 없음. 경고(return 1, y/N 프롬프트)와 달리 return 2 는 호출부에서 즉시 중단시킨다 —
       # 환경변수 우회구를 두면 결국 그 변수가 습관이 된다. 통과시키려면 에셋을 만들거나
@@ -71,7 +71,7 @@ doc_check() {
   fi
   cat <<'CHECK'
   ─ 수동 체크리스트 (내용 변경 시 갱신) ─────────────────────────────
-   [ ] README.md / .ko / .ja : 기능 목록·요구사항·데이터소스·스크린샷
+   [ ] README.md / .ja : 기능 목록·요구사항·데이터소스·스크린샷
    [ ] 확정된 포크 랜딩(있는 경우): hero·features·install·works-with·요구사항·푸터
        · 버전 배지는 동적(github/v/release) → 자동. 기능/문구만 수동.
        · 3개 언어 i18n 사전(en/ko/ja) 동시 갱신 + 키 정합 유지.
@@ -88,6 +88,10 @@ case "$ORIGIN" in
   *) echo "Fork origin mismatch: $ORIGIN" >&2; exit 1 ;;
 esac
 python3 scripts/release-validate.py source .
+# The version commit below goes straight to public main, so check its identity before any build or signing.
+if [[ "$MODE" == publish ]]; then
+  python3 scripts/release-validate.py commit-identity .
+fi
 
 if [[ "$MODE" == --check-only ]]; then
   doc_check

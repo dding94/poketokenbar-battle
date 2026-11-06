@@ -99,7 +99,7 @@ The app is provider-agnostic by design. When extending it, follow these rules
 
 PokeTokenBar is an **unofficial, non-commercial fan project** and is not
 affiliated with Nintendo, Game Freak, Creatures Inc., or The Pokémon Company
-(see the disclaimer in the [README](README.md#license--disclaimer)). To keep the
+(see the disclaimer in the [README](README.md#라이선스와-고지)). To keep the
 project safe to maintain and distribute, contributions **must** follow these
 rules:
 

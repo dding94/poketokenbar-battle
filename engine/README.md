@@ -1,8 +1,6 @@
 # 전투 엔진
 
-`@pkmn/sim` **0.10.12**, esbuild **0.28.2**를 고정한다. 제품 계약은
-[부록 A](../docs/BATTLE_PLAN.md#부록-a-전투-엔진-api-계약-pr-01-초안), 실제 검증 상태는
-[AI_HANDOFF](../docs/AI_HANDOFF.md)에 기록한다. `probe/`는 5세대 연구 자료이며 제품 코드가 아니다.
+`@pkmn/sim` **0.10.12**, esbuild **0.28.2**를 고정한다. `probe/`는 5세대 연구 자료이며 제품 코드가 아니다.
 
 ```sh
 cd engine

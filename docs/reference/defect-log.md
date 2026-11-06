@@ -1701,6 +1701,7 @@ read_when:
 
 - **`FileHandle`의 옛 읽기 API는 실패를 Objective-C 예외로 던져 앱을 종료시킨다.** `BinaryLocator`는 로그인 셸을 8초 기다린 뒤 읽기 핸들을 닫는데, 그 핸들을 다른 스레드가 `readDataToEndOfFile()`로 읽고 있었다. 마지막 CI에서 macOS 15 러너가 느려 이 경로를 밟았고 `NSFileHandleOperationException`으로 테스트 프로세스가 죽어 646건이 실행되지 않았다. 실제 앱에서도 셸 시작이 8초를 넘으면 같은 경로다(2026-08-16 코드). 왜 못 걸렀나: 평소 셸은 8초 안에 끝나고 이 맥(macOS 27)에서는 느린 셸을 만들어도 재현되지 않았다. 그래서 재현 테스트 대신 해당 API 사용 자체를 소스 검사로 막았고(`testNoSourceUsesAFileHandleReadThatRaises`), 전수 확인 결과 이 한 곳뿐이었다. 호출은 `readToEnd()`로 바꿨다. 실제로 사라졌는지는 macOS 15에서 다시 볼 수 없어 CI 통과로만 판단한다.
 - **공개 빌드에 필요한 입력이 빠져도 모든 게이트를 통과할 수 있었다.** `PTB_BATTLE_SERVER_URL` 없이 만든 번들은 조용히 수동 입력 빌드가 되고 `release-validate.py bundle`도 통과했다. brew 리허설에서 드러났다. 이제 `release.sh --prepare-build`와 공개 경로가 값을 요구하고, `bundle`이 내장 주소를 요구한다. 같은 리허설에서 첫 공개가 기존 tap 검사에서 멈추는 결함도 찾았다(`check-published-cask`). 스텁이 새 템플릿으로 고정 입력을 만들어 이 경로를 밟지 않았기 때문이다.
+- **릴리스 커밋의 git 계정은 아무도 검사하지 않았다.** `release.sh`는 버전 커밋을 리뷰와 CI 없이 `main`에 바로 푸시한다. 계정이 저장소 로컬 설정에만 있어, 새 clone에서 실행하면 그 맥의 전역 계정으로 커밋되고 공개 이력에 그대로 남는다. 왜 못 걸렀나: 릴리스 테스트는 git을 스텁으로 대신해 계정을 본 적이 없고, secret-scan은 비밀값만 볼 뿐 커밋 작성자는 보지 않는다. 이제 `release-validate.py commit-identity`가 발행 경로의 빌드·서명 전에 작성자와 커밋 계정을 각각 확인한다. 이름은 기준 태그 이후 이력에 있어야 하고, 주소는 그 이력에 있거나 GitHub noreply여야 한다. 허용 목록을 파일에 적지 않아 개인 주소가 저장소 내용에 들어가지 않는다. `test_release_identity.py`는 실제 git으로 전역 계정만 있는 새 clone을 재현한다. 스윕: 스크립트에서 커밋을 만드는 곳은 `release.sh` 한 곳이고, tap 갱신은 Contents API라 로그인한 GitHub 계정으로 남는다. 이 가드는 릴리스 경로만 막으며 기능 브랜치 커밋은 막지 않는다.
 
 ## 가방 아이템의 대상 (2026-11-06)
 
