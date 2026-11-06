@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import Vision
 import XCTest
 @testable import PokeTokenBar
 
@@ -18,6 +19,7 @@ final class SessionKeySettingsRenderingTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: file) }
         let usage = UsageStore(providers: [], autoRefresh: false, defaults: defaults)
         let companion = CompanionStore(fileURL: file, defaults: defaults)
+        companion.setLanguage(.en)
         let navigation = PopoverNavigation()
         navigation.openSessionKeySettings()
         let host = NSHostingController(rootView: SettingsView(
@@ -46,12 +48,35 @@ final class SessionKeySettingsRenderingTests: XCTestCase {
             XCTAssertNotNil(secure.currentEditor(), "session key entry must receive keyboard focus")
             XCTAssertTrue(secure.currentEditor() === window.firstResponder)
         }
-        // Two difficulty sliders plus the existing size/opacity sliders.
-        XCTAssertEqual(views.compactMap { $0 as? NSSlider }.count, 4,
-                                    "growth and shop difficulty controls must survive the Settings merge")
+        try await assertDifficultyControlsAreDrawn(l: companion.l, around: secure, in: host.view)
         XCTAssertTrue(navigation.showSettings)
         navigation.reset()
         XCTAssertFalse(navigation.expandAdvancedOnOpen)
+    }
+
+    /// Reads the growth and shop rows off the pixels, one screenful at a time: linked against the macOS 27 SDK
+    /// a SwiftUI slider has no `NSSlider` to count (defect log).
+    private func assertDifficultyControlsAreDrawn(l: L, around field: NSView, in host: NSView) async throws {
+        let scroll = try XCTUnwrap(field.enclosingScrollView)
+        let clip = scroll.contentView
+        let height = try XCTUnwrap(scroll.documentView).frame.height
+        var seen = ""
+        for y in stride(from: 0, to: height, by: clip.bounds.height * 0.75) {
+            clip.scroll(to: NSPoint(x: 0, y: clip.isFlipped ? y : height - clip.bounds.height - y))
+            scroll.reflectScrolledClipView(clip)
+            try await Task.sleep(for: .milliseconds(100))
+            let image = try XCTUnwrap(PracticeScreenRenderingTests.capture2x(host).cgImage)
+            let request = VNRecognizeTextRequest()
+            request.recognitionLevel = .accurate; request.recognitionLanguages = ["en-US"]
+            try VisionOCR.perform(request, on: image)
+            seen += (request.results ?? []).flatMap { $0.topCandidates(3).map(\.string) }.joined(separator: " ") + " "
+        }
+        let compact = { (text: String) in text.filter { !$0.isWhitespace }.lowercased() }
+        for label in [l.difficultySectionTitle, l.difficultyGrowthLabel, l.difficultyShopLabel,
+                      l.difficultyGrowthLowLabel, l.difficultyShopLowLabel] {
+            XCTAssertTrue(compact(seen).contains(compact(label)),
+                          "\(label): growth and shop difficulty controls must survive the Settings merge. Seen: \(seen)")
+        }
     }
 
     private func descendants(of view: NSView) -> [NSView] {

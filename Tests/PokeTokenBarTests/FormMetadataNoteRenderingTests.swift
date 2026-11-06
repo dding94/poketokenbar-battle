@@ -94,7 +94,7 @@ final class FormMetadataNoteRenderingTests: XCTestCase {
         let request = VNRecognizeTextRequest()
         request.recognitionLevel = .accurate
         request.recognitionLanguages = ["en-US"]
-        try VNImageRequestHandler(cgImage: XCTUnwrap(bitmap.cgImage)).perform([request])
+        try VisionOCR.perform(request, on: XCTUnwrap(bitmap.cgImage))
         return (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }
             .joined(separator: " ").lowercased()
     }

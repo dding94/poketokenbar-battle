@@ -266,7 +266,7 @@ final class SnapshotHistoryRenderingTests: XCTestCase {
         let request = VNRecognizeTextRequest()
         request.recognitionLevel = .accurate
         request.recognitionLanguages = ["en-US"]
-        try VNImageRequestHandler(cgImage: image).perform([request])
+        try VisionOCR.perform(request, on: image)
         return request.results?.compactMap {
             let candidates = $0.topCandidates(10)
             let box = $0.boundingBox

@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import Vision
 import XCTest
 @testable import PokeTokenBar
 
@@ -34,8 +35,10 @@ final class IndividualPickerRenderingTests: XCTestCase {
             let store = CompanionStore(provider: PickerRenderProvider(), fileURL: file)
             await store.loadPokemonDetails(speciesID: 47)
             let species = try XCTUnwrap(store.dexSpecies.first { $0.id == 47 })
-            let view = PokemonDetailView(store: store, species: species, onBack: {},
+            let detail = PokemonDetailView(store: store, species: species, onBack: {},
                 spriteStore: SpriteStore(directory: dir))
+            XCTAssertEqual(Set(detail.individualOptions.map(\.id)), count == 1 ? [] : ["fixture-0", "fixture-1"])
+            let view = detail
                 .frame(width: PopoverMetrics.contentWidth, height: 520)
                 .background(Color.white).environment(\.colorScheme, .light)
             let host = NSHostingView(rootView: view)
@@ -49,10 +52,14 @@ final class IndividualPickerRenderingTests: XCTestCase {
             window.orderFront(nil)
             try await Task.sleep(for: .milliseconds(100))
             host.layoutSubtreeIfNeeded()
-            func descendants(_ v: NSView) -> [NSView] { [v] + v.subviews.flatMap { descendants($0) } }
-            let menus = descendants(host).compactMap { $0 as? NSPopUpButton }
-            XCTAssertEqual(menus.count, count == 1 ? 0 : 1)
-            if count == 2 { XCTAssertEqual(menus.first?.numberOfItems, 2) }
+            // The menu's closed label names the selected individual; read it off the pixels. Linked against the
+            // macOS 27 SDK a menu picker has no `NSPopUpButton` to count (defect log).
+            let image = try XCTUnwrap(PracticeScreenRenderingTests.capture2x(host).cgImage)
+            let request = VNRecognizeTextRequest()
+            request.recognitionLevel = .accurate; request.recognitionLanguages = ["en-US"]
+            try VisionOCR.perform(request, on: image)
+            let text = (request.results ?? []).flatMap { $0.topCandidates(3).map(\.string) }.joined(separator: " ")
+            XCTAssertEqual(text.contains("#1"), count > 1, "the menu shows only with a choice to make. Seen: \(text)")
             if let output = ProcessInfo.processInfo.environment["PTB_PICKER_RENDER_DIR"] {
                 // Capture only the selector/profile area; no sprite or user save data is included.
                 let captureBounds = NSRect(x: 0, y: 140, width: PopoverMetrics.contentWidth, height: 370)

@@ -88,7 +88,7 @@ final class CollectionReadabilityRenderingTests: XCTestCase {
             let request = VNRecognizeTextRequest()
             request.recognitionLevel = .accurate
             request.recognitionLanguages = [language == .ko ? "ko-KR" : language == .ja ? "ja-JP" : language.rawValue]
-            try VNImageRequestHandler(cgImage: XCTUnwrap(bitmap.cgImage)).perform([request])
+            try VisionOCR.perform(request, on: XCTUnwrap(bitmap.cgImage))
             recognized = request.results?.filter { expectedTexts.count == 1 || $0.boundingBox.midY > 0.75 }
                 .compactMap { $0.topCandidates(1).first?.string }.joined(separator: " ") ?? ""
             if expectedTexts.allSatisfy({ recognized.localizedCaseInsensitiveContains($0) }) {
@@ -116,7 +116,7 @@ final class CollectionReadabilityRenderingTests: XCTestCase {
             host.cacheDisplay(in: host.bounds, to: bitmap)
             let request = VNRecognizeTextRequest()
             request.recognitionLevel = .accurate
-            try VNImageRequestHandler(cgImage: XCTUnwrap(bitmap.cgImage)).perform([request])
+            try VisionOCR.perform(request, on: XCTUnwrap(bitmap.cgImage))
             let text = request.results?.filter { $0.boundingBox.midY < 0.05 }.flatMap { $0.topCandidates(10).map(\.string) }.joined(separator: " | ").replacingOccurrences(of: " ", with: "") ?? ""
             XCTAssertTrue(text.contains(expected), "Pagination \(name) must visibly show \(expected): \(text)")
             try XCTUnwrap(bitmap.representation(using: .png, properties: [:])).write(to: directory.appendingPathComponent("en-grid-\(name).png"))
