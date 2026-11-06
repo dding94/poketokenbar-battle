@@ -1727,3 +1727,11 @@ read_when:
 - **필터 클래스 이름 오타가 다시 나왔다.** `CompanionTests`·`PracticeBattleRenderingTests`라는 클래스는 없어서 해당 묶음이 조용히 안 돌았다. `scripts/check-test-filter.sh`를 돌려서 잡았다. 필터를 쓰면 이 검사까지 한 번에 돌린다.
 - **결함 주입 8종을 모두 잡았다.** 목록이 다시 `ko`를 읽음, 폼 표시 누락, 막힌 줄의 한국어 대체값, 야생이 다시 `ko`를 읽음, 언어가 바뀌어도 옛 상대 유지, 세션이 저장 언어를 받지 않음, 이전 단계 대체 제거, 먼 단계부터 읽음. 각각 해당 테스트가 실패했다. 마지막 둘은 `llvm-cov --show-regions`에서 `localizedName`의 이전 단계 분기가 `^0`으로 나와 테스트를 더한 뒤 주입한 것이다. 도감에서 옮겨 온 분기도 이번 변경으로 처음 테스트됐다.
 - **Vision OCR 호출은 시간 제한 없이 멈출 수 있다.** `DexBackNavigationTests.words(in:)`가 `VNImageRequestHandler.performRequests` 안의 `semaphore_wait_trap`에서 돌아오지 않아 `xctest`가 CPU 없이 1시간 넘게 남았다. 깨끗한 HEAD에서도 같고, 이 테스트의 대기 도우미는 호출 사이에서만 시간을 재므로 끝나지 않는다. 검증 스크립트의 단계마다 시간 제한을 둔다. `swift test`를 죽여도 `xctest`는 자기 프로세스 그룹에 남으므로 따로 찾아 끝낸다. 환경 문제인지 macOS 27 문제인지는 아직 가리지 못했다.
+
+## 테스트가 시작한 새로고침이 실제 사용량 로그를 읽는다 (2026-11-06)
+
+- **증상과 직접 원인.** `GrokUsageTests.testProviderIsSilentWhenNoGrokDataExists`는 단독으로 0.9초인데 전체 실행에서는 48.9초 걸렸다. 앞서 도는 `CustomScanRootsTests.testUsageStorePersistsPerProviderAndLeavesOthersAlone`이 기본 프로바이더를 가진 스토어에서 `setCustomScanRoots`를 불렀고, 이 함수는 아무도 기다리지 않는 `Task`로 `refresh()`를 시작한다. `autoRefresh: false`는 생성 시점의 새로고침만 막는다. 그 새로고침이 테스트가 끝난 뒤에도 `LocalUsageCache.shared`로 이 맥의 실제 로그(약 3.2GB)를 읽어 다음 테스트가 그 액터를 기다렸다. 앞 테스트만 바꿔 가며 재서 원인을 좁혔고(이 테스트 뒤 26.5초, 다른 테스트 뒤 0.5초 이하), 수정 뒤 OCR 테스트를 뺀 직렬 실행에서 0.001초가 됐다. 액터 대기 자체를 샘플링으로 본 것은 아니고 코드 경로와 측정이 일치한 결과다.
+- **왜 못 걸렀나.** 테스트 단정은 전부 동기로 통과하고, 새로고침 결과를 보지 않으므로 뒤에서 무엇이 돌든 실패하지 않는다. CI 러너에는 큰 로그가 없어 느려지지도 않는다. 로컬에서도 다음 테스트의 시간으로 찍혀 엉뚱한 테스트가 느려 보였다.
+- **규칙.** 기본 프로바이더를 가진 `UsageStore`는 테스트에서 `registeredProviderIDs`만 읽는다. 그 밖의 호출이나 스토어를 함수 밖으로 넘기는 일은 `UsageStoreTestIsolationGuardTests`가 소스를 읽어 막는다. 런타임 단정으로는 큰 로그가 없는 CI에서 잡히지 않기 때문이다. `setCustomScanRoots`가 새로고침을 시작한다는 동작은 수정한 테스트가 주입한 프로바이더로 확인한다.
+- **부류 스윕과 남은 범위.** 기본 프로바이더 스토어 9곳 중 새로고침에 닿는 것은 이 하나였다. 프로바이더만 주입한 스토어 55곳 중 52곳은 한도·상태 조회 중 일부를 실제 구현으로 두고 있다. 이들이 네트워크나 로컬 파일에 실제로 닿는지는 재지 않았고 이 가드의 범위도 아니다.
+- **결함 주입 5종을 모두 잡았다.** 실제 프로바이더로 되돌림, `setCustomScanRoots`의 새로고침 제거, 가드가 다른 사용을 무시, 가드가 주입 스토어까지 잡음, 가드가 `let` 아닌 스토어를 통과시킴.

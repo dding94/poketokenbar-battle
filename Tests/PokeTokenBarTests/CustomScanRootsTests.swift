@@ -1,6 +1,47 @@
 import XCTest
 @testable import PokeTokenBar
 
+/// Reports that a refresh reached it, with today's usage so no empty-usage retry gets scheduled.
+private struct RefreshRecordingProvider: UsageProvider {
+    let id = "codex"
+    let displayName = "Codex"
+    let onRefresh: @Sendable () -> Void
+
+    func fetchDaily() async throws -> DailyUsage? {
+        onRefresh()
+        return DailyUsage(date: LocalUsageReader.todayKey(), inputTokens: 1, outputTokens: 1,
+                          cacheCreationTokens: 0, cacheReadTokens: 0, totalTokens: 2, totalCost: 0)
+    }
+    func fetchEnrichment() async -> ProviderEnrichment { ProviderEnrichment() }
+}
+
+private struct NoScanClaudeLimits: ClaudeLimitsProviding {
+    func fetch(allowKeychainPrompt: Bool) async throws -> LimitStatus {
+        throw LimitsError.keychainInteractionNotAllowed
+    }
+}
+private struct NoScanCodexLimits: CodexLimitsProviding {
+    func fetch() async throws -> CodexRateLimitStatus? { nil }
+}
+private struct NoScanAntigravityLimits: AntigravityLimitsProviding {
+    var hasTokenFile: Bool { false }
+    func fetch(allowKeychainPrompt: Bool) async throws -> AntigravityRateLimitStatus {
+        throw LimitsError.keychainInteractionNotAllowed
+    }
+}
+private struct NoScanCursorLimits: CursorLimitsProviding {
+    func fetch() async throws -> CursorRateLimitStatus? { nil }
+}
+private struct NoScanStatus: ProviderStatusProviding {
+    func fetch() async -> [String: ProviderStatus] { [:] }
+}
+private struct NoScanSessionKeys: SessionKeyManaging {
+    func credential() -> SessionKeyCredential? { nil }
+    func organizations(sessionKey: String) async throws -> [SessionKeyOrganization] { [] }
+    func save(key: String, organizationID: String?) throws {}
+    func clear() {}
+}
+
 /// Additional scan folders (#177). Storage is per provider. Custom roots only *add*
 /// to curated defaults — an ancestor custom root must not evict a hidden default
 /// (the #162-B failure: `normalizedRoots` + `skipsHiddenFiles` silently zeros usage).
@@ -154,18 +195,40 @@ final class CustomScanRootsTests: XCTestCase {
 
     // MARK: UsageStore persistence
 
+    /// `setCustomScanRoots` starts a refresh nobody awaits, so every source that refresh reaches is
+    /// a stub here. With the default sources it walked the machine's real usage logs, and the next
+    /// test on `LocalUsageCache.shared` waited for that walk to finish.
     @MainActor
-    func testUsageStorePersistsPerProviderAndLeavesOthersAlone() {
+    func testUsageStorePersistsPerProviderAndLeavesOthersAlone() async {
         let suite = "ptb.store.scan.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
-        let store = UsageStore(autoRefresh: false, defaults: defaults)
+        let refreshed = expectation(description: "a changed scan root refreshes usage")
+        refreshed.assertForOverFulfill = false
+        let store = UsageStore(
+            providers: [RefreshRecordingProvider { refreshed.fulfill() }],
+            claudeLimitsProvider: NoScanClaudeLimits(),
+            additionalClaudeLimitsProvider: { _ in NoScanClaudeLimits() },
+            discoverClaudeConfigDirs: { [] },
+            readDefaultIdentity: { nil },
+            readLastPrompt: { _ in nil },
+            claudeUsageEntries: { _ in [] },
+            readPromptHistory: { _ in .init() },
+            codexLimitsProvider: NoScanCodexLimits(),
+            antigravityLimitsProvider: NoScanAntigravityLimits(),
+            cursorLimitsProvider: NoScanCursorLimits(),
+            statusProvider: NoScanStatus(),
+            sessionKeys: NoScanSessionKeys(),
+            accountSessionKeys: { _ in NoScanSessionKeys() },
+            autoRefresh: false,
+            defaults: defaults)
         store.setCustomScanRoots("~/codex-extra", for: "codex")
         XCTAssertEqual(store.customScanRoots(for: "codex"), "~/codex-extra")
         XCTAssertEqual(store.customScanRoots(for: "gemini"), "")
         XCTAssertEqual(defaults.string(forKey: "customScanRoots.codex"), "~/codex-extra")
         XCTAssertNil(defaults.string(forKey: "customScanRoots"),
                      "generic customScanRoots key must not be written (#162-C)")
+        await fulfillment(of: [refreshed], timeout: 10)
     }
 
     // MARK: Claude seam
