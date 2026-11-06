@@ -190,6 +190,18 @@ PR 11 완료 당시 다음은 PR 12 연승·챔피언·재대결·그룹 전적�
 
 
 
+## 2.7.1 공개 완료 (2026-11-06)
+
+사용자 리포트: 보유 포켓몬 중 상처약·기력의조각이 필요한 개체가 있는데 현재 키우는 대상에게만 쓸 수 있었다.
+
+- **수정:** 상처약·고급상처약·기력의조각·민트·개체값 재추첨권을 가방 카드의 목록에서 보유 포켓몬 중 골라 쓴다(#4). 이상한 사탕은 성장 상태가 현재 포켓몬에게만 있어 그대로 둔다. 민트·재추첨을 넓힌 것은 이 세션의 판단이며 BATTLE_PLAN에 변경으로 적었다. 사용자가 공개 전에 내용을 보고 승인했다.
+- **함께 고친 결함:** 민트·재추첨이 온라인 hold를 무시하던 문제, 가방에서 회복한 개체가 다음 읽기까지 온라인 목록에 기절로 남던 문제. cask 표기를 `:sequoia`로 바꾸고, tap에 있던 2.7.0 표기는 `check-published-cask`에서만 받는다. 원인과 스윕은 defect-log "가방 아이템의 대상".
+- **공개:** [v2.7.1](https://github.com/dding94/poketokenbar-battle/releases/tag/v2.7.1) 정식(latest), 공개 커밋 `831142c`. main 전체 CI [42147350594](https://github.com/dding94/poketokenbar-battle/actions/runs/42147350594)는 그 직전 `5e10967`에서 8개 필수 작업과 네이티브 수락 테스트를 통과했다(같은 코드의 직전 실행 42145452976: 앱 2,834건 실행, skip 16, 실패 0). ZIP SHA256 `32acd7fb4f96e489021d68c6e815e0a648ccfb6b1dce1f3e3948058f3a6fe8d6`.
+- **공개 뒤 확인:** `/releases/latest`가 v2.7.1. 공개 URL로 받은 ZIP과 tap cask의 SHA 일치. 번들 버전 2.7.1, 내장 주소가 2.7.0과 같은 값, universal, `codesign --verify --deep --strict` 종료 0. `brew info`가 2.7.1과 새 sha를 읽고 경고 없음.
+- **미검증:** 공개 ZIP을 실행하지 않았고 brew 설치·업그레이드도 하지 않았다. 실제 앱에서 가방 목록을 눌러 보지 못했다. 합성 클릭이 오프스크린 창에서 SwiftUI 상태를 바꾸지 못해 목록 렌더와 `BagView.use`를 따로 테스트했고, 행의 버튼과 `BagView.use`를 잇는 한 줄은 자동 테스트가 없다. 2.7.0의 미검증 항목(두 맥 대전, 알림, 팝오버 고정, 슬립 복귀, VoiceOver, 2.6.0 업그레이드)도 그대로다.
+- **절차 메모:** 공개는 임시 깨끗한 clone의 `main`에서 실행했다(`release.sh`는 브랜치 이름이 main이어야 하고, 이 worktree는 main을 체크아웃할 수 없다). 저장소 루트 main 체크아웃은 건드리지 않았으므로 `git pull`이 필요하다. PR 4의 이미지는 `pr-item-target-images` 브랜치에 있으니 지우지 않는다.
+- **후속 확인:** 연습전 목록의 이름이 언어와 상관없이 한국어로 나온다(`PracticeRoster`가 `entry.names?[finalID]?["ko"]`를 읽는다). 이번 범위 밖이라 고치지 않았다.
+
 ## 2.7.0 공개 완료 (2026-11-06)
 
 - [v2.7.0](https://github.com/dding94/poketokenbar-battle/releases/tag/v2.7.0)을 정식(latest) 릴리스로 공개했고 개인 tap의 cask를 교체했다. main CI run 42128000317 전체 통과(1e4962e), 공개 커밋 a8f54bb. ZIP SHA256 `af57f05d2f1c69bd60e4bac60b5331bb36761f97fb06163f0fb732f1804f2818`.
