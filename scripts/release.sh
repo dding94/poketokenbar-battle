@@ -88,6 +88,10 @@ case "$ORIGIN" in
   *) echo "Fork origin mismatch: $ORIGIN" >&2; exit 1 ;;
 esac
 python3 scripts/release-validate.py source .
+# The version commit below goes straight to public main, so check its identity before any build or signing.
+if [[ "$MODE" == publish ]]; then
+  python3 scripts/release-validate.py commit-identity .
+fi
 
 if [[ "$MODE" == --check-only ]]; then
   doc_check
