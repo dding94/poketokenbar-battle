@@ -1,8 +1,8 @@
 # PokeTokenBar Battle — 포크 진입점
 
-먼저 [AGENTS.md](AGENTS.md), [docs/AI_HANDOFF.md](docs/AI_HANDOFF.md), [docs/BATTLE_PLAN.md](docs/BATTLE_PLAN.md)를 읽는다.
+먼저 [AGENTS.md](AGENTS.md)를 읽는다.
 
-이 저장소는 `dding94/poketokenbar-battle`이다. 아래 내용은 기준 앱의 개발 규칙이며, 포크의 제품 범위·현재 진행 상태·Git 원격·배포 대상은 위 문서를 따른다. 현재 브랜치의 빌드·저장·업데이트 경로는 포크 전용으로 분리했다. 원본/main 스크립트는 원본 앱을 덮어쓰므로 실행하지 않는다. 설치 승인·검증 상태는 `docs/AI_HANDOFF.md`를 확인한다.
+이 저장소는 `dding94/poketokenbar-battle`이다. 아래 내용은 기준 앱의 개발 규칙이며, 포크의 제품 범위·현재 진행 상태·Git 원격·배포 대상은 AGENTS.md가 안내하는 비공개 문서를 따른다. 현재 브랜치의 빌드·저장·업데이트 경로는 포크 전용으로 분리했다. 원본/main 스크립트는 원본 앱을 덮어쓰므로 실행하지 않는다. 설치 승인·검증 상태도 비공개 문서에서 확인한다.
 
 ---
 
@@ -16,7 +16,7 @@
 
 | 문서 | 언제 읽나 |
 |---|---|
-| `docs/reference/release-workflow.md` | 버전을 배포할 때, `release.sh` 게이트에 막혔을 때, UI 변경으로 스크린샷·랜딩을 갱신할 때 |
+| 비공개 문서의 `docs/reference/release-workflow.md` | 버전을 배포할 때, `release.sh` 게이트에 막혔을 때, UI 변경으로 스크린샷·랜딩을 갱신할 때 |
 | `docs/reference/provider-extension.md` | 새 사용량 소스·버전매니저·로그 루트를 추가할 때, 프로바이더 분기를 리뷰할 때 |
 | `docs/reference/defect-log.md` | 결함·회귀를 고치는 중(부류 스윕 근거), 동시성·캐시·외부 로그 포맷·대용량 파일 읽기·상시 애니메이션·세이브 이전을 건드릴 때 |
 
@@ -62,7 +62,7 @@ Claude Code는 `.claude/skills/prepare-pr`의 symlink를 통해
 - 세그먼트 지정 없이 "배포/릴리스"만 말하면: 변경 성격 기준으로 제안 후 확인받고 진행.
 
 **문서·스크린샷·랜딩 갱신은 매 릴리스 필수다 — "할까요?" 묻지 말고 무조건 한다.**
-실행 절차·에셋 게이트·함정은 `docs/reference/release-workflow.md`, 체크리스트는 `RELEASE.md`.
+실행 절차·에셋 게이트·함정은 비공개 문서의 `docs/reference/release-workflow.md`, 체크리스트는 `RELEASE.md`.
 
 릴리스는 외부 공개(비가역)이므로 실행 직전 **적용할 버전과 노트 요약을 한 번 보여준 뒤** 진행한다.
 

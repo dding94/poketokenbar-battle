@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Fork release preparation and separately authorized publication. See RELEASE.md.
+# Fork release preparation and separately authorized publication. AGENTS.md says where the procedure lives.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 

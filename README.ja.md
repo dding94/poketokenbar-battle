@@ -127,7 +127,7 @@ Claude Code · Codex · Gemini CLI · Antigravity · OpenCode · Hermes Agent ·
 - セーブは `~/Library/Application Support/PokeTokenBarBattle` にあります。大切なセーブはバックアップしてください。元の PokeTokenBar のセーブがあれば初回起動時に一度だけコピーし、元のアプリとセーブには手を加えません。
 - トークン使用量はこの Mac のローカル記録から読み取ります。利用記録やプロンプトはゲームサーバーに送りません。オンライン対戦では、ニックネーム、出場するポケモンの情報、選んだ技、試合結果がサーバーを経由します。
 - スプライトと名前の翻訳は実行時に [PokéAPI](https://pokeapi.co/) からダウンロードし、アプリには含めません。オフラインのときは代替画像を表示します。
-- アプリが読み取るファイルと接続先の一覧は[ベースアプリの文書](README.upstream.md#data-sources)にあります。
+- アプリが読み取るファイルと接続先の一覧は[元のアプリの文書](https://github.com/chattymin/PokeTokenBar/blob/v2.5.6/README.md#data-sources)にあります。
 
 ## ライセンス & 免責
 

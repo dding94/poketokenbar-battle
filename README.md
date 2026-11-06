@@ -125,7 +125,7 @@ Claude Code · Codex · Gemini CLI · Antigravity · OpenCode · Hermes Agent ·
 - 세이브는 `~/Library/Application Support/PokeTokenBarBattle`에 있습니다. 소중한 세이브는 백업해 두세요. 원본 PokeTokenBar 세이브가 있으면 첫 실행 때 한 번 복사해 오며, 원본 앱과 세이브는 건드리지 않습니다.
 - 토큰 사용량은 이 맥의 로컬 기록에서 읽습니다. 사용 기록과 프롬프트는 게임 서버로 보내지 않습니다. 온라인 배틀에서는 닉네임, 출전 포켓몬 정보, 선택한 기술, 경기 결과가 서버를 거칩니다.
 - 스프라이트와 이름 번역은 실행 중 [PokéAPI](https://pokeapi.co/)에서 내려받으며 앱에 포함하지 않습니다. 오프라인이면 대체 그림을 표시합니다.
-- 앱이 읽는 파일과 접속하는 서비스의 전체 목록은 [기준 앱 문서](README.upstream.md#data-sources)에 있습니다.
+- 앱이 읽는 파일과 접속하는 서비스의 전체 목록은 [원본 앱 문서](https://github.com/chattymin/PokeTokenBar/blob/v2.5.6/README.md#data-sources)에 있습니다.
 
 ## 라이선스와 고지
 
