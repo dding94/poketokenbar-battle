@@ -1633,7 +1633,7 @@ struct PokemonDetailView: View {
                     if PokemonForm.hasForms(speciesID: species.id) { formPicker }
                     if displayedSpecies.hasNormal && displayedSpecies.isShiny { appearancePicker }
                     identityHeader
-                    if individuals.count > 1 { individualPicker }
+                    if !individualOptions.isEmpty { individualPicker }
                     if individuals.isEmpty {
                         Text(store.l.dexAppearancePreview).font(.callout).foregroundStyle(.secondary)
                     }
@@ -1773,11 +1773,18 @@ struct PokemonDetailView: View {
     private var individualPicker: some View {
         Picker(store.l.pokemonIndividual, selection: Binding(
             get: { individual?.id ?? "" }, set: { selectedInstanceID = $0 })) {
-            ForEach(Array(individuals.enumerated()), id: \.element.id) { index, entry in
-                Text(individualLabel(entry, index: index)).tag(entry.id)
+            ForEach(individualOptions, id: \.id) { option in
+                Text(option.label).tag(option.id)
             }
         }
         .pickerStyle(.menu)
+    }
+
+    /// What the individual picker offers; empty when there is nothing to choose, so no picker is drawn.
+    /// Tests read this: a menu picker has no `NSPopUpButton` once linked against the macOS 27 SDK.
+    var individualOptions: [(id: String, label: String)] {
+        guard individuals.count > 1 else { return [] }
+        return individuals.enumerated().map { index, entry in (entry.id, individualLabel(entry, index: index)) }
     }
 
     private func individualLabel(_ entry: DexEntry, index: Int) -> String {

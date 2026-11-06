@@ -78,7 +78,7 @@ final class DexBackNavigationTests: XCTestCase {
         let request = VNRecognizeTextRequest()
         request.recognitionLevel = .accurate
         request.recognitionLanguages = ["en-US"]
-        try VNImageRequestHandler(cgImage: XCTUnwrap(bitmap.cgImage)).perform([request])
+        try VisionOCR.perform(request, on: XCTUnwrap(bitmap.cgImage))
         return request.results?.compactMap { observation in
             let candidates = observation.topCandidates(10).map(\.string)
             return candidates.isEmpty ? nil : Word(candidates: candidates, box: observation.boundingBox)
@@ -100,9 +100,9 @@ final class DexBackNavigationTests: XCTestCase {
         return nil
     }
 
-    /// Clicks the control under a rendered label. Back is a borderless button that AppKit backs with an
-    /// untitled `NSButton`; a synthetic mouse-down there blocks in its tracking loop waiting for a
-    /// queued mouse-up, so that one is pressed directly. Plain SwiftUI buttons take the events.
+    /// Clicks the control under a rendered label. A synthetic mouse-down on an `NSButton` blocks in its
+    /// tracking loop waiting for a queued mouse-up, so that one is pressed directly. Plain SwiftUI buttons
+    /// take the events.
     private func press(_ word: Word, in host: NSView) throws {
         let y = host.isFlipped ? 1 - word.box.midY : word.box.midY   // Vision boxes are y-up
         let point = NSPoint(x: word.box.midX * host.bounds.width, y: y * host.bounds.height)
@@ -121,27 +121,48 @@ final class DexBackNavigationTests: XCTestCase {
         }
     }
 
-    private func isRendered(_ text: String, exactly: Bool = false, in host: NSView) throws -> Bool {
-        try words(in: host).contains { $0.reads(text, exactly: exactly) }
-    }
-
-    /// Presses the control labeled `text` until the screen changes: `opens` appears, or `text` goes
-    /// away. Right after a transition the view tree can still hit-test the previous screen (seen on
-    /// CI), so a press that lands there is retried.
-    private func press(_ text: String, exactly: Bool = false, opens: String? = nil, in host: NSView,
-                       file: StaticString = #filePath, line: UInt = #line) async throws {
+    /// Presses and re-presses until `done`. Right after a transition the view tree can still hit-test the
+    /// previous screen (seen on CI), so a press that lands there is retried.
+    private func press(until done: () -> Bool, what: String, file: StaticString, line: UInt,
+                       _ pressOnce: () async throws -> Void) async throws {
         for _ in 0..<5 {
-            let word = try await waitForText(text, exactly: exactly, in: host, file: file, line: line)
-            try press(XCTUnwrap(word, file: file, line: line), in: host)
+            try await pressOnce()
             let deadline = ContinuousClock.now + .seconds(1)
             repeat {
                 try await Task.sleep(for: .milliseconds(50))
-                let changed = try opens.map { try isRendered($0, in: host) }
-                    ?? !isRendered(text, exactly: exactly, in: host)
-                if changed { return }
+                if done() { return }
             } while ContinuousClock.now < deadline
         }
-        XCTFail("Pressing \(text) never changed the screen", file: file, line: line)
+        XCTFail("Pressing \(what) never changed the screen", file: file, line: line)
+    }
+
+    /// Opens the detail page by pressing the row or cell labeled `text`.
+    private func pressToOpenDetail(_ text: String, exactly: Bool = false, _ navigation: PopoverNavigation, in host: NSView,
+                                   file: StaticString = #filePath, line: UInt = #line) async throws {
+        try await press(until: { navigation.dexDetailCollectionID != nil }, what: text, file: file, line: line) {
+            let word = try await waitForText(text, exactly: exactly, in: host, file: file, line: line)
+            try press(XCTUnwrap(word, file: file, line: line), in: host)
+        }
+    }
+
+    /// Presses the detail page's Back, the topmost button. It is not found by its label: on macOS 27 Vision
+    /// drops "‹ Back" from the full page (it reads "#18" beside it, and "‹ Back" from a crop of the same image).
+    /// Back is a borderless button that AppKit backs with an untitled `NSButton`.
+    private func pressBack(_ store: CompanionStore, _ navigation: PopoverNavigation, in host: NSView,
+                           file: StaticString = #filePath, line: UInt = #line) async throws {
+        try await waitForText(store.l.pokemonDetailsUnavailable, in: host, file: file, line: line)   // `OfflineProvider`
+        func buttons(_ view: NSView) -> [NSButton] {
+            ((view as? NSButton).map { [$0] } ?? []) + view.subviews.flatMap { buttons($0) }
+        }
+        func top(_ button: NSButton) -> CGFloat {
+            let frame = button.convert(button.bounds, to: host)
+            return host.isFlipped ? frame.minY : host.bounds.height - frame.maxY
+        }
+        try await press(until: { navigation.dexDetailCollectionID == nil }, what: store.l.back, file: file, line: line) {
+            let back = try XCTUnwrap(buttons(host).min { top($0) < top($1) }, "the detail page has no button",
+                                     file: file, line: line)
+            back.performClick(nil)
+        }
     }
 
     /// Opens #18 (page 2) the way Home's sprite does, then presses the detail page's Back.
@@ -149,7 +170,7 @@ final class DexBackNavigationTests: XCTestCase {
                                              _ host: NSView) async throws {
         let species = try XCTUnwrap(store.dexSpecies.first { $0.id == 18 })
         navigation.dexDetailCollectionID = species.collectionID
-        try await press(store.l.back, in: host)
+        try await pressBack(store, navigation, in: host)
     }
 
     // MARK: Pokédex grid
@@ -223,8 +244,8 @@ final class DexBackNavigationTests: XCTestCase {
             row = try words(in: root).first { $0.reads("Mon1", exactly: true) }
         }
         XCTAssertNotNil(row, "scrolling never reached Mon1")
-        try await press("Mon1", exactly: true, opens: store.l.back, in: root)
-        try await press(store.l.back, in: root)
+        try await pressToOpenDetail("Mon1", exactly: true, navigation, in: root)
+        try await pressBack(store, navigation, in: root)
 
         try await waitForText("Mon1", exactly: true, in: root)
 

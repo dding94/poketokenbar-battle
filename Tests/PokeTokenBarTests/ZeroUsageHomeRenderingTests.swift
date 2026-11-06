@@ -114,7 +114,7 @@ final class ZeroUsageHomeRenderingTests: XCTestCase {
         let request = VNRecognizeTextRequest()
         request.recognitionLanguages = ["ko-KR", "en-US"]
         request.recognitionLevel = .accurate
-        try VNImageRequestHandler(cgImage: XCTUnwrap(bitmap.cgImage)).perform([request])
+        try VisionOCR.perform(request, on: XCTUnwrap(bitmap.cgImage))
         let text = request.results?.compactMap { $0.topCandidates(1).first?.string }.joined(separator: " ") ?? ""
         let normalizedText = text.replacingOccurrences(of: " ", with: "")
         for label in [companion.l.todayTokens, companion.l.thisWeek, companion.l.thisMonth] {
