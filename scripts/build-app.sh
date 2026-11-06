@@ -7,7 +7,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-VERSION="2.7.0"
+VERSION="2.7.1"
 # Release preparation selects an artifact version without editing this tracked file.
 if [[ -n "${PTB_RELEASE_VERSION:-}" ]]; then
     [[ "$PTB_RELEASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'Invalid PTB_RELEASE_VERSION' >&2; exit 1; }
