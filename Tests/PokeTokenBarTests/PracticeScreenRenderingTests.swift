@@ -1147,11 +1147,13 @@ final class PracticeScreenRenderingTests: XCTestCase {
                                         width: PopoverMetrics.contentWidth, height: 520))
         }
         for language in [AppLanguage.en, .ko] {
-            let store = try battleItemStore(language: language, graduates: [("Blastoise", 0), ("Venusaur", 0.6), ("Gengar", 0.3)],
+            // The Korean render is `assets/screenshot-bag-targets.png`; its names read as the README's language.
+            let (fainted, hurt, held) = language == .ko ? ("거북왕", "이상해꽃", "팬텀") : ("Blastoise", "Venusaur", "Gengar")
+            let store = try battleItemStore(language: language, graduates: [(fainted, 0), (hurt, 0.6), (held, 0.3)],
                                             items: [.potion: 2, .revive: 1, .mint: 1, .ivReroll: 1])
             try store.holdOnlineBattle(key: .init(scope: .init(originHash: "origin", groupID: "group", trainerID: "trainer"), battleID: "battle"),
-                                       instanceID: "Gengar")
-            XCTAssertEqual(store.itemTargets(.potion).map(\.id), ["Venusaur", "Blastoise", "Gengar"],
+                                       instanceID: held)
+            XCTAssertEqual(store.itemTargets(.potion).map(\.id), [hurt, fainted, held],
                            "who it works on, then who a reason keeps from it; full HP is not waiting for it")
             let closed = try bag(store)
             try save(closed, as: "bag-targets-closed-\(language.rawValue).png")
