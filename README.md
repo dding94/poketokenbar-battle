@@ -108,6 +108,7 @@ GitHub Actions는 `feat/**` 브랜치 푸시와 PR에서 자동으로 돌고(문
 ![합성 한국어 화면: 결과와 재대결 신청](assets/screenshot-online-result.png)
 ![합성 한국어 화면: 그룹 전적판](assets/screenshot-online-standings.png)
 ![합성 한국어 화면: 재대결 출전 준비](assets/screenshot-online-rematch.png)
+![합성 한국어 화면: 가방에서 상처약을 쓸 포켓몬 고르기](assets/screenshot-bag-targets.png)
 
 ## 라이선스와 고지
 

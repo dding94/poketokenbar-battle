@@ -216,6 +216,7 @@ Pi는 모델 여러 개를 세션 로그 하나로 흘려보낼 수 있습니다
 ![합성 한국어 화면: 결과와 재대결 신청](assets/screenshot-online-result.png)
 ![합성 한국어 화면: 그룹 전적판](assets/screenshot-online-standings.png)
 ![합성 한국어 화면: 재대결 출전 준비](assets/screenshot-online-rematch.png)
+![합성 한국어 화면: 가방에서 상처약을 쓸 포켓몬 고르기](assets/screenshot-bag-targets.png)
 
 ## 설치와 업데이트
 
