@@ -190,6 +190,15 @@ PR 11 완료 당시 다음은 PR 12 연승·챔피언·재대결·그룹 전적�
 
 
 
+## 배틀 목록 이름을 앱 언어로 (2026-11-06, 미배포)
+
+2.7.1의 후속 확인 항목을 처리했다. 연습 선택 화면과 온라인 출전 목록의 졸업생 이름, 야생·오늘의 상대 이름이 앱 언어를 따른다. 원인과 스윕 결과는 `docs/reference/defect-log.md`의 "배틀 목록의 졸업생 이름과 앱 언어".
+
+- **동작 변화:** 이름 규칙은 `DexEntry.localizedName(_:)` 하나로 모았다. 언어가 바뀌면 다음 `prepare`에서 야생·오늘의 상대를 버리고 다시 찾는다. 드물게 야생 상대와 끝낸 대기 중 결과도 함께 사라진다. 스냅샷·logHash·서버 전송값은 언어와 무관하다(테스트로 확인).
+- **로컬 검증(macOS 27, 한국어 로캘):** 집중 필터 235개 통과. `DexBackNavigationTests`를 뺀 전체 2844개에서 2개 테스트만 실패(`IndividualPickerRenderingTests`, `SessionKeySettingsRenderingTests`), 둘 다 깨끗한 HEAD에서 같이 실패한다. `systemDefault = .en` 시뮬레이션의 전체 실행도 같은 2개만 실패한다.
+- **미검증:** `DexBackNavigationTests`는 이 맥에서 Vision OCR 호출이 돌아오지 않아 깨끗한 HEAD에서도 끝나지 않는다. 앞선 실행에서는 수정 트리에서 "Back not rendered"로 실패했지만, 깨끗한 HEAD에서의 결과를 얻지 못해 원인을 가리지 못했다. 실제 앱을 띄워 언어를 바꿔 보지 못했고, 온라인 대전도 실행하지 않았다.
+- **남은 일(이번 범위 밖, 코드만 읽고 재현은 안 함):** `PracticeText.failure`의 막힘 사유와 `PracticeBattle.messages`·배틀 로그는 언어와 상관없이 한국어다. `store.displayName`은 `currentLine`이 없으면 "Token Egg"를 돌려주므로 목록의 현재 포켓몬 줄에 그대로 나올 수 있다.
+
 ## 2.7.1 공개 완료 (2026-11-06)
 
 사용자 리포트: 보유 포켓몬 중 상처약·기력의조각이 필요한 개체가 있는데 현재 키우는 대상에게만 쓸 수 있었다.
@@ -200,7 +209,7 @@ PR 11 완료 당시 다음은 PR 12 연승·챔피언·재대결·그룹 전적�
 - **공개 뒤 확인:** `/releases/latest`가 v2.7.1. 공개 URL로 받은 ZIP과 tap cask의 SHA 일치. 번들 버전 2.7.1, 내장 주소가 2.7.0과 같은 값, universal, `codesign --verify --deep --strict` 종료 0. `brew info`가 2.7.1과 새 sha를 읽고 경고 없음.
 - **미검증:** 공개 ZIP을 실행하지 않았고 brew 설치·업그레이드도 하지 않았다. 실제 앱에서 가방 목록을 눌러 보지 못했다. 합성 클릭이 오프스크린 창에서 SwiftUI 상태를 바꾸지 못해 목록 렌더와 `BagView.use`를 따로 테스트했고, 행의 버튼과 `BagView.use`를 잇는 한 줄은 자동 테스트가 없다. 2.7.0의 미검증 항목(두 맥 대전, 알림, 팝오버 고정, 슬립 복귀, VoiceOver, 2.6.0 업그레이드)도 그대로다.
 - **절차 메모:** 공개는 임시 깨끗한 clone의 `main`에서 실행했다(`release.sh`는 브랜치 이름이 main이어야 하고, 이 worktree는 main을 체크아웃할 수 없다). 저장소 루트 main 체크아웃은 건드리지 않았으므로 `git pull`이 필요하다. PR 4의 이미지는 `pr-item-target-images` 브랜치에 있으니 지우지 않는다.
-- **후속 확인:** 연습전 목록의 이름이 언어와 상관없이 한국어로 나온다(`PracticeRoster`가 `entry.names?[finalID]?["ko"]`를 읽는다). 이번 범위 밖이라 고치지 않았다.
+- **후속 확인:** 연습전 목록의 이름이 언어와 상관없이 한국어로 나온다(`PracticeRoster`가 `entry.names?[finalID]?["ko"]`를 읽는다). 이번 범위 밖이라 고치지 않았다. (같은 날 처리: 위 "배틀 목록 이름을 앱 언어로".)
 
 ## 2.7.0 공개 완료 (2026-11-06)
 
