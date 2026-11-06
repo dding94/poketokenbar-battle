@@ -519,16 +519,7 @@ final class CompanionStore {
 
     /// Resolves the primary localized name of an individual final species for sorting and display.
     func dexEntryName(_ entry: DexEntry) -> String {
-        let targetID = entry.finalID
-        if let stored = entry.names?[targetID], let localized = state.language.resolveName(stored) {
-            return localized
-        }
-        for id in entry.chainOrder.reversed() {
-            if let stored = entry.names?[id], let localized = state.language.resolveName(stored) {
-                return localized
-            }
-        }
-        return "#\(targetID)"
+        entry.localizedName(state.language) ?? "#\(entry.finalID)"
     }
 
     /// The one search rule shared by the Pokédex grid and the Catch Log, so the two screens cannot

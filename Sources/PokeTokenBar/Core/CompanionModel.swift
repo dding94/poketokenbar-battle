@@ -640,6 +640,15 @@ struct DexEntry: Codable, Sendable, Identifiable {
     var releasedAt: Date?
     /// 졸업이 아니라 놓아준 기록인가 — 포획 로그가 뱃지를 가르는 판정.
     var isReleased: Bool { releasedAt != nil }
+    /// The individual's stored name in `language`: the final species', else the closest earlier stage's. Nil when no
+    /// stored name resolves; each caller has its own fallback. The dex, the bag and the battle rosters all read this.
+    func localizedName(_ language: AppLanguage) -> String? {
+        if let stored = names?[finalID], let localized = language.resolveName(stored) { return localized }
+        for id in chainOrder.reversed() {
+            if let stored = names?[id], let localized = language.resolveName(stored) { return localized }
+        }
+        return nil
+    }
 
     init(id: String = UUID().uuidString,
          baseID: Int, finalID: Int, chainOrder: [Int], rarity: Rarity,

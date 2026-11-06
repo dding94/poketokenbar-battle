@@ -199,6 +199,36 @@ final class PracticeScreenRenderingTests: XCTestCase {
         try save(bitmap, as: "practice-popover-selection.png")
     }
 
+    /// An English app whose graduates also have Korean names: both screens the roster feeds show the English ones.
+    func testSelectionAndOnlineRosterNameGraduatesInTheAppLanguage() async throws {
+        var state = Self.syntheticState()
+        state.language = .en
+        for index in state.dex.indices {
+            let species = state.dex[index].finalID
+            state.dex[index].names = [species: ["ko": species == 25 ? "피카츄" : "잉어킹",
+                                                "en": species == 25 ? "Pikachu" : "Magikarp"]]
+        }
+        let session = makeSession(state)
+        let needles = ["Pikachu", "Magikarp"]
+        let selection = host(session)
+        _ = try await waitForText(needles, in: selection)
+        // The offline searches the screen starts settle first, so the saved image never shows them half done.
+        await session.wildTask?.value; await session.dailyTask?.value
+        let (selectionText, selectionBitmap) = try await waitForText(needles, in: selection)
+        try save(selectionBitmap, as: "roster-names-practice-selection.png")
+        assertRendered(needles, in: selectionText)
+
+        let model = OnlineBattlePresentation()
+        model.roster = PracticeRoster(state: state, engine: try BattleEngine(url: Self.engineURL)).candidates
+        model.entryHP = Dictionary(uniqueKeysWithValues: model.roster.map { ($0.id, 100) })
+        model.selectedEntryID = model.roster.first?.id
+        let online = hostView(OnlineBattleRoster(model: model, l: L(.en), artwork: false).padding(PopoverMetrics.padding),
+                              width: PopoverMetrics.width, height: 150)
+        let (onlineText, onlineBitmap) = try await waitForText(needles, in: online)
+        try save(onlineBitmap, as: "roster-names-online-lobby.png")
+        assertRendered(needles, in: onlineText)
+    }
+
     /// Manual battle: the turn clock in the top bar and a move card with its name and PP.
     func testManualBattleShowsMoveGridAndTurnClock() async throws {
         let session = makeSession()

@@ -46,6 +46,8 @@ struct PracticeWildSource: Sendable {
 struct PracticeWildGenerator {
     let source: PracticeWildSource
     let engine: BattleEngine
+    /// The app language the opponents are named in.
+    let language: AppLanguage
     /// Time source for the search budget; tests inject a fake one (`PracticeSession` passes its own clock).
     var clock: () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }
     /// Seconds from the start of `make` after which no new attempt begins. Each request has its own timeout and
@@ -118,7 +120,7 @@ struct PracticeWildGenerator {
         guard let snapshot = try? BattleSnapshot.make(
             speciesID: speciesID, form: PokemonForm.resolved(speciesID: speciesID, form: form),
             shiny: shiny, nature: nature, profile: profile, using: engine) else { return nil }
-        let name = line?.names[speciesID]?["ko"] ?? snapshot.publicInfo.species
+        let name = line?.names[speciesID].flatMap(language.resolveName) ?? snapshot.publicInfo.species
         return PracticeCandidate(id: id, name: name, snapshot: snapshot, blockedReason: nil,
                                  origin: .wild(rarity: rarity, shiny: shiny))
     }
